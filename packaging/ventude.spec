@@ -2,11 +2,15 @@
 # Build (na raiz do projeto):  uv run pyinstaller --noconfirm packaging\ventude.spec
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 hidden = collect_submodules("ventude")
-try:
-    hidden += collect_submodules("winrt")
+datas, binaries = [], []
+try:  # WinRT (mídia do Windows) só existe no Windows
+    d, b, h = collect_all("winrt")
+    datas += d
+    binaries += b
+    hidden += h
 except Exception:
     pass
 
@@ -37,6 +41,8 @@ DROP_BINARIES = ("qt6quick", "qt6qml", "qt6pdf", "qt6opengl", "opengl32sw", "qt6
 a = Analysis(
     ["../src/ventude/__main__.py"],
     pathex=["../src"],
+    datas=datas,
+    binaries=binaries,
     hiddenimports=sorted(set(hidden)),
     excludes=EXCLUDES,
     noarchive=False,

@@ -17,10 +17,16 @@ Reformulação completa do Ventude (19/11/2026).
 - [x] Migração automática de atalhos, agenda e listas da versão anterior. Arquivos antigos vão para `legado\`.
 - [x] Instância única, ícone próprio, spec do PyInstaller enxuto.
 
+## Instalador e atualização automática
+
+- [x] Instalador `Ventude-Setup.exe` (Inno Setup): sem administrador, atalho na área de trabalho e no menu Iniciar, desinstalador.
+- [x] GitHub Actions: a cada push na `main` testa, gera o executável num Windows real, testa se ele abre e publica a Release `vX.Y.N`.
+- [x] Ao iniciar, o app instalado confere a última Release da `main` e pergunta se você quer atualizar. Ele baixa, confere o SHA-256, instala em silêncio e reabre.
+
 ## Verificação
 
 - `uv run ruff check`: sem apontamentos.
-- `uv run pytest`: 51 testes passando (núcleo, migração, rede local, provedores de IA, gerenciador de limites, serviços e interface).
+- `uv run pytest`: 57 testes passando (núcleo, migração, rede local, provedores de IA, gerenciador de limites, serviços, atualização e interface).
 - App iniciado de verdade (Qt offscreen): sobe, fica rodando e uma segunda execução só pede para a primeira aparecer.
 - PyInstaller com o spec novo: build concluído e o executável abre.
 - Todas as telas conferidas visualmente com `scripts/preview.py`.
@@ -31,4 +37,4 @@ Os pontos abaixo dependem do Windows ou das suas contas e não puderam ser testa
 
 - Leitura real das cotas no Antigravity aberto, no Claude Code logado e no Grok.
 - Player do Windows, atalho global, tela cheia e "Iniciar com o Windows".
-- Build do `.exe` no Windows (`uv run pyinstaller --noconfirm packaging\ventude.spec`).
+- Primeira instalação pelo `Ventude-Setup.exe` e a primeira atualização de verdade.

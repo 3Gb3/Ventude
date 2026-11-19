@@ -4,12 +4,13 @@ import getpass
 import logging
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from ventude import __version__
+from ventude.core import updates
 from ventude.core.logs import setup_logging
 from ventude.core.paths import app_data_dir
 from ventude.core.store import Store
@@ -17,6 +18,7 @@ from ventude.core.tasks import Tasks
 from ventude.services import system
 
 log = logging.getLogger(__name__)
+_windows: list[object] = []  # mantém janelas avulsas vivas (ex.: aviso de atualização)
 
 
 def _server_name() -> str:
@@ -37,6 +39,19 @@ def _already_running(name: str) -> bool:
         socket.disconnectFromServer()
         return True
     return False
+
+
+def _check_for_update(tasks: Tasks, app: QApplication) -> None:
+    """Uma vez por inicialização: pergunta se quer atualizar quando a main tem versão nova."""
+    from ventude.ui.update_dialog import ask_to_update
+
+    def found(update: updates.Update | None) -> None:
+        if update is None:
+            return
+        log.info("Atualização disponível: %s", update.version)
+        _windows.append(ask_to_update(update, tasks, app.quit))
+
+    tasks.run(updates.check, __version__, done=found)
 
 
 def run() -> int:
@@ -98,6 +113,8 @@ def run() -> int:
     tray.show()
     island.show()
     log.info("Ventude %s iniciado", __version__)
+    if updates.enabled():
+        QTimer.singleShot(3000, lambda: _check_for_update(tasks, app))
     code = app.exec()
 
     tray.hide()

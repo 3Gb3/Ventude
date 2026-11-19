@@ -3,6 +3,7 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 
@@ -100,7 +101,7 @@ def test_secrets_roundtrip(store):
 
 def test_migrates_previous_version(tmp_home):
     folder = tmp_home / "data"
-    with sqlite3.connect(folder / "ventude.db") as old:
+    with closing(sqlite3.connect(folder / "ventude.db")) as old:
         old.executescript(
             """
             CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -110,10 +111,11 @@ def test_migrates_previous_version(tmp_home):
             INSERT INTO pinned_items VALUES (1, 'folder', 'Docs', '/tmp', 0);
             """
         )
-    with sqlite3.connect(folder / "calendar.db") as old:
+    with closing(sqlite3.connect(folder / "calendar.db")) as old:
         old.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, title, day, start, end, notes)")
         old.execute("INSERT INTO events VALUES (1, 'Consulta', '2030-01-02', '10:00', NULL, '')")
-    with sqlite3.connect(folder / "lists.db") as old:
+        old.commit()
+    with closing(sqlite3.connect(folder / "lists.db")) as old:
         old.executescript(
             """
             CREATE TABLE lists (id INTEGER PRIMARY KEY, name TEXT);

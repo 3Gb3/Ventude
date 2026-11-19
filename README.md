@@ -58,7 +58,17 @@ Esses segredos ficam protegidos pelo Windows (DPAPI): só a sua conta do Windows
 
 > Os endpoints de uso do Claude, do Antigravity e do grok.com não são APIs públicas documentadas. Se um deles mudar, o card daquela IA mostra o aviso e o último valor conhecido, e o resto do Ventude continua funcionando.
 
-## Rodar
+## Instalar
+
+Baixe o **`Ventude-Setup.exe`** da [última versão](https://github.com/3Gb3/Ventude_Notch/releases/latest) e abra. Ele instala sem pedir administrador (em `%LOCALAPPDATA%\Programs\Ventude`), cria o atalho na **área de trabalho** e no menu Iniciar e já abre o Ventude.
+
+> O Windows pode avisar "O Windows protegeu o PC" porque o instalador não é assinado: clique em **Mais informações > Executar assim mesmo**.
+
+### Atualizações
+
+Toda alteração na branch `main` gera uma versão nova (`1.0.N`) automaticamente. Ao **iniciar**, o Ventude instalado confere se há uma versão mais nova e pergunta se você quer atualizar. Se aceitar, ele baixa, confere o arquivo, instala em silêncio e reabre sozinho. Ele não procura atualizações enquanto está aberto.
+
+## Rodar pelo código-fonte
 
 Requer Python 3.12+ e [uv](https://docs.astral.sh/uv/).
 
@@ -67,7 +77,7 @@ uv sync
 uv run ventude
 ```
 
-Para abrir sem janela de console, use `.venv\Scripts\ventude-gui.exe` (dá para criar um atalho na área de trabalho) ou ligue **Ajustes > Iniciar com o Windows**.
+Rodando pelo código, o Ventude não se atualiza sozinho: use `git pull`.
 
 ## Como usar
 

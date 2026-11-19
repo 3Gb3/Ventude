@@ -158,6 +158,8 @@ QScrollBar::handle:vertical:hover {{ background: #3D424C; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QScrollBar:horizontal {{ height: 0; }}
+QProgressBar {{ background: {SURFACE_3}; border: none; border-radius: 3px; }}
+QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
 QSlider::groove:horizontal {{ height: 4px; background: {STROKE_2}; border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ background: {TEXT}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ width: 10px; height: 10px; margin: -3px 0; background: {TEXT};

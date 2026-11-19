@@ -7,3 +7,4 @@ dist/
 build/
 *.egg-info/
 preview/
+src/ventude/_build.py

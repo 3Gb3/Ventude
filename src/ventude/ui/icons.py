@@ -88,6 +88,7 @@ PATHS: dict[str, str] = {
     'M15.5 8.5 18 6"/>',
     "arrow-up": '<path d="M12 19V5M6 11l6-6 6 6"/>',
     "arrow-down": '<path d="M12 5v14M6 13l6 6 6-6"/>',
+    "download": '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
     "dot": '<circle cx="12" cy="12" r="4" fill="currentColor"/>',
 }
 
