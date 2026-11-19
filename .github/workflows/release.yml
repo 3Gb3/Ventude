@@ -1,0 +1,97 @@
+# A cada push na main: testa, gera o Ventude.exe e o instalador num Windows real
+# e publica uma Release (vX.Y.N). O app instalado só se atualiza a partir delas.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Dependências
+        run: uv sync --frozen --python 3.12
+
+      - name: Lint e testes
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          uv run ruff check
+          uv run pytest -q
+
+      - name: Versão
+        id: version
+        shell: pwsh
+        run: |
+          $version = (uv run python scripts/stamp_version.py ${{ github.run_number }} ${{ github.sha }}).Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Versão $version"
+
+      - name: Executável
+        run: uv run pyinstaller --noconfirm packaging/ventude.spec
+
+      - name: Teste do executável
+        shell: pwsh
+        run: |
+          $env:VENTUDE_HOME = Join-Path $env:RUNNER_TEMP "ventude-smoke"
+          $env:VENTUDE_NO_UPDATE = "1"
+          $p = Start-Process -FilePath "dist\Ventude\Ventude.exe" -PassThru
+          Start-Sleep -Seconds 12
+          $log = Join-Path $env:VENTUDE_HOME "ventude.log"
+          if (Test-Path $log) { Get-Content $log }
+          if ($p.HasExited) { throw "O Ventude.exe fechou sozinho (código $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+          if (-not (Select-String -Path $log -Pattern "iniciado" -Quiet)) { throw "O log não registrou a inicialização" }
+          if (Select-String -Path $log -Pattern "Traceback" -Quiet) { throw "Erro no log do Ventude" }
+
+      - name: Instalador
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress | Out-Null
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "O Inno Setup falhou" }
+          Get-Item dist\Ventude-Setup.exe | Format-List Name, Length
+
+      - name: Notas da versão
+        shell: bash
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            git log "$prev..HEAD" --no-merges --pretty='- %s' > notes.md
+          else
+            git log -n 15 --no-merges --pretty='- %s' > notes.md
+          fi
+          [ -s notes.md ] || echo "- Melhorias e correções" > notes.md
+          cat notes.md
+
+      - name: Publicar
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          gh release create "v$v" dist/Ventude-Setup.exe \
+            --target "${{ github.sha }}" \
+            --title "Ventude $v" \
+            --notes-file notes.md \
+            --latest

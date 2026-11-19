@@ -1,49 +1,42 @@
-# Empacotamento do Ventude
+# Empacotar e publicar o Ventude
 
-O app roda em desenvolvimento com:
+## Automático (recomendado)
+
+O workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) roda a cada push na `main`, num Windows do GitHub:
+
+1. `ruff` e `pytest`.
+2. Carimba a versão `X.Y.N` (X.Y do `pyproject.toml`, N = número do build) em `src/ventude/_build.py`.
+3. Gera `dist\Ventude\Ventude.exe` com o PyInstaller e testa se ele abre.
+4. Gera `dist\Ventude-Setup.exe` com o Inno Setup (`packaging/installer.iss`).
+5. Publica a Release `vX.Y.N` com o instalador e as mudanças desde a versão anterior.
+
+Só a `main` publica versões. O app instalado consulta `releases/latest` ao iniciar e oferece a atualização.
+
+## Manual (no Windows)
 
 ```powershell
-cd $env:USERPROFILE\Downloads\Ventude
-$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 uv sync
-uv run ventude
-```
-
-## Build one-folder (PyInstaller)
-
-PyInstaller fica só no ambiente do projeto (dependency-group `dev`):
-
-```powershell
-uv sync --group dev
+uv run python scripts/stamp_version.py 0
 uv run pyinstaller --noconfirm packaging\ventude.spec
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\installer.iss
 ```
 
-### Resultado (versão 0.3.0)
+Resultado: `dist\Ventude\Ventude.exe` (pasta portátil) e `dist\Ventude-Setup.exe` (instalador).
 
-| Item | Valor |
-|------|--------|
-| Executável | `dist\Ventude\Ventude.exe` |
-| Tamanho do .exe | ~8,6 MB |
-| Pasta `dist\Ventude` | ~146 MB (one-folder com PySide6 + WinRT) |
-| Forma | COLLECT (pasta `_internal` + exe) |
+## O instalador
 
-Para usar: abra `dist\Ventude\Ventude.exe` (não mova só o .exe; a pasta `_internal` precisa ir junto).
+- Instala em `%LOCALAPPDATA%\Programs\Ventude`, sem pedir administrador.
+- Cria atalhos na área de trabalho e no menu Iniciar.
+- Aparece em "Aplicativos instalados" para desinstalar. A desinstalação remove o "Iniciar com o Windows" e mantém seus dados em `%APPDATA%\Ventude`.
+- Na atualização, roda em silêncio (`/VERYSILENT`), fecha o Ventude, troca os arquivos e o reabre.
 
-Credenciais e dados continuam em `%APPDATA%\Ventude\` (não ficam dentro do pacote).
+## O executável
 
-### Observações
+- Usa o ícone `packaging/ventude.ico` e abre sem console.
+- Exclui os módulos Qt que o Ventude não usa (QML, Quick, PDF, SQL, OpenGL etc.) e as traduções do Qt.
+- Descarta um ICU privado que esteja no PATH da máquina de build (o Qt usa o ICU do Windows).
 
-- O Windows pode mostrar aviso do **SmartScreen** ("Windows protegeu o PC"), porque o .exe **não é assinado**. Em "Mais informações" → "Executar assim mesmo".
-- Antivírus às vezes demora na 1ª abertura de pastas grandes do PyInstaller.
-- O pacote inclui o WinRT para mídia e os módulos Qt usados pela interface, inclusive QtSvg para os ícones.
-- O Sign in with ChatGPT usa o navegador do sistema.
-- Codex CLI **não** entra no pacote; se quiser esse provedor, instale aparte.
-- Warnings do build sobre `fbclient.dll` / `OCI.dll` / `LIBPQ.dll` (plugins SQL opcionais do Qt) são esperados e podem ser ignorados: o Ventude usa SQLite via stdlib.
+## Observações
 
-### Rebuild
-
-```powershell
-uv run pyinstaller --noconfirm packaging\ventude.spec
-```
-
-Log da análise: `build\ventude\warn-ventude.txt`.
+- O SmartScreen avisa porque nem o instalador nem o `.exe` são assinados: **Mais informações > Executar assim mesmo**.
+- Avisos do build sobre plugins SQL do Qt (`fbclient.dll`, `OCI.dll`, `LIBPQ.dll`) podem ser ignorados.

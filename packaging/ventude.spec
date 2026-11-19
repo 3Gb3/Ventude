@@ -1,62 +1,65 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
+# Build (na raiz do projeto):  uv run pyinstaller --noconfirm packaging\ventude.spec
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-datas, binaries, hidden = [], [], []
-for pkg in (
-    "winrt",
-    "jsonschema",
-    "jsonschema_specifications",
-    "referencing",
-    "rpds",
-    "jwt",
-    "cryptography",
-    "httpx",
-    "httpcore",
-    "anyio",
-    "h11",
-    "certifi",
-    "idna",
-):
-    try:
-        d, b, h = collect_all(pkg)
-        datas += d
-        binaries += b
-        hidden += h
-    except Exception:
-        pass
+hidden = collect_submodules("ventude")
+datas, binaries = [], []
+try:  # WinRT (mídia do Windows) só existe no Windows
+    d, b, h = collect_all("winrt")
+    datas += d
+    binaries += b
+    hidden += h
+except Exception:
+    pass
 
-hidden += collect_submodules("ventude")
-hidden += [
-    "ventude",
-    "ventude.app",
-    "ventude.__main__",
-    "winrt.windows.media.control",
-    "winrt.windows.storage.streams",
-    "winrt.windows.foundation",
-    "winrt.windows.foundation.collections",
-    "winrt.windows.media",
+# Módulos que o Ventude não usa: fora do pacote, ele fica bem menor.
+EXCLUDES = [
+    "tkinter",
+    "unittest",
+    "pydoc_data",
+    "PySide6.QtQml",
+    "PySide6.QtQuick",
+    "PySide6.QtQuickControls2",
+    "PySide6.QtQuickWidgets",
+    "PySide6.QtOpenGL",
+    "PySide6.QtOpenGLWidgets",
+    "PySide6.QtPdf",
+    "PySide6.QtSql",
+    "PySide6.QtTest",
+    "PySide6.QtXml",
+    "PySide6.QtDBus",
+    "PySide6.QtConcurrent",
+    "PySide6.QtHelp",
+    "PySide6.QtDesigner",
+    "PySide6.QtUiTools",
+    "PySide6.QtPrintSupport",
 ]
+DROP_BINARIES = ("qt6quick", "qt6qml", "qt6pdf", "qt6opengl", "opengl32sw", "qt6virtualkeyboard")
 
 a = Analysis(
     ["../src/ventude/__main__.py"],
     pathex=["../src"],
-    binaries=binaries,
     datas=datas,
+    binaries=binaries,
     hiddenimports=sorted(set(hidden)),
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
+    excludes=EXCLUDES,
     noarchive=False,
 )
-# Qt uses the unversioned ICU API provided by Windows. A private ICU from a
-# program on the build machine's PATH can have the same DLL name but a different ABI.
-a.binaries = [item for item in a.binaries if not (
-    Path(item[0]).name.lower() == "icuuc.dll"
-    or Path(item[0]).name.lower().startswith("icudt")
-)]
+
+
+def keep_binary(entry):
+    name = Path(entry[0]).name.lower()
+    # O Qt usa o ICU do Windows; um ICU privado no PATH da máquina de build quebra o app.
+    if name == "icuuc.dll" or name.startswith("icudt"):
+        return False
+    return not name.startswith(DROP_BINARIES)
+
+
+a.binaries = [b for b in a.binaries if keep_binary(b)]
+a.datas = [d for d in a.datas if "/translations/" not in d[0].replace("\\", "/")]
+
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
@@ -64,18 +67,10 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="Ventude",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
+    icon="ventude.ico",
     console=False,
-    disable_windowed_traceback=False,
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
     upx=False,
-    name="Ventude",
+    strip=False,
+    debug=False,
 )
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="Ventude")

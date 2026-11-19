@@ -1,55 +1,40 @@
 # Progresso
 
-Atualizado em 04/11/2026 (America/Sao_Paulo).
+## Versão 1.0: completa
 
-## Fase 0: concluída
-- Projeto uv (`uv init --app --package`), Python 3.12, PySide6/httpx; ruff e pytest.
-- `uv run ventude` como entry point. Versão atual: 0.2.0.
+Reformulação completa do Ventude (19/11/2026).
 
-## Fase 1: concluída
-- Ilha frameless, translúcida, always-on-top, fora do Alt+Tab (Qt.Tool), tema preto/grafite/verde.
-- Expansão animada, atraso configurável, bandeja com Monitor/Sair, settings em SQLite, DPI PassThrough.
+- [x] IA antiga (ChatGPT/Codex, login, ferramentas, histórico) removida, com as dependências dela (`jsonschema`, `pyjwt`, `cryptography`, `httpx`).
+- [x] **Limites das IAs**: Claude (Claude Code ou claude.ai), Gemini no Antigravity (servidor local) e Grok (Grok CLI ou grok.com), com anéis na ilha, aba dedicada, cache, estado "último valor" e avisos de 80%, 95% e renovação.
+- [x] Ilha única no lugar das duas: pílula com data, hora, música (capa e equalizador) e anéis; painel com 9 abas criadas sob demanda.
+- [x] Visual novo: paleta escura, fonte do sistema, ícones SVG, componentes desenhados à mão (anéis, barras, sparklines, switches).
+- [x] Início com relógio, semana, próximo compromisso, clima com 3 dias, IAs, player e tarefas.
+- [x] Atalhos em blocos com ícone real do Windows, arrastar e soltar, sites, renomear e reordenar.
+- [x] Agenda com horário flexível (`14h`, `9-10`) e próximos dias. Tarefas com várias listas e edição inline.
+- [x] Clima com 7 dias e faixa de temperatura. Mercado com lista editável e gráfico do mês. Notícias com filtro por fonte.
+- [x] Ajustes ao vivo: iniciar com o Windows, atalho global Ctrl+Alt+Espaço, abrir ao passar o mouse, sumir em tela cheia, abas, fontes de notícias e fontes de cada IA.
+- [x] Leveza: só PySide6-Essentials + biblioteca padrão (WinRT só no Windows). Um SQLite único. Abas desligadas não rodam.
+- [x] Migração automática de atalhos, agenda e listas da versão anterior. Arquivos antigos vão para `legado\`.
+- [x] Instância única, ícone próprio, spec do PyInstaller enxuto.
 
-## Fase 2: concluída
-- Apps e pastas fixados (abrir, reordenar, remover, validar, persistir).
+## Instalador e atualização automática
 
-## Fase 3: concluída
-- Mídia WinRT com eventos (sem polling), card no Início, faixa no modo compacto.
+- [x] Instalador `Ventude-Setup.exe` (Inno Setup): sem administrador, atalho na área de trabalho e no menu Iniciar, desinstalador.
+- [x] GitHub Actions: a cada push na `main` testa, gera o executável num Windows real, testa se ele abre e publica a Release `vX.Y.N`.
+- [x] Ao iniciar, o app instalado confere a última Release da `main` e pergunta se você quer atualizar. Ele baixa, confere o SHA-256, instala em silêncio e reabre.
 
-## Fase 4: concluída (login real ainda depende do usuário)
-- SIWC documentado, Responses API, Codex app-server, ferramentas, permissões, DPAPI, aba IA.
+## Verificação
 
-## Fase 5: concluída
-- Cache SQLite com TTL (`cache.db`).
-- Clima: Open-Meteo + geocoding (sem chave); cidade salva em settings.
-- Calendário: eventos locais em `calendar.db` (mês, adicionar/remover).
-- Notícias: RSS G1, BBC Brasil, Tecnoblog (sem chave), cache 15 min.
-- Mercado: Yahoo Finance chart (ações/índice) + CoinGecko (BTC/ETH); cache 10 min. Stooq foi tentado e responde 404 neste ambiente; trocado por Yahoo.
-- Listas: aba nova com listas/itens locais em `lists.db`.
-- Abas Clima/Calendário/Notícias/Mercado/Listas deixam de ser placeholder.
+- `uv run ruff check`: sem apontamentos.
+- `uv run pytest`: 57 testes passando (núcleo, migração, rede local, provedores de IA, gerenciador de limites, serviços, atualização e interface).
+- App iniciado de verdade (Qt offscreen): sobe, fica rodando e uma segunda execução só pede para a primeira aparecer.
+- PyInstaller com o spec novo: build concluído e o executável abre.
+- Todas as telas conferidas visualmente com `scripts/preview.py`.
 
-## Fase 6: concluída (empacotamento preparado, build PyInstaller não executado)
-- Revisão de arquitetura em `docs/ARCHITECTURE.md`.
-- Multi-monitor: reposiciona em screenAdded/Removed e geometryChanged; índice inválido volta ao monitor 0.
-- Script `scripts/smoke.ps1`, `docs/PACKAGING.md`, `packaging/ventude.spec`.
-- Versão 0.2.0; organização Qt "Ventude".
-- Testes ampliados (54 passed). PyInstaller fica como passo opcional do usuário (`uv add --dev pyinstaller`).
+## Validar no seu PC
 
-## Testes (última rodada)
-- `uv run ruff check`: All checks passed!
-- `uv run pytest -q`: 54 passed.
-- Smoke `uv run ventude` ~9 s: processo vivo, depois encerrado; 0 restantes.
-- Rede real verificada: Open-Meteo (Cachoeirinha), RSS G1, Yahoo (Ibovespa/PETR4/…) e CoinGecko.
+Os pontos abaixo dependem do Windows ou das suas contas e não puderam ser testados no ambiente de desenvolvimento:
 
-## Pendências gerais
-- Login ChatGPT real e Codex CLI (usuário).
-- Build PyInstaller completo (usuário; precisa `uv add --dev pyinstaller`).
-- Ferramentas no provedor plano ChatGPT (namespaces não documentados).
-- Chaves opcionais extras (não necessárias hoje).
-
-## Build .exe (04/11/2026 ~23:30 America/Sao_Paulo)
-- `uv add --dev pyinstaller` (só no venv do projeto).
-- `uv run pyinstaller --noconfirm packaging\ventude.spec` — sucesso (EXIT 0).
-- Spec reforçado com collect_all/hiddenimports (PySide6, winrt, jsonschema, jwt, cryptography, httpx…).
-- Smoke: `dist\Ventude\Ventude.exe` vivo após 9 s; log `Ventude iniciado`; widgets buscaram RSS/Yahoo/CoinGecko; processo encerrado, 0 restantes.
-- Artefato: `dist\Ventude\Ventude.exe` (~8,2 MB); pasta dist ~700 MB / 4501 arquivos.
+- Leitura real das cotas no Antigravity aberto, no Claude Code logado e no Grok.
+- Player do Windows, atalho global, tela cheia e "Iniciar com o Windows".
+- Primeira instalação pelo `Ventude-Setup.exe` e a primeira atualização de verdade.
