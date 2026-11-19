@@ -1,49 +1,69 @@
+"""Abrir apps, pastas, arquivos e sites fixados."""
+
 from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
+import webbrowser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 log = logging.getLogger(__name__)
 
-APP_SUFFIXES = {".exe", ".lnk", ".url", ".bat", ".cmd", ".appref-ms"}
+APP_SUFFIXES = {".exe", ".lnk", ".url", ".bat", ".cmd", ".appref-ms", ".msc"}
 
 
-def validate_path(kind: str, raw: str) -> tuple[bool, str]:
-    """Retorna (ok, mensagem). kind = 'app' ou 'folder'."""
-    if not raw or not raw.strip():
-        return False, "Caminho vazio."
-    p = Path(raw.strip().strip('"'))
-    if not p.exists():
-        return False, "Caminho não encontrado."
-    if kind == "folder":
-        return (True, "") if p.is_dir() else (False, "Não é uma pasta.")
-    if kind == "app":
-        if not p.is_file():
-            return False, "Não é um arquivo."
-        if p.suffix.lower() not in APP_SUFFIXES:
-            return False, "Tipo não suportado (use .exe, .lnk, .url, .bat ou .cmd)."
-        return True, ""
-    return False, "Tipo desconhecido."
+def normalize_url(raw: str) -> str:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = "https://" + raw
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or "." not in (parts.hostname or ""):
+        return ""
+    return raw
 
 
-def default_label(path: str) -> str:
+def kind_for(path: str) -> str:
     p = Path(path)
-    return p.stem if p.suffix else (p.name or str(p))
+    if p.is_dir():
+        return "folder"
+    return "app" if p.suffix.lower() in APP_SUFFIXES else "file"
 
 
-def open_path(path: str) -> tuple[bool, str]:
-    if not Path(path).exists():
-        return False, "O caminho não existe mais."
+def default_label(target: str, kind: str) -> str:
+    if kind == "url":
+        host = urlsplit(target).hostname or target
+        return host.removeprefix("www.").split(".")[0].capitalize()
+    p = Path(target)
+    return (p.stem if p.suffix else p.name) or str(p)
+
+
+def is_valid(kind: str, target: str) -> bool:
+    if kind == "url":
+        return bool(normalize_url(target))
+    return Path(target).exists()
+
+
+def open_target(kind: str, target: str) -> tuple[bool, str]:
     try:
+        if kind == "url":
+            webbrowser.open(target)
+            return True, ""
+        if not Path(target).exists():
+            return False, "O caminho não existe mais."
         if sys.platform == "win32":
-            os.startfile(path)  # type: ignore[attr-defined]
+            os.startfile(target)  # type: ignore[attr-defined]
         else:  # pragma: no cover
-            import subprocess
-
-            subprocess.Popen(["xdg-open", path])
+            subprocess.Popen(["xdg-open", target])
     except OSError as exc:
-        log.exception("Falha ao abrir %s", path)
+        log.exception("Falha ao abrir %s", target)
         return False, str(exc)
     return True, ""
+
+
+def open_url(url: str) -> None:
+    webbrowser.open(url)

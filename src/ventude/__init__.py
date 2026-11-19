@@ -1,6 +1,6 @@
-"""Ventude: Dynamic Island e launcher para Windows."""
+"""Ventude: uma Dynamic Island leve para Windows."""
 
-__version__ = "0.3.0"
+__version__ = "1.0.0"
 
 
 def main() -> int:

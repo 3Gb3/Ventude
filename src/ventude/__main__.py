@@ -1,3 +1,5 @@
+import sys
+
 from ventude import main
 
-raise SystemExit(main())
+sys.exit(main())

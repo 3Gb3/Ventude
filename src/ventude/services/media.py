@@ -1,9 +1,7 @@
-"""Sessão de mídia do Windows (GlobalSystemMediaTransportControls).
+"""Mídia do Windows (GlobalSystemMediaTransportControls), sem polling.
 
-Todo o código WinRT roda num loop asyncio em thread própria. Os resultados chegam
-à UI por sinais Qt (conexão enfileirada), então a interface nunca bloqueia.
-Não há polling: só os eventos CurrentSessionChanged, MediaPropertiesChanged,
-PlaybackInfoChanged e TimelinePropertiesChanged disparam leituras.
+O código WinRT roda num loop asyncio em thread própria; os resultados chegam à
+interface por sinais Qt. Fora do Windows o serviço simplesmente fica vazio.
 """
 
 from __future__ import annotations
@@ -21,16 +19,7 @@ from PySide6.QtCore import QObject, Signal
 
 log = logging.getLogger(__name__)
 
-# GlobalSystemMediaTransportControlsSessionPlaybackStatus
 _STATUS = {0: "closed", 1: "opened", 2: "changing", 3: "stopped", 4: "playing", 5: "paused"}
-STATUS_LABELS = {
-    "closed": "Fechado",
-    "opened": "Aberto",
-    "changing": "Carregando",
-    "stopped": "Parado",
-    "playing": "Tocando",
-    "paused": "Pausado",
-}
 TICKS_PER_SECOND = 10_000_000
 
 
@@ -42,7 +31,7 @@ class MediaState:
     status: str
     position_s: float
     duration_s: float
-    updated_at: float  # time.monotonic() em que position_s era válido
+    updated_at: float  # time.monotonic() em que position_s valia
     can_play_pause: bool
     can_next: bool
     can_previous: bool
@@ -54,7 +43,6 @@ class MediaState:
         return self.status == "playing"
 
     def position_at(self, now: float | None = None) -> float:
-        """Posição interpolada (só avança enquanto toca)."""
         pos = self.position_s
         if self.is_playing:
             pos += max(0.0, (time.monotonic() if now is None else now) - self.updated_at)
@@ -79,10 +67,7 @@ def _seconds(value: Any) -> float:
         return 0.0
 
 
-def build_state(
-    props: Any, playback: Any, timeline: Any, source_app: str = ""
-) -> MediaState | None:
-    """Monta o estado a partir dos objetos WinRT. Retorna None se não há o que mostrar."""
+def build_state(props: Any, playback: Any, timeline: Any, source_app: str = "") -> MediaState | None:
     title = (getattr(props, "title", "") or "").strip()
     if not title:
         return None
@@ -115,8 +100,7 @@ def build_state(
     )
 
 
-async def read_thumbnail(ref: Any) -> bytes:
-    """Lê o stream da capa (IRandomAccessStreamReference) e devolve os bytes."""
+async def read_thumbnail(ref: Any) -> bytes:  # pragma: no cover - só Windows
     if ref is None:
         return b""
     from winrt.windows.storage.streams import Buffer, InputStreamOptions
@@ -129,7 +113,7 @@ async def read_thumbnail(ref: Any) -> bytes:
     return bytes(buf)
 
 
-async def default_manager() -> Any:
+async def default_manager() -> Any:  # pragma: no cover - só Windows
     from winrt.windows.media.control import (
         GlobalSystemMediaTransportControlsSessionManager as Manager,
     )
@@ -139,8 +123,7 @@ async def default_manager() -> Any:
 
 class MediaService(QObject):
     state_changed = Signal(object)  # MediaState | None
-    thumbnail_changed = Signal(bytes)  # b"" = sem capa
-    unavailable = Signal(str)
+    thumbnail_changed = Signal(bytes)
 
     def __init__(
         self,
@@ -156,9 +139,10 @@ class MediaService(QObject):
         self._session: Any = None
         self._tokens: list[tuple[Callable[[Any], None], Any]] = []
         self._manager_token: Any = None
-        self._pending: asyncio.Task[None] | None = None
+        self._pending: asyncio.Future[None] | None = None
         self._track_key: tuple[str, str, str] | None = None
         self.state: MediaState | None = None
+        self.thumbnail = b""
 
     # ---------- ciclo de vida ----------
     def start(self) -> None:
@@ -196,10 +180,9 @@ class MediaService(QObject):
     async def connect(self) -> None:
         try:
             self._manager = await self._manager_factory()
-        except Exception as exc:  # noqa: BLE001
-            log.exception("Controle de mídia indisponível")
-            self.unavailable.emit(str(exc))
-            self.state_changed.emit(None)
+        except Exception:  # noqa: BLE001
+            log.info("Controle de mídia indisponível neste sistema")
+            self._emit_state(None)
             return
         self._manager_token = self._manager.add_current_session_changed(
             lambda *_: self._from_winrt("session")
@@ -207,12 +190,10 @@ class MediaService(QObject):
         await self.refresh("session")
 
     def _from_winrt(self, kind: str) -> None:
-        """Handlers WinRT chegam em outra thread: reagenda no loop."""
         if self._loop is not None and not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._schedule, kind)
 
     def _schedule(self, kind: str) -> None:
-        # Agrupa rajadas de eventos numa só leitura.
         if self._pending and not self._pending.done():
             if kind in ("session", "media"):
                 self._pending.cancel()
@@ -255,6 +236,9 @@ class MediaService(QObject):
             session = self._session
             if session is None:
                 self._emit_state(None)
+                if self._track_key is None and self.thumbnail:
+                    self.thumbnail = b""
+                    self.thumbnail_changed.emit(b"")
                 return
             props = await session.try_get_media_properties_async()
             state = build_state(
@@ -273,6 +257,7 @@ class MediaService(QObject):
                         data = await self._thumbnail_reader(getattr(props, "thumbnail", None))
                     except Exception:  # noqa: BLE001
                         log.debug("capa indisponível", exc_info=True)
+                self.thumbnail = data
                 self.thumbnail_changed.emit(data)
         except asyncio.CancelledError:
             raise
@@ -283,7 +268,7 @@ class MediaService(QObject):
         self.state = state
         self.state_changed.emit(state)
 
-    # ---------- comandos (chamados pela UI) ----------
+    # ---------- comandos ----------
     def _submit(self, make: Callable[[Any], Awaitable[Any]]) -> None:
         session, loop = self._session, self._loop
         if session is None or loop is None:
@@ -315,6 +300,4 @@ class MediaService(QObject):
             return
         seconds = max(0.0, min(seconds, st.duration_s))
         self.state = replace(st, position_s=seconds, updated_at=time.monotonic())
-        self._submit(
-            lambda s: s.try_change_playback_position_async(int(seconds * TICKS_PER_SECOND))
-        )
+        self._submit(lambda s: s.try_change_playback_position_async(int(seconds * TICKS_PER_SECOND)))
