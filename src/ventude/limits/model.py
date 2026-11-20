@@ -17,6 +17,7 @@ class Window:
     used: float | None  # 0..100 (% usado)
     resets_at: float | None = None  # epoch (s)
     detail: str = ""
+    group: str = ""  # Antigravity: família do modelo (Gemini, Claude, GPT, Outros)
 
     def used_at(self, now: float | None = None) -> float | None:
         """Uso considerando renovações que já passaram desde a última leitura."""
@@ -47,13 +48,20 @@ class Report:
     def has_data(self) -> bool:
         return bool(self.windows) and self.state in ("ok", "stale")
 
-    def headline(self, now: float | None = None) -> Window | None:
-        """A janela mais apertada: é ela que decide se dá para continuar usando."""
+    def headline(self, now: float | None = None, pinned: str = "") -> Window | None:
+        """A janela que vai no anel: a fixada pelo usuário ou a mais apertada.
+
+        No Antigravity o anel do "Gemini" segue só os modelos Gemini.
+        """
         known = [w for w in self.windows if w.used_at(now) is not None]
+        if pinned:
+            chosen = next((w for w in known if w.key == pinned), None)
+            if chosen:
+                return chosen
         if not known:
             return None
-        if self.provider == "antigravity":  # o anel do "Gemini" segue os modelos Gemini
-            known = [w for w in known if "gemini" in w.label.lower()] or known
+        if self.provider == "antigravity":
+            known = [w for w in known if is_gemini(w)] or known
         return max(known, key=lambda w: (w.used_at(now) or 0.0, -(w.resets_at or 0)))
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,7 +69,8 @@ class Report:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Report:
-        windows = [Window(**w) for w in data.get("windows") or []]
+        names = set(Window.__dataclass_fields__)
+        windows = [Window(**{k: v for k, v in w.items() if k in names}) for w in data.get("windows") or []]
         values = {k: v for k, v in data.items() if k != "windows" and k in cls.__dataclass_fields__}
         return cls(windows=windows, **values)
 
@@ -74,6 +83,7 @@ class FetchContext:
     home: Path
     secret: Callable[[str], str]
     previous: Report | None = None
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 class ProviderError(Exception):
@@ -82,6 +92,10 @@ class ProviderError(Exception):
     def __init__(self, message: str, *, transient: bool = True) -> None:
         super().__init__(message)
         self.transient = transient
+
+
+def is_gemini(window: Window) -> bool:
+    return window.group == "Gemini" or (not window.group and "gemini" in window.label.lower())
 
 
 def severity(used: float | None) -> str:

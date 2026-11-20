@@ -76,6 +76,8 @@ PATHS: dict[str, str] = {
     "wind": '<path d="M3 8h11a3 3 0 1 0-3-3M3 12h16a3 3 0 1 1-3 3M3 16h8"/>',
     "thermo": '<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0Z"/>',
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "sunrise": '<path d="M12 2.5v6M9 5.5l3-3 3 3"/><path d="M6 18a6 6 0 0 1 12 0"/>'
+    '<path d="M2 18h20M4.3 11.3l1.4 1.4M19.7 11.3l-1.4 1.4M6 21.5h12"/>',
     "bell": '<path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
     "edit": '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16Z"/><path d="m13.5 6.5 4 4"/>',
     "alert": '<path d="M12 4 2.8 19.5h18.4Z"/><path d="M12 10v4M12 17h.01"/>',

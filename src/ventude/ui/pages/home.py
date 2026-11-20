@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QFont, QPainter
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QMouseEvent, QPainter
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QLineEdit, QSlider, QVBoxLayout, QWidget
 
 from ventude.core.timefmt import (
@@ -17,7 +17,7 @@ from ventude.core.timefmt import (
     short_reset,
     weekday_name,
 )
-from ventude.limits.model import Report
+from ventude.limits.model import Report, Window
 from ventude.services.media import MediaState, format_time
 from ventude.services.weather import Forecast, Place, icon_for
 from ventude.ui import icons, theme
@@ -143,6 +143,34 @@ class ClockCard(Card):
         self.event_when.setText(f"{day_word(event.day, today)} · {event.when}")
 
 
+class DayCell(QWidget):
+    """Um dos próximos dias no card de clima. Clique para abrir os detalhes dele."""
+
+    clicked = Signal(str)
+
+    def __init__(self, day: dict) -> None:
+        super().__init__()
+        self.iso = day["date"]
+        when = date.fromisoformat(self.iso)
+        name = label(WEEKDAYS_SHORT[when.weekday()].capitalize(), "Faint")
+        temps = label(f"{day['max']:.0f}° {day['min']:.0f}°", "")
+        temps.setStyleSheet("font-size: 11px; font-weight: 600;")
+        glyph = icon_for(day["code"])
+        self.setLayout(hbox(icon_label(glyph, tint(glyph), 16), vbox(name, temps, spacing=0), spacing=6))
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Ver os detalhes deste dia")
+        for child in self.findChildren(QWidget):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        event.accept()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit(self.iso)
+        event.accept()
+
+
 class WeatherCard(Card):
     def __init__(self, ctx: AppContext) -> None:
         super().__init__(clickable=True, spacing=3)
@@ -207,15 +235,14 @@ class WeatherCard(Card):
         today = forecast.days[0]
         self.range.setText(f"Máx {today['max']:.0f}° · Mín {today['min']:.0f}°")
         for day in forecast.days[1:4]:
-            when = date.fromisoformat(day["date"])
-            cell = QWidget()
-            name = label(WEEKDAYS_SHORT[when.weekday()].capitalize(), "Faint")
-            temps = label(f"{day['max']:.0f}° {day['min']:.0f}°", "")
-            temps.setStyleSheet("font-size: 11px; font-weight: 600;")
-            glyph = icon_for(day["code"])
-            cell.setLayout(hbox(icon_label(glyph, tint(glyph), 16), vbox(name, temps, spacing=0), spacing=6))
+            cell = DayCell(day)
+            cell.clicked.connect(self._open_day)
             self.days.addWidget(cell)
         self.days.addStretch(1)
+
+    def _open_day(self, iso: str) -> None:
+        self.ctx.weather_focus = iso
+        self.ctx.navigate_requested.emit("weather")
 
     def _fail(self, _error: BaseException) -> None:
         self._loading = False
@@ -272,20 +299,20 @@ class LimitsCard(Card):
                 continue
             visible += 1
             name.setText(report.name)
-            fill_ring(ring, report, compact=False)
-            first, second = ring_caption(report)
+            head = self.ctx.limits.headline(report)
+            fill_ring(ring, report, head, compact=False)
+            first, second = ring_caption(report, head)
             window.setText(first)
             when.setText(second)
         self.empty.setVisible(visible == 0)
 
 
-def ring_caption(report: Report) -> tuple[str, str]:
+def ring_caption(report: Report, head: Window | None) -> tuple[str, str]:
     """Duas linhas curtas: qual janela manda agora e quando ela renova."""
     if report.state == "setup":
         return "Configurar", ""
     if report.state == "loading":
         return "Consultando…", ""
-    head = report.headline()
     if not head:
         return ("Indisponível" if report.state == "error" else "Sem dados"), ""
     if head.key == "session":
@@ -302,8 +329,7 @@ def ring_caption(report: Report) -> tuple[str, str]:
     return name, when
 
 
-def fill_ring(ring: Ring, report: Report, *, compact: bool) -> None:
-    head = report.headline()
+def fill_ring(ring: Ring, report: Report, head: Window | None, *, compact: bool) -> None:
     used = head.used_at() if head else None
     color = theme.usage_color(report.provider, used)
     text = "" if compact else ("—" if used is None else f"{used:.0f}%")
@@ -377,21 +403,23 @@ class MediaCard(Card):
             vbox(None, self.source, self.title, self.artist, 8, bar, controls, None, spacing=3)
         )
         self.empty = QWidget()
-        self.empty.setLayout(
-            vbox(
-                None,
-                label("Nada tocando", "H2"),
-                label("Abra o Spotify, o YouTube ou qualquer player do Windows.", "Muted", wrap=True),
-                None,
-                spacing=4,
-            )
-        )
+        self.empty_text = label("", "Muted", wrap=True)
+        self.empty.setLayout(vbox(None, label("Nada tocando", "H2"), self.empty_text, None, spacing=4))
+        ctx.settings_changed.connect(lambda _s: self._empty_hint())
+        self._empty_hint()
         self.body.addLayout(hbox(self.art, self.player, self.empty, spacing=16))
         self.tick = QTimer(self, interval=500, timeout=self._progress)
         self.media.state_changed.connect(self.set_state)
         self.media.thumbnail_changed.connect(self.set_art)
         self.set_state(self.media.state)
         self.set_art(self.media.thumbnail)
+
+    def _empty_hint(self) -> None:
+        if self.ctx.settings.media_source == "spotify":
+            text = "Abra o Spotify e dê play. Para seguir outros players, troque em Ajustes > Música."
+        else:
+            text = "Abra o Spotify, o YouTube ou qualquer player do Windows."
+        self.empty_text.setText(text)
 
     def set_state(self, state: MediaState | None) -> None:
         self.state = state
@@ -401,7 +429,8 @@ class MediaCard(Card):
             self.tick.stop()
             return
         app = pretty_source(state.source_app)
-        self.source.setText(f"Tocando agora · {app}" if app else "Tocando agora")
+        status = "Tocando agora" if state.is_playing else "Pausado"
+        self.source.setText(f"{status} · {app}" if app else status)
         self.title.setText(state.title)
         self.artist.setText(" · ".join(x for x in (state.artist, state.album) if x) or "—")
         self.play.set_icon("pause" if state.is_playing else "play", theme.BG)

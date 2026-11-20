@@ -89,10 +89,65 @@ def test_claude_fetch_from_code(home, monkeypatch):
     assert raw["claudeAiOauth"]["refreshToken"] == "ref"  # nunca reescreve o login
 
 
-def test_claude_expired_token_and_errors(home, monkeypatch):
+def test_claude_expired_token_is_renewed_and_saved(home, monkeypatch):
+    write_claude(home, (time.time() - 10) * 1000)
+    path = home / ".claude" / ".credentials.json"
+    raw = json.loads(path.read_text())
+    raw["mcpOAuth"] = {"keep": True}
+    path.write_text(json.dumps(raw))
+    posts, gets = [], []
+
+    def fake_post(url, body, **kw):
+        posts.append((url, body))
+        return {"access_token": "tok2", "refresh_token": "ref2", "expires_in": 28800, "scope": "a b"}
+
+    def fake_get(url, **kw):
+        gets.append(kw["headers"]["Authorization"])
+        return USAGE
+
+    monkeypatch.setattr(net, "post_json", fake_post)
+    monkeypatch.setattr(net, "get_json", fake_get)
+    report = claude.fetch(ctx(home))
+    assert report.state == "ok" and gets == ["Bearer tok2"]
+    expected = {"grant_type": "refresh_token", "refresh_token": "ref", "client_id": claude.CLIENT_ID}
+    assert posts[0][1] == expected
+    saved = json.loads(path.read_text())
+    oauth = saved["claudeAiOauth"]
+    assert oauth["accessToken"] == "tok2" and oauth["refreshToken"] == "ref2"
+    assert oauth["expiresAt"] > time.time() * 1000 and oauth["scopes"] == ["a", "b"]
+    assert oauth["subscriptionType"] == "max" and saved["mcpOAuth"] == {"keep": True}
+    assert not list(path.parent.glob("*.ventude-tmp"))
+
+
+def test_claude_expired_without_refresh(home, monkeypatch):
     write_claude(home, (time.time() - 10) * 1000)
     with pytest.raises(ProviderError, match="expirou"):
+        claude.fetch(FetchContext("auto", home, NO_SECRET, None, {"claude_refresh": False}))
+
+    def invalid(url, body, **kw):
+        raise net.NetError("HTTP 400", 400, '{"error": "invalid_grant"}')
+
+    monkeypatch.setattr(net, "post_json", invalid)
+    with pytest.raises(ProviderError, match="/login"):
         claude.fetch(ctx(home))
+
+
+def test_claude_refresh_tries_next_endpoint(home, monkeypatch):
+    write_claude(home, (time.time() - 10) * 1000)
+    urls = []
+
+    def fake_post(url, body, **kw):
+        urls.append(url)
+        if len(urls) == 1:
+            raise net.NetError("HTTP 404", 404, "not found")
+        return {"access_token": "tok3", "expires_in": 3600}
+
+    monkeypatch.setattr(net, "post_json", fake_post)
+    monkeypatch.setattr(net, "get_json", lambda url, **kw: USAGE)
+    assert claude.fetch(ctx(home)).state == "ok"
+    assert urls == list(claude.TOKEN_URLS)
+    oauth = json.loads((home / ".claude" / ".credentials.json").read_text())["claudeAiOauth"]
+    assert oauth["accessToken"] == "tok3" and oauth["refreshToken"] == "ref"
 
 
 def test_claude_401_message(home, monkeypatch):
@@ -103,23 +158,49 @@ def test_claude_401_message(home, monkeypatch):
 
     monkeypatch.setattr(net, "get_json", boom)
     with pytest.raises(ProviderError, match="login"):
-        claude.fetch(ctx(home))
+        claude.fetch(FetchContext("auto", home, NO_SECRET, None, {"claude_refresh": False}))
 
 
 def test_claude_web_fallback(home, monkeypatch):
     calls = []
 
-    def fake_get(url, **kw):
-        calls.append((url, kw["headers"]["Cookie"]))
+    def fake_browser(method, url, **kw):
+        calls.append((url, kw["headers"]["Cookie"], kw["headers"].get("User-Agent")))
         if url.endswith("/organizations"):
             return [{"uuid": "org1", "capabilities": ["chat", "claude_pro"]}]
         return USAGE
 
-    monkeypatch.setattr(net, "get_json", fake_get)
+    monkeypatch.setattr(net, "browser_json", fake_browser)
     report = claude.fetch(ctx(home, secrets={"claude_session": "sessionKey=sk-ant-sid01-x; other=1"}))
     assert report.source == "claude.ai" and report.plan == "Pro"
-    assert calls[0][1] == "sessionKey=sk-ant-sid01-x"
+    assert calls[0][1] == "sessionKey=sk-ant-sid01-x; other=1" and calls[0][2] is None
     assert calls[1][0].endswith("/organizations/org1/usage")
+    curl = (
+        "curl 'https://claude.ai/api/organizations' -H 'user-agent: Mozilla/5.0 Test' "
+        "-b 'lastActiveOrg=org2; sessionKey=sk-ant-sid01-abc_DEF-1'"
+    )
+    calls.clear()
+
+    def two_orgs(method, url, **kw):
+        calls.append((url, kw["headers"]["Cookie"], kw["headers"].get("User-Agent")))
+        if url.endswith("/organizations"):
+            return [{"uuid": "org1", "capabilities": ["chat"]}, {"uuid": "org2", "capabilities": ["chat"]}]
+        return USAGE
+
+    monkeypatch.setattr(net, "browser_json", two_orgs)
+    claude.fetch(ctx(home, "web", secrets={"claude_session": curl}))
+    assert calls[0][2] == "Mozilla/5.0 Test" and "sessionKey=sk-ant-sid01-abc_DEF-1" in calls[0][1]
+    assert calls[1][0].endswith("/organizations/org2/usage")
+    assert claude.normalize_session_key("  sk-ant-sid01-zz-yy  ") == "sk-ant-sid01-zz-yy"
+
+
+def test_claude_web_cloudflare_message(home, monkeypatch):
+    def blocked(method, url, **kw):
+        raise net.NetError("HTTP 403", 403, "<title>Just a moment...</title>")
+
+    monkeypatch.setattr(net, "browser_json", blocked)
+    with pytest.raises(ProviderError, match="Cloudflare"):
+        claude.fetch(ctx(home, "web", secrets={"claude_session": "sk-ant-sid01-x"}))
 
 
 def test_claude_setup_and_off(home):
@@ -192,6 +273,36 @@ def test_antigravity_extract_groups_models_and_zero_fraction():
     assert "GPT-OSS 120B" not in labels
     assert labels["Créditos de prompt"].used == 20.0
     assert windows[0].label.startswith("Gemini")
+
+
+def test_antigravity_keeps_each_model_and_groups_codenames():
+    def quota(fraction):
+        return {"remainingFraction": fraction, "resetTime": "2030-01-01T10:00:00Z"}
+
+    data = {
+        "clientModelConfigs": [
+            {"label": "Gemini 3 Pro (High)", "quotaInfo": quota(0.9)},
+            {"label": "Gemini 3 Flash", "quotaInfo": quota(0.9)},
+            {"label": "Claude Opus 4.5 (Thinking)", "quotaInfo": quota(0.9)},
+            {"label": "GPT-OSS 120B (Medium)", "quotaInfo": quota(0.5)},
+            {"modelName": "argon", "quotaInfo": quota(0.1)},
+            {"modelName": "MODEL_PLACEHOLDER_M9", "quotaInfo": {"remainingFraction": 1}},
+        ]
+    }
+    windows, _, _ = antigravity.extract(data)
+    by_label = {w.label: w for w in windows}
+    # mesma cota e mesmo horário não juntam mais modelos diferentes
+    assert {"Gemini 3 Pro (High)", "Gemini 3 Flash", "Claude Opus 4.5 (Thinking)"} <= set(by_label)
+    assert by_label["Argon"].group == "Outros" and by_label["Gemini 3 Flash"].group == "Gemini"
+    assert by_label["M9"].group == "Outros"
+    assert by_label["GPT-OSS 120B (Medium)"].group == "GPT"
+    assert [w.group for w in windows] == ["Gemini", "Gemini", "Claude", "GPT", "Outros", "Outros"]
+    report = Report("antigravity", "ok", windows)
+    assert report.headline().group == "Gemini"  # o argon (90%) não vai para o anel
+    assert report.headline(pinned="model:argon").label == "Argon"
+    assert report.headline(pinned="model:sumiu").group == "Gemini"
+    old = {"provider": "antigravity", "state": "ok", "windows": [{"key": "a", "label": "A", "used": 1}]}
+    assert Report.from_dict(old).windows[0].group == ""
 
 
 def test_antigravity_extract_summary_format():
@@ -299,16 +410,83 @@ def test_grok_fetch_cli(monkeypatch, home):
 
 
 def test_grok_fetch_web_cookie(monkeypatch, home):
-    def fake_post(url, body, **kw):
-        assert kw["headers"]["Cookie"] == "sso=abc"
-        if body["modelName"] == "grok-4-heavy":
-            raise net.NetError("HTTP 403", 403)
+    def fake_browser(method, url, **kw):
+        assert method == "POST" and kw["headers"]["Cookie"] == "sso=abc"
+        if kw["json_body"]["modelName"] == "grok-4-heavy":
+            raise net.NetError("HTTP 400", 400)
         return {"remainingQueries": 10, "totalQueries": 20, "windowSizeSeconds": 7200}
 
-    monkeypatch.setattr(net, "post_json", fake_post)
+    monkeypatch.setattr(net, "browser_json", fake_browser)
     report = grok.fetch(ctx(home, secrets={"grok_cookie": "Cookie: sso=abc"}))
     assert report.source == "grok.com"
     assert len(report.windows) == 1  # resultados idênticos não se repetem
+
+
+def test_grok_web_from_curl_and_errors(monkeypatch, home):
+    seen = []
+    curl = (  # "Copiar como cURL (cmd)" do Chrome
+        r'curl ^"https://grok.com/rest/rate-limits^" ^'
+        "\n"
+        r'  -H ^"accept: */*^" ^'
+        "\n"
+        r'  -H ^"x-statsig-id: abc123^" ^'
+        "\n"
+        r'  -b ^"sso=s1; sso-rw=s2; cf_clearance=cf^" ^'
+        "\n"
+        r'  -H ^"user-agent: Mozilla/5.0 Edge^" ^'
+        "\n"
+        r'  --data-raw ^"^{^\^"requestKind^\^":^\^"DEFAULT^\^",^\^"modelName^\^":^\^"grok-5^\^"^}^"'
+    )
+
+    def fake_browser(method, url, **kw):
+        seen.append((kw["json_body"]["modelName"], kw["headers"]))
+        return {"remainingTokens": 50, "totalTokens": 200, "waitTimeSeconds": 60}
+
+    monkeypatch.setattr(net, "browser_json", fake_browser)
+    report = grok.fetch(ctx(home, "web", secrets={"grok_cookie": curl}))
+    first_model, headers = seen[0]
+    assert first_model == "grok-5"
+    assert headers["Cookie"] == "sso=s1; sso-rw=s2; cf_clearance=cf"
+    assert headers["User-Agent"] == "Mozilla/5.0 Edge" and headers["x-statsig-id"] == "abc123"
+    assert report.windows[0].used == 75.0 and "tokens" in report.windows[0].detail
+
+    def blocked(method, url, **kw):
+        raise net.NetError("HTTP 403", 403, "cf-mitigated <html>")
+
+    monkeypatch.setattr(net, "browser_json", blocked)
+    with pytest.raises(ProviderError, match="Cloudflare"):
+        grok.fetch(ctx(home, "web", secrets={"grok_cookie": "sso=1"}))
+    with pytest.raises(ProviderError, match="sso"):
+        grok.fetch(ctx(home, "web", secrets={"grok_cookie": "foo=bar"}))
+
+
+def test_parse_pasted_formats():
+    from ventude.limits.web import parse_pasted
+
+    bash = (
+        "curl 'https://grok.com/x' -H 'cookie: a=1; b=2' -H 'User-Agent: UA' "
+        '--data-raw \'{"modelName":"m"}\''
+    )
+    p = parse_pasted(bash)
+    assert p.cookie == "a=1; b=2" and p.user_agent == "UA" and p.models == ["m"]
+    assert p.cookie_value("b") == "2"
+    ps = (
+        '$session.Cookies.Add((New-Object System.Net.Cookie("sso", "v1", "/", ".grok.com")))\n'
+        '$session.Cookies.Add((New-Object System.Net.Cookie("sso-rw", "v2", "/", ".grok.com")))\n'
+        'Invoke-WebRequest -UseBasicParsing -Uri "https://grok.com/rest/rate-limits" -UserAgent "UA2"'
+    )
+    p = parse_pasted(ps)
+    assert p.cookie == "sso=v1; sso-rw=v2" and p.user_agent == "UA2"
+    headers = parse_pasted("Host: grok.com\nCookie: x=1\nUser-Agent: UA3")
+    assert headers.cookie == "x=1" and headers.user_agent == "UA3"
+    assert parse_pasted("Cookie: z=9").cookie == "z=9"
+    assert parse_pasted("").cookie == ""
+
+
+def test_net_challenge_detection():
+    assert net.NetError("x", 403, "<title>Just a moment...</title>").challenge
+    assert not net.NetError("x", 403, '{"error":"forbidden"}').challenge
+    assert not net.NetError("x", 500, "just a moment").challenge
 
 
 def test_grok_setup(home):

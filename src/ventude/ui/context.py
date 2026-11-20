@@ -38,11 +38,13 @@ class AppContext(QObject):
         super().__init__()
         self.store, self.tasks = store, tasks
         self.settings: Settings = store.load_settings()
-        self.media = media or MediaService()
+        self.media = media or MediaService(source=self.settings.media_source)
+        self.media.set_source(self.settings.media_source)
         self.weather = WeatherService(store)
         self.market = MarketService(store)
         self.news = NewsService(store)
         self.limits = LimitsManager(store, tasks, lambda: self.settings, home=home, fetchers=fetchers)
+        self.weather_focus = ""  # dia (ISO) que a aba Clima deve abrir nos detalhes
 
     def update_settings(self, **changes: object) -> Settings:
         updated = self.settings.copy(**changes)
@@ -50,6 +52,7 @@ class AppContext(QObject):
             return updated
         self.settings = updated
         self.store.save_settings(updated)
+        self.media.set_source(updated.media_source)
         self.settings_changed.emit(updated)
         return updated
 

@@ -2,21 +2,51 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from ventude.core.timefmt import ago, resets_text
-from ventude.limits.model import Report
+from ventude.limits.model import Report, Window
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
 from ventude.ui.pages.base import Page, scroller
 from ventude.ui.widgets import Badge, Card, IconButton, UsageBar, hbox, label, repolish
 
 HOW_TO = {
-    "claude": "Use o Claude Code logado (comando claude) ou cole a sessionKey do claude.ai em Ajustes.",
+    "claude": "Usa o Claude Desktop ou o site? Cole a sessionKey do claude.ai em Ajustes "
+    "(ou use o Claude Code logado).",
     "antigravity": "Deixe o Antigravity aberto e logado. O Ventude lê as cotas direto dele.",
-    "grok": "Use o Grok CLI logado (comando grok) ou cole o cookie do grok.com em Ajustes.",
+    "grok": "Cole o cURL ou o cookie do grok.com em Ajustes (vale para o site, o app e os bots).",
 }
+
+
+class LimitRow(QWidget):
+    """Uma janela de limite com o alfinete que a fixa no anel da ilha."""
+
+    pin_clicked = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.key = ""
+        self.bar = UsageBar()
+        self.pin = IconButton("pin", "", 24, 13)
+        self.pin.clicked.connect(lambda: self.pin_clicked.emit(self.key))
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(self.bar, 1)
+        row.addWidget(self.pin, 0, Qt.AlignmentFlag.AlignTop)
+
+    def set_pin(self, state: str) -> None:
+        """state: pinned (fixado) | auto (no anel agora) | off."""
+        color = {"pinned": theme.ACCENT, "auto": theme.TEXT_2}.get(state, theme.STROKE_2)
+        self.pin.set_icon("pin", color)
+        self.pin.setToolTip(
+            {
+                "pinned": "Fixado no anel da ilha. Clique para voltar ao automático.",
+                "auto": "No anel da ilha agora (automático). Clique para fixar.",
+            }.get(state, "Mostrar este limite no anel da ilha")
+        )
 
 
 class ProviderCard(Card):
@@ -36,8 +66,8 @@ class ProviderCard(Card):
         self.body.addWidget(self.source)
         self.bars_box = QWidget()
         self.bars = QVBoxLayout(self.bars_box)
-        self.bars.setContentsMargins(0, 2, 6, 0)
-        self.bars.setSpacing(12)
+        self.bars.setContentsMargins(0, 2, 2, 0)
+        self.bars.setSpacing(8)
         self.bars.addStretch(1)
         self.scroll = scroller(self.bars_box)
         self.body.addWidget(self.scroll, 1)
@@ -47,7 +77,8 @@ class ProviderCard(Card):
         self.setup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_btn.clicked.connect(lambda: ctx.navigate_requested.emit("settings"))
         self.body.addWidget(self.setup_btn, 0, Qt.AlignmentFlag.AlignLeft)
-        self._pool: list[UsageBar] = []
+        self._rows: dict[str, LimitRow] = {}
+        self._layout_key: tuple = ()
 
     def refresh(self) -> None:
         report = self.ctx.limits.report(self.provider)
@@ -74,32 +105,67 @@ class ProviderCard(Card):
             parts.append("atualizando…")
         return " · ".join(parts) or "Aguardando a primeira leitura"
 
+    def _clear_bars(self) -> None:
+        while self.bars.count() > 1:
+            item = self.bars.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._rows.clear()
+
     def _fill_bars(self, report: Report) -> None:
         windows = report.windows
-        while len(self._pool) < len(windows):
-            bar = UsageBar()
-            self._pool.append(bar)
-            self.bars.insertWidget(self.bars.count() - 1, bar)
-        for index, bar in enumerate(self._pool):
-            if index >= len(windows):
-                bar.hide()
+        groups = list(dict.fromkeys(w.group for w in windows if w.group))
+        show_groups = len(groups) > 1
+        layout_key = tuple((w.key, w.group) for w in windows) + (show_groups,)
+        if layout_key != self._layout_key:
+            self._clear_bars()
+            self._layout_key = layout_key
+            current = None
+            for window in windows:
+                if show_groups and window.group != current:
+                    current = window.group
+                    heading = label(window.group.upper(), "Caption")
+                    heading.setContentsMargins(0, 4 if self.bars.count() > 1 else 0, 0, 0)
+                    self.bars.insertWidget(self.bars.count() - 1, heading)
+                row = LimitRow()
+                row.pin_clicked.connect(self._toggle_pin)
+                self.bars.insertWidget(self.bars.count() - 1, row)
+                self._rows[window.key] = row
+        pinned = self.ctx.settings.pinned_limit(self.provider)
+        head = self.ctx.limits.headline(report)
+        for window in windows:
+            row = self._rows.get(window.key)
+            if row is None:
                 continue
-            window = windows[index]
-            used = window.used_at()
-            sub = resets_text(window.resets_at)
-            if window.detail and window.key.startswith(("mode:", "credits")):
-                sub = f"{sub} · {window.detail}" if sub else window.detail
-            tip = window.detail if window.key.startswith("model:") else ""
-            bar.set_data(
-                window.label,
-                used,
-                theme.usage_color(self.provider, used),
-                sub or "Sem data de renovação",
-                tip,
-                dim=report.state != "ok",
-            )
-            bar.show()
+            row.key = window.key
+            self._fill_row(row, report, window)
+            state = "off"
+            if head is not None and head.key == window.key:
+                state = "pinned" if pinned == window.key else "auto"
+            row.set_pin(state)
         self.scroll.setVisible(bool(windows))
+
+    def _fill_row(self, row: LimitRow, report: Report, window: Window) -> None:
+        used = window.used_at()
+        sub = resets_text(window.resets_at)
+        if window.detail and window.key.startswith(("mode:", "credits")):
+            sub = f"{sub} · {window.detail}" if sub else window.detail
+        tip = window.detail if window.key.startswith("model:") else ""
+        row.bar.set_data(
+            window.label,
+            used,
+            theme.usage_color(self.provider, used),
+            sub or "Sem data de renovação",
+            tip,
+            dim=report.state != "ok",
+        )
+
+    def _toggle_pin(self, key: str) -> None:
+        settings = self.ctx.settings
+        current = settings.pinned_limit(self.provider)
+        self.ctx.update_settings(
+            pinned_limits_json=settings.with_pinned(self.provider, "" if current == key else key)
+        )
 
     def _message(self, report: Report) -> None:
         text, style = "", "Muted"
@@ -138,7 +204,8 @@ class LimitsPage(Page):
         )
         self.root.addWidget(self.none)
         foot = label(
-            "Leitura direta das contas que você já usa: nada passa por servidores de terceiros.",
+            "Leitura direta das contas que você já usa: nada passa por servidores de terceiros. "
+            "O alfinete escolhe qual limite aparece no anel da ilha.",
             "Faint",
         )
         self.root.addWidget(foot)

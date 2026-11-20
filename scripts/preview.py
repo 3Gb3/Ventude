@@ -54,10 +54,13 @@ def demo_fetchers() -> dict:
                     "Gemini 3 Pro",
                     24,
                     now + 3 * H + 40 * 60,
-                    "Gemini 3 Pro (High), Gemini 3 Pro (Low)",
+                    "Variantes: High, Low",
+                    "Gemini",
                 ),
-                Window("model:gemini-3-flash", "Gemini 3 Flash", 8, now + 4 * H + 5 * 60),
-                Window("model:claude", "Claude · 2 modelos", 91, now + 52 * 60),
+                Window("model:gemini-3-flash", "Gemini 3 Flash", 8, now + 4 * H + 5 * 60, "", "Gemini"),
+                Window("model:claude-sonnet-4-5", "Claude Sonnet 4.5", 91, now + 52 * 60, "", "Claude"),
+                Window("model:gpt-oss-120b", "GPT-OSS 120B (Medium)", 40, now + 2 * H, "", "GPT"),
+                Window("model:argon", "Argon", 63, now + 5 * H, "", "Outros"),
             ],
             plan="Google AI Pro",
             source="Antigravity",
@@ -120,8 +123,66 @@ def seed(store: Store) -> None:
     store.add_shortcut("url", "Claude", "https://claude.ai")
     store.add_shortcut("folder", "Downloads", "/tmp")
     store.add_shortcut("url", "Gmail", "https://mail.google.com")
+    import math
+
+    plan = [
+        (2, 30, 19, 10, 2.0),
+        (61, 26, 18, 70, 8.4),
+        (80, 24, 17, 85, 14.2),
+        (3, 25, 16, 30, 0.6),
+        (1, 28, 17, 5, 0.0),
+        (0, 31, 19, 0, 0.0),
+        (95, 29, 20, 90, 22.0),
+    ]
+    days, hours = [], []
+    for i, (code, mx, mn, rain, precip) in enumerate(plan):
+        iso = (today + timedelta(days=i)).isoformat()
+        humidity = []
+        for hour in range(24):
+            curve = (math.sin((hour - 9) / 24 * 2 * math.pi) + 1) / 2
+            temp = mn + (mx - mn) * curve
+            hum = round(88 - 38 * curve + (8 if rain > 50 else 0))
+            humidity.append(hum)
+            chance = max(0, min(100, int(rain * (0.4 + 0.6 * abs(math.sin((hour + i) / 3.1))))))
+            hours.append(
+                {
+                    "time": f"{iso}T{hour:02d}:00",
+                    "temp": round(temp, 1),
+                    "feels": round(temp + 1.5, 1),
+                    "humidity": hum,
+                    "rain": chance,
+                    "precip": round(precip / 10 * chance / 100, 1),
+                    "code": code if 9 <= hour <= 20 else (1 if code in (0, 2) else code),
+                    "is_day": 6 <= hour <= 18,
+                    "wind": round(8 + 10 * curve, 1),
+                    "uv": round(max(0.0, 9 * math.sin((hour - 6) / 13 * math.pi)), 1)
+                    if 6 <= hour <= 19
+                    else 0,
+                }
+            )
+        days.append(
+            {
+                "date": iso,
+                "code": code,
+                "max": mx,
+                "min": mn,
+                "rain": rain,
+                "precip": precip,
+                "feels_max": mx + 2,
+                "feels_min": mn - 1,
+                "sunrise": f"{iso}T05:12",
+                "sunset": f"{iso}T18:41",
+                "uv": 9.0 if code in (0, 1, 2) else 5.0,
+                "wind_max": 18.0 + i,
+                "gusts": 34.0 + i,
+                "wind_dir": 135.0,
+                "hum_mean": round(sum(humidity) / 24),
+                "hum_min": min(humidity),
+                "hum_max": max(humidity),
+            }
+        )
     store.cache_set(
-        "wx:-23.550,-46.633",
+        "wx2:-23.550,-46.633",
         {
             "place": "São Paulo, São Paulo, Brasil",
             "temp": 27.0,
@@ -130,20 +191,8 @@ def seed(store: Store) -> None:
             "wind": 12.0,
             "code": 2,
             "is_day": True,
-            "days": [
-                {"date": (today + timedelta(days=i)).isoformat(), "code": c, "max": mx, "min": mn, "rain": r}
-                for i, (c, mx, mn, r) in enumerate(
-                    [
-                        (2, 30, 19, 10),
-                        (61, 26, 18, 70),
-                        (80, 24, 17, 85),
-                        (3, 25, 16, 30),
-                        (1, 28, 17, 5),
-                        (0, 31, 19, 0),
-                        (95, 29, 20, 90),
-                    ]
-                )
-            ],
+            "days": days,
+            "hours": hours,
         },
         3600,
     )
@@ -308,6 +357,42 @@ def main() -> None:
         area.verticalScrollBar().setValue(part * 440)
         settle(island, 200)
         shot(island, out / f"{index + 2:02d}-settings-{part + 1}.png")
+    # ---------- telas da versão 1.1 ----------
+    island.expand("weather")
+    settle(island, 400)
+    weather = island.panel.pages["weather"]
+    weather.open_day((date.today() + timedelta(days=1)).isoformat())
+    settle(island, 300)
+    shot(island, out / "20-clima-dia.png")
+    chart = weather.detail.chart
+    chart.hover = 14
+    weather.detail._hovered(14)
+    chart.update()
+    settle(island, 200)
+    shot(island, out / "21-clima-dia-hora.png")
+    weather.close_day()
+    island.panel.drop_hint.show()
+    island.panel.drop_hint.raise_()
+    island.panel.select("shortcuts")
+    settle(island, 500)
+    shot(island, out / "22-arrastar.png")
+    island.panel.drop_hint.hide()
+    island.collapse()
+    settle(island, 500)
+    paused = MediaState(
+        "Midnight City", "M83", "", "paused", 95, 243, time.monotonic(), True, True, True, True
+    )
+    media.state = paused
+    media.state_changed.emit(paused)
+    settle(island, 500)
+    shot(island, out / "23-ilha-pausada.png", 18)
+    island.expand("home")
+    settle(island, 120)
+    shot(island, out / "24-abrindo.png")
+    settle(island, 500)
+    island.panel.select("limits")
+    settle(island, 90)
+    shot(island, out / "25-trocando-aba.png")
     print(f"Capturas em {out.resolve()}")
 
 

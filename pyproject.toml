@@ -1,11 +1,12 @@
 [project]
 name = "ventude"
-version = "1.0.0"
+version = "1.1.0"
 description = "Dynamic Island leve para Windows: limites das suas IAs, mídia, clima, agenda e atalhos"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pyside6-essentials>=6.9",
+    "curl-cffi>=0.15",
     "winrt-runtime>=3.0 ; sys_platform == 'win32'",
     "winrt-windows-foundation>=3.0 ; sys_platform == 'win32'",
     "winrt-windows-foundation-collections>=3.0 ; sys_platform == 'win32'",

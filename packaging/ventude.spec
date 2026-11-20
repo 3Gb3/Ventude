@@ -14,6 +14,23 @@ try:  # WinRT (mídia do Windows) só existe no Windows
 except Exception:
     pass
 
+# curl_cffi: conexão com "cara de navegador" para claude.ai e grok.com (Cloudflare).
+# A DLL do libcurl fica em curl_cffi.libs (delvewheel), ao lado do pacote.
+try:
+    import importlib.util
+
+    from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
+    hidden += collect_submodules("curl_cffi", filter=lambda name: not name.startswith("curl_cffi.cli"))
+    hidden += ["_cffi_backend", "certifi"]
+    binaries += collect_dynamic_libs("curl_cffi")
+    datas += collect_data_files("curl_cffi") + collect_data_files("certifi")
+    _origin = importlib.util.find_spec("curl_cffi").origin
+    for _dll in (Path(_origin).parent.parent / "curl_cffi.libs").glob("*.dll"):
+        binaries.append((str(_dll), "curl_cffi.libs"))
+except Exception:
+    pass
+
 # Módulos que o Ventude não usa: fora do pacote, ele fica bem menor.
 EXCLUDES = [
     "tkinter",
