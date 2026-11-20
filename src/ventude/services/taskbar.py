@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 SW_HIDE, SW_SHOW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE = 0, 5, 3, 6, 9
 SPI_GETWORKAREA, SPI_SETWORKAREA = 0x0030, 0x002F
 SPIF_SENDCHANGE = 0x0002
+ABM_GETSTATE, ABM_SETSTATE = 0x00000004, 0x0000000A
+ABS_AUTOHIDE = 0x00000001
 GW_OWNER = 4
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE = 0x00000080, 0x00040000, 0x08000000
@@ -59,6 +61,8 @@ def _user32():  # noqa: ANN202
     u.FindWindowExW.restype = wintypes.HWND
     u.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
     u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    u.ShowWindowAsync.argtypes = [wintypes.HWND, ctypes.c_int]
+    u.GetShellWindow.restype = wintypes.HWND
     u.IsWindowVisible.argtypes = [wintypes.HWND]
     u.IsWindow.argtypes = [wintypes.HWND]
     u.IsIconic.argtypes = [wintypes.HWND]
@@ -96,21 +100,81 @@ def _user32():  # noqa: ANN202
 
 
 # ---------- barra do Windows ----------
+class _AppBarData(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("hWnd", wintypes.HWND),
+        ("uCallbackMessage", wintypes.UINT),
+        ("uEdge", wintypes.UINT),
+        ("rc", wintypes.RECT),
+        ("lParam", wintypes.LPARAM),
+    ]
+
+
+def _shell32():  # noqa: ANN202
+    s = ctypes.windll.shell32  # type: ignore[attr-defined]
+    s.SHAppBarMessage.argtypes = [wintypes.DWORD, ctypes.POINTER(_AppBarData)]
+    s.SHAppBarMessage.restype = ctypes.c_size_t
+    return s
+
+
+def _appbar_data(state: int = 0) -> _AppBarData:
+    abd = _AppBarData()
+    abd.cbSize = ctypes.sizeof(_AppBarData)
+    abd.hWnd = _user32().FindWindowW(TASKBAR_CLASSES[0], None) or 0
+    abd.lParam = int(state)
+    return abd
+
+
+def get_appbar_state() -> int | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        abd = _appbar_data()
+        return int(_shell32().SHAppBarMessage(ABM_GETSTATE, ctypes.byref(abd)))
+    except (OSError, AttributeError):
+        return None
+
+
+def set_appbar_state(state: int) -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        abd = _appbar_data(state)
+        _shell32().SHAppBarMessage(ABM_SETSTATE, ctypes.byref(abd))
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
 def taskbar_windows() -> list[int]:
     if sys.platform != "win32":
         return []
     user32 = _user32()
-    found = []
-    main = user32.FindWindowW(TASKBAR_CLASSES[0], None)
-    if main:
-        found.append(int(main))
-    previous = None
-    while True:
-        previous = user32.FindWindowExW(None, previous, TASKBAR_CLASSES[1], None)
-        if not previous:
-            break
-        found.append(int(previous))
-    return found
+    shell_hwnd = int(user32.GetShellWindow() or 0)
+    shell_pid = _pid(user32, shell_hwnd) if shell_hwnd else 0
+    handles: list[int] = []
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    callback = proc(lambda hwnd, _data: handles.append(int(hwnd)) or True)
+    user32.EnumWindows.argtypes = [proc, wintypes.LPARAM]
+    user32.EnumWindows(callback, 0)
+    primary: list[int] = []
+    secondary: list[int] = []
+    seen: set[int] = set()
+    for hwnd in handles:
+        if hwnd in seen:
+            continue
+        cls = _class_name(user32, hwnd)
+        if cls not in TASKBAR_CLASSES:
+            continue
+        if shell_pid and _pid(user32, hwnd) != shell_pid:
+            continue
+        seen.add(hwnd)
+        if cls == TASKBAR_CLASSES[0]:
+            primary.append(hwnd)
+        else:
+            secondary.append(hwnd)
+    return primary + secondary
 
 
 class _MonitorInfo(ctypes.Structure):
@@ -150,11 +214,12 @@ def monitors() -> list[tuple[Rect, Rect]]:
     return out
 
 
-def set_work_area(rect: Rect) -> bool:
+def set_work_area(rect: Rect, *, broadcast: bool = False) -> bool:
     if sys.platform != "win32":
         return False
     value = wintypes.RECT(*rect)
-    return bool(_user32().SystemParametersInfoW(SPI_SETWORKAREA, 0, ctypes.byref(value), SPIF_SENDCHANGE))
+    flags = SPIF_SENDCHANGE if broadcast else 0
+    return bool(_user32().SystemParametersInfoW(SPI_SETWORKAREA, 0, ctypes.byref(value), flags))
 
 
 def monitor_scale(rect: Rect) -> float:
@@ -203,77 +268,155 @@ class TaskbarHider:
         work_area: Callable[[Rect], bool] = set_work_area,
         marker: Path | None = None,
         reserve: Callable[[Rect], int] | None = None,
+        *,
+        appbar_get: Callable[[], int | None] | None = None,
+        appbar_set: Callable[[int], bool] | None = None,
+        is_visible: Callable[[int], bool] | None = None,
+        is_window: Callable[[int], bool] | None = None,
     ) -> None:
         self._windows, self._screens, self._work_area = windows, screens, work_area
-        self._show = show or (lambda hwnd, cmd: _user32().ShowWindow(hwnd, cmd))
-        self._visible = (
-            (lambda hwnd: bool(_user32().IsWindowVisible(hwnd))) if show is None else (lambda _h: True)
-        )
+        if show is None:
+            self._show = lambda hwnd, cmd: _user32().ShowWindowAsync(hwnd, cmd)
+            self._visible = is_visible or (lambda hwnd: bool(_user32().IsWindowVisible(hwnd)))
+            self._is_window = is_window or (lambda hwnd: bool(_user32().IsWindow(hwnd)))
+            self._appbar_get = appbar_get or get_appbar_state
+            self._appbar_set = appbar_set or set_appbar_state
+        else:
+            self._show = show
+            self._visible = is_visible or (lambda _h: True)
+            self._is_window = is_window or (lambda _h: True)
+            self._appbar_get = appbar_get or (lambda: None)
+            self._appbar_set = appbar_set or (lambda _s: False)
         self.marker = marker or marker_path()
         self.reserve: Callable[[Rect], int] = reserve or (lambda _mon: 0)
         self.hidden = False
         self.peeking = False
         self._saved: list[tuple[Rect, Rect]] = []
+        self._bars: list[int] = []
+        self._reassert_ticks = 0
+        self._saved_appbar_state: int | None = None
+        self._autohide_changed = False
+        self._autohide_active = False
+        self._custom_work_monitors: set[Rect] = set()
 
     def hide(self) -> bool:
         bars = self._windows()
         if not bars:
             return False
+        self._bars = list(bars)
+        self._reassert_ticks = 0
         if not self.hidden:
             self._saved = [(mon, work) for mon, work in self._screens() if work != mon]
+            orig = self._appbar_get()
+            self._saved_appbar_state = orig
+            self._autohide_changed = False
+            self._autohide_active = bool(orig is not None and (orig & ABS_AUTOHIDE))
+            if orig is not None and not (orig & ABS_AUTOHIDE):
+                if self._appbar_set(orig | ABS_AUTOHIDE):
+                    self._autohide_changed = True
+                    self._autohide_active = True
+            payload = {
+                "version": 2,
+                "appbar_state": self._saved_appbar_state,
+                "autohide_changed": self._autohide_changed,
+                "work_areas": self._saved,
+            }
             try:
-                self.marker.write_text(json.dumps(self._saved), encoding="utf-8")
+                self.marker.write_text(json.dumps(payload), encoding="utf-8")
             except OSError:
                 log.warning("Não deu para gravar o marcador da barra escondida", exc_info=True)
         for hwnd in bars:
             self._show(hwnd, SW_HIDE)
         self.peeking = False
-        self.apply_work_areas()
         self.hidden = True
+        self.apply_work_areas()
         return True
 
     def apply_work_areas(self) -> None:
         """Área útil de cada monitor = tela menos a barra do Ventude (ou a tela toda)."""
         for mon, work in self._screens():
-            wanted = work_rect(mon, self.reserve(mon))
-            if work != wanted:
-                self._work_area(wanted)
+            res = self.reserve(mon)
+            wanted = work_rect(mon, res)
+            if self._autohide_active:
+                if res > 0:
+                    if work != wanted:
+                        self._work_area(wanted)
+                    self._custom_work_monitors.add(mon)
+                elif mon in self._custom_work_monitors:
+                    if work != wanted:
+                        self._work_area(wanted)
+                    self._custom_work_monitors.discard(mon)
+            else:
+                if work != wanted:
+                    self._work_area(wanted)
 
     def peek(self, on: bool) -> None:
         """Mostra a barra do Windows por um tempo (ex.: para usar um ícone da bandeja) e esconde de novo."""
         if not self.hidden:
             return
         self.peeking = on
-        for hwnd in self._windows():
+        self._bars = self._windows()
+        for hwnd in self._bars:
             self._show(hwnd, SW_SHOW if on else SW_HIDE)
 
-    def reassert(self) -> None:
+    def reassert(self, refresh: bool = False) -> None:
         """O Explorer às vezes mostra a barra de novo (ex.: ao reiniciar): esconde outra vez."""
         if not self.hidden or self.peeking:
             return
-        for hwnd in self._windows():
+        self._reassert_ticks += 1
+        if (
+            refresh
+            or not self._bars
+            or self._reassert_ticks >= 20
+            or any(not self._is_window(h) for h in self._bars)
+        ):
+            self._bars = self._windows()
+            self._reassert_ticks = 0
+        for hwnd in self._bars:
             if self._visible(hwnd):
                 self._show(hwnd, SW_HIDE)
-        self.apply_work_areas()
 
     def restore(self) -> None:
         saved = self._saved
-        if not saved and self.marker.exists():  # o Ventude anterior fechou sem restaurar
+        saved_state = self._saved_appbar_state
+        autohide_changed = self._autohide_changed
+        custom_work = set(self._custom_work_monitors)
+        if not saved and not autohide_changed and self.marker.exists():  # fechou sem restaurar
             try:
-                saved = [(tuple(m), tuple(w)) for m, w in json.loads(self.marker.read_text(encoding="utf-8"))]
+                raw = json.loads(self.marker.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    saved = [(tuple(m), tuple(w)) for m, w in raw.get("work_areas", [])]
+                    raw_state = raw.get("appbar_state")
+                    saved_state = int(raw_state) if raw_state is not None else None
+                    autohide_changed = bool(raw.get("autohide_changed", False))
+                elif isinstance(raw, list):
+                    saved = [(tuple(m), tuple(w)) for m, w in raw]
             except (OSError, ValueError, TypeError):
                 saved = []
+        if autohide_changed and saved_state is not None:
+            try:
+                self._appbar_set(saved_state)
+            except OSError:
+                log.exception("Não deu para restaurar o estado da barra do Windows")
         for hwnd in self._windows():
             try:
                 self._show(hwnd, SW_SHOW)
             except OSError:
                 log.exception("Não deu para mostrar a barra %s", hwnd)
-        current = {mon for mon, _work in self._screens()}
-        for mon, work in saved:
-            if tuple(mon) in current:
-                self._work_area(tuple(work))  # type: ignore[arg-type]
+        if (not autohide_changed) or custom_work:
+            current = {mon for mon, _work in self._screens()}
+            for mon, work in saved:
+                m_t = tuple(mon)
+                if m_t in current:
+                    self._work_area(tuple(work))  # type: ignore[arg-type]
         self.marker.unlink(missing_ok=True)
         self._saved = []
+        self._bars = []
+        self._reassert_ticks = 0
+        self._saved_appbar_state = None
+        self._autohide_changed = False
+        self._autohide_active = False
+        self._custom_work_monitors.clear()
         self.hidden = False
         self.peeking = False
 

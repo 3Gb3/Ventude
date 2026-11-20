@@ -89,8 +89,8 @@ class ShellController(QObject):
         self._wanted = False
         self._busy = False
         self._hover_target: tuple[Dock, TaskItem, QRect] | None = None
-        self._last_inside = time.monotonic()
-        self._edge_revealed = False
+        self._last_inside: dict[int, float] = {}
+        self._edge_revealed: dict[int, bool] = {}
         self._peeking = False
         self.network = ""
         self.wifi = ""
@@ -101,7 +101,7 @@ class ShellController(QObject):
         self.windows_timer.timeout.connect(self.refresh_windows)
         self.dodge_timer = QTimer(self, interval=DODGE_MS)
         self.dodge_timer.timeout.connect(self._check_dodge)
-        self.reassert_timer = QTimer(self, interval=2000)
+        self.reassert_timer = QTimer(self, interval=150)
         self.reassert_timer.timeout.connect(self.hider.reassert)
         self.status_timer = QTimer(self, interval=STATUS_MS)
         self.status_timer.timeout.connect(self.update_status)
@@ -144,10 +144,14 @@ class ShellController(QObject):
             self.failed = False
             self._wanted = wanted
         if wanted and not self.failed:
+            self.seed_taskbar_pins()
             self._ensure_docks()
             self._sync_events(True)
             if not self.hider.hidden:
-                if not self.hider.hide():
+                if self.hider.hide():
+                    QTimer.singleShot(150, lambda: self.hider.reassert(refresh=True))
+                    QTimer.singleShot(500, lambda: self.hider.reassert(refresh=True))
+                else:
                     log.warning("Barra do Windows não encontrada: a Doca do Ventude aparece mesmo assim")
             else:
                 self.hider.apply_work_areas()
@@ -258,6 +262,7 @@ class ShellController(QObject):
         if self.taskbar_wanted and not self.failed:
             self._ensure_docks()
             self.hider.apply_work_areas()
+            self.hider.reassert(refresh=True)
             for dock in self.docks:
                 dock.place()
         self.sync_echos()
@@ -803,7 +808,13 @@ class ShellController(QObject):
         pos = QCursor.pos()
         now = time.monotonic()
 
+        active_ids = {id(d) for d in self.docks}
+        for stale in set(self._last_inside) - active_ids:
+            self._last_inside.pop(stale, None)
+            self._edge_revealed.pop(stale, None)
+
         for dock in self.docks:
+            dock_id = id(dock)
             mon_phys = physical_rect(dock.screen_)
             fullscreen = taskbar_service.covering_window(mon_phys, fullscreen_only=True)
             dock.fullscreen = fullscreen
@@ -812,17 +823,20 @@ class ShellController(QObject):
             at_edge = dock_model.edge_reveal(pos.x(), pos.y(), screen_rect)
             inside = dock.isVisible() and not dock.slid and dock.geometry().contains(pos)
             if at_edge:
-                self._last_inside = now
-                self._edge_revealed = True
+                self._last_inside[dock_id] = now
+                self._edge_revealed[dock_id] = True
             elif inside or dock.menu_open or thumbs_open or dock.dragging:
-                self._last_inside = now
+                self._last_inside[dock_id] = now
 
+            last_inside = self._last_inside.get(dock_id, now - 10.0)
+            edge_revealed = self._edge_revealed.get(dock_id, False)
             if mode == "oculta":
-                hover_reveal = at_edge or inside or (now - self._last_inside <= 0.8)
+                hover_reveal = at_edge or inside or (now - last_inside <= 0.8)
             else:
-                if self._edge_revealed and not (at_edge or inside or now - self._last_inside <= 0.8):
-                    self._edge_revealed = False
-                hover_reveal = self._edge_revealed
+                if edge_revealed and not (at_edge or inside or now - last_inside <= 0.8):
+                    self._edge_revealed[dock_id] = False
+                    edge_revealed = False
+                hover_reveal = edge_revealed
 
             ratio = dock.screen_.devicePixelRatio()  # type: ignore[attr-defined]
             cap = dock.capsule_rect_on_screen()

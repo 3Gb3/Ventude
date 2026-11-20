@@ -20,7 +20,7 @@ from ventude.services.caffeine import AWAKE, ES_CONTINUOUS, CaffeineService
 from ventude.services.hardware import Battery, Gpu, Snapshot
 from ventude.services.lyrics import Lyrics, LyricsService, from_json, parse_lrc
 from ventude.services.system import BLOCK, PASS, VK_LWIN, VK_S, WinKeyLogic
-from ventude.services.taskbar import SW_HIDE, SW_SHOW, TaskbarHider, WindowInfo, is_app_window
+from ventude.services.taskbar import ABS_AUTOHIDE, SW_HIDE, SW_SHOW, TaskbarHider, WindowInfo, is_app_window
 from ventude.services.winutil import app_name, lnk_target
 
 
@@ -468,6 +468,153 @@ def test_taskbar_hide_restore_and_crash_recovery(tmp_path):
     assert not hider.hidden
     no_bar = TaskbarHider(windows=lambda: [], show=lambda h, c: None, screens=lambda: [], marker=marker)
     assert not no_bar.hide() and not no_bar.hidden
+
+
+def test_taskbar_hider_autohide_multimonitor_and_no_reassert_workarea_loop(tmp_path):
+    import json
+
+    monitors = [
+        ((0, 0, 1920, 1080), (0, 0, 1920, 1032)),
+        ((1920, 0, 3286, 768), (1920, 0, 3286, 720)),
+        ((-1024, 0, 0, 768), (-1024, 0, 0, 720)),
+    ]
+    bars = [11, 22, 33]
+    visible = {11: True, 22: True, 33: True}
+    valid = {11: True, 22: True, 33: True}
+    shown: list[tuple[int, int]] = []
+    areas: list[tuple[int, int, int, int]] = []
+    appbar_calls: list[int] = []
+    appbar_state = [0]
+
+    def fake_show(hwnd: int, cmd: int) -> None:
+        shown.append((hwnd, cmd))
+        visible[hwnd] = cmd != SW_HIDE
+
+    def fake_work_area(rect: tuple[int, int, int, int]) -> bool:
+        areas.append(rect)
+        return True
+
+    def fake_appbar_set(state: int) -> bool:
+        appbar_calls.append(state)
+        appbar_state[0] = state
+        return True
+
+    marker = tmp_path / "barra.json"
+    hider = TaskbarHider(
+        windows=lambda: list(bars),
+        show=fake_show,
+        screens=lambda: list(monitors),
+        work_area=fake_work_area,
+        marker=marker,
+        appbar_get=lambda: appbar_state[0],
+        appbar_set=fake_appbar_set,
+        is_visible=lambda h: visible.get(h, False),
+        is_window=lambda h: valid.get(h, False),
+    )
+
+    # 1-2. hide() ativa ABS_AUTOHIDE uma vez, esconde todas as barras e não altera work_area em "esquivar"
+    assert hider.hide() and hider.hidden
+    assert appbar_calls == [ABS_AUTOHIDE]
+    assert shown == [(11, SW_HIDE), (22, SW_HIDE), (33, SW_HIDE)]
+    assert areas == []
+
+    # 3. reassert() quando a barra secundária 22 reaparece só esconde a 22 e nunca chama work_area/appbar_set
+    shown.clear()
+    appbar_calls.clear()
+    visible[22] = True
+    for _ in range(5):
+        hider.reassert()
+    assert shown == [(22, SW_HIDE)]
+    assert areas == []
+    assert appbar_calls == []
+
+    # 4. Quando um HWND em cache deixa de existir, reassert() renumera windows() e esconde o novo handle
+    shown.clear()
+    valid[22] = False
+    bars[:] = [11, 33, 44]
+    visible[44] = True
+    valid[44] = True
+    hider.reassert()
+    assert shown == [(44, SW_HIDE)]
+
+    # 5. Trocar para "sempre" (reserve=64) aplica work_area uma vez por monitor; voltar para 0 reseta uma vez
+    areas.clear()
+    hider.reserve = lambda _m: 64
+    hider.apply_work_areas()
+    assert areas == [
+        (0, 0, 1920, 1016),
+        (1920, 0, 3286, 704),
+        (-1024, 0, 0, 704),
+    ]
+    areas.clear()
+    hider.reserve = lambda _m: 0
+    hider.apply_work_areas()
+    assert areas == [
+        (0, 0, 1920, 1080),
+        (1920, 0, 3286, 768),
+        (-1024, 0, 0, 768),
+    ]
+    areas.clear()
+    hider.apply_work_areas()
+    assert areas == []
+
+    # 6. Recuperação após queda a partir do marcador v2 restaura appbar_state=0 e reexibe as barras
+    bars[:] = [11, 22, 33]
+    for h in bars:
+        visible[h] = False
+        valid[h] = True
+    shown.clear()
+    appbar_calls.clear()
+    crashed = TaskbarHider(
+        windows=lambda: list(bars),
+        show=fake_show,
+        screens=lambda: list(monitors),
+        work_area=fake_work_area,
+        marker=marker,
+        appbar_get=lambda: appbar_state[0],
+        appbar_set=fake_appbar_set,
+    )
+    assert crashed.recover()
+    assert appbar_calls == [0]
+    assert shown == [(11, SW_SHOW), (22, SW_SHOW), (33, SW_SHOW)]
+    assert not marker.exists()
+
+    # 7. Recuperação retrocompatível com marcador v1 em lista restaura área útil e mostra barras
+    legacy_marker = tmp_path / "barra-v1.json"
+    legacy_marker.write_text(json.dumps([[(0, 0, 1920, 1080), (0, 0, 1920, 1032)]]), encoding="utf-8")
+    areas.clear()
+    shown.clear()
+    monitors_v1 = [((0, 0, 1920, 1080), (0, 0, 1920, 1080))]
+    legacy = TaskbarHider(
+        windows=lambda: [11],
+        show=fake_show,
+        screens=lambda: monitors_v1,
+        work_area=fake_work_area,
+        marker=legacy_marker,
+        appbar_get=lambda: 0,
+        appbar_set=fake_appbar_set,
+    )
+    assert legacy.recover()
+    assert shown == [(11, SW_SHOW)] and areas == [(0, 0, 1920, 1032)] and not legacy_marker.exists()
+
+    # 8. Se ABS_AUTOHIDE já estava ligado no Windows, hide() e restore() preservam o ajuste do usuário
+    appbar_state[0] = ABS_AUTOHIDE
+    appbar_calls.clear()
+    shown.clear()
+    areas.clear()
+    preset = TaskbarHider(
+        windows=lambda: [11, 22, 33],
+        show=fake_show,
+        screens=lambda: list(monitors),
+        work_area=fake_work_area,
+        marker=tmp_path / "barra-preset.json",
+        appbar_get=lambda: appbar_state[0],
+        appbar_set=fake_appbar_set,
+    )
+    assert preset.hide()
+    assert appbar_calls == []
+    preset.restore()
+    assert appbar_calls == [] and appbar_state[0] == ABS_AUTOHIDE
 
 
 def test_app_window_rules_and_dock_grouping():
