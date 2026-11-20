@@ -75,7 +75,8 @@ def parse_user(data: Any) -> tuple[list[Window], str]:
             if left is None:
                 continue
             detail = f"{remaining:.0f} de {total:.0f} restantes" if total and remaining is not None else ""
-            windows.append(Window(key, label, round(max(0.0, min(100.0, 100 - left)), 1), reset, detail))
+            used = round(max(0.0, min(100.0, 100 - left)), 1)
+            windows.append(Window(key, label, used, reset, detail, period=30 * 86400))
     monthly, left_quota = data.get("monthly_quotas"), data.get("limited_user_quotas")
     if not windows and isinstance(monthly, dict) and isinstance(left_quota, dict):  # plano Free
         for name in ("chat", "completions"):
@@ -84,7 +85,8 @@ def parse_user(data: Any) -> tuple[list[Window], str]:
                 continue
             key, label = QUOTAS[name]
             used = round(max(0.0, min(100.0, (total - remaining) / total * 100)), 1)
-            windows.append(Window(key, label, used, reset, f"{remaining:.0f} de {total:.0f} restantes"))
+            detail = f"{remaining:.0f} de {total:.0f} restantes"
+            windows.append(Window(key, label, used, reset, detail, period=30 * 86400))
     plan = str(data.get("copilot_plan") or data.get("access_type_sku") or "")
     return windows, PLANS.get(plan.lower(), plan.replace("_", " ").title())
 

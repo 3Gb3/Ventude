@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS list_items (
     position INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS secrets (name TEXT PRIMARY KEY, blob BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS usage_samples (
+    provider TEXT NOT NULL, key TEXT NOT NULL, ts REAL NOT NULL, used REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS usage_samples_idx ON usage_samples(provider, key, ts);
 """
 
 
@@ -215,6 +218,24 @@ class Store:
 
     def cache_clear(self, prefix: str = "") -> None:
         self._exec("DELETE FROM cache WHERE key LIKE ?", (prefix + "%",))
+
+    # ---------- histórico de uso das IAs ----------
+    def add_sample(self, provider: str, key: str, ts: float, used: float) -> None:
+        self._exec(
+            "INSERT INTO usage_samples(provider, key, ts, used) VALUES(?,?,?,?)", (provider, key, ts, used)
+        )
+
+    def samples(self, provider: str, key: str, since: float) -> list[tuple[float, float]]:
+        return [
+            (float(ts), float(used))
+            for ts, used in self._all(
+                "SELECT ts, used FROM usage_samples WHERE provider=? AND key=? AND ts>=? ORDER BY ts",
+                (provider, key, since),
+            )
+        ]
+
+    def prune_samples(self, before: float) -> None:
+        self._exec("DELETE FROM usage_samples WHERE ts<?", (before,))
 
     # ---------- segredos ----------
     def secret(self, name: str) -> str:

@@ -453,3 +453,37 @@ def test_agenda_reminders(store):
     reminders.check(now + timedelta(minutes=7))
     assert seen == [("Reunião", 10), ("Reunião", 5)]
     assert event.start is not None
+
+
+def test_detect_installed_tools_turns_them_on(qapp, store, home, monkeypatch):
+    from ventude.limits import detect
+    from ventude.ui.context import AppContext
+
+    now = time.time()
+    fetchers = {
+        p: (lambda c, p=p: Report(p, "ok", [Window("session", "Sessão", 10, now + 3600)]))
+        for p in ("claude", "antigravity", "grok", "codex", "cursor")
+    }
+    ctx = AppContext(store, Tasks(), media=MediaService(), fetchers=fetchers, home=home)
+    monkeypatch.setattr(detect, "installed", lambda _home: ["codex", "cursor", "copilot"])
+    found = []
+    ctx.detect_providers(found.extend)
+    end = time.monotonic() + 3
+    while not found and time.monotonic() < end:
+        qapp.processEvents()
+    assert found == ["codex", "cursor"]  # o Copilot nem existe neste app de teste
+    assert ctx.settings.codex_mode == "auto" and ctx.settings.cursor_mode == "auto"
+    assert ctx.settings.ring_enabled("codex") and not ctx.settings.ring_enabled("cursor")  # até 4 anéis
+    ctx.tasks.shutdown()
+
+
+def test_limits_card_shows_pace_and_history(qapp, island, app_ctx, store):
+    now = time.time()
+    for minutes, used in ((240, 5.0), (120, 30.0), (10, 55.0)):
+        store.add_sample("claude", "session", now - minutes * 60, used)
+    app_ctx.limits.refresh_all()
+    settle(qapp, 400)
+    island.expand("limits")
+    settle(qapp, 300)
+    card = island.panel.pages["limits"].cards["claude"]
+    assert card.spark.isVisibleTo(card)

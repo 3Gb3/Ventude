@@ -147,7 +147,7 @@ def parse_rate(data: Any, key: str, label: str, now: float | None = None) -> Win
         detail = f"{remaining / max(total, 1) * 100:.0f}% dos tokens restantes"
     if window:
         detail += f" · janela de {_hours(window)}"
-    return Window(f"mode:{key}", label, round(used, 1), now + wait if wait else None, detail)
+    return Window(f"mode:{key}", label, round(used, 1), now + wait if wait else None, detail, period=window)
 
 
 def _web_error(exc: net.NetError) -> ProviderError:

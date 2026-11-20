@@ -273,13 +273,22 @@ class UsageBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(50)
         self._label, self._sub, self._color = "", "", theme.ACCENT
+        self._note = ""  # aviso em destaque depois do subtexto (ex.: ritmo alto)
         self._used: float | None = None
         self._dim = False
 
     def set_data(
-        self, label_text: str, used: float | None, color: str, sub: str = "", tip: str = "", dim: bool = False
+        self,
+        label_text: str,
+        used: float | None,
+        color: str,
+        sub: str = "",
+        tip: str = "",
+        dim: bool = False,
+        note: str = "",
     ) -> None:
         self._label, self._used, self._color, self._sub, self._dim = label_text, used, color, sub, dim
+        self._note = note
         self.setToolTip(tip)
         self.update()
 
@@ -311,8 +320,16 @@ class UsageBar(QWidget):
         if self._sub:
             p.setFont(theme.font(11))
             p.setPen(theme.color(theme.MUTED))
-            sub = p.fontMetrics().elidedText(self._sub, Qt.TextElideMode.ElideRight, w)
+            fm = p.fontMetrics()
+            note = f" · {self._note}" if self._note else ""
+            note_w = min(fm.horizontalAdvance(note), int(w * 0.62)) if note else 0
+            sub = fm.elidedText(self._sub, Qt.TextElideMode.ElideRight, w - note_w)
             p.drawText(QRectF(0, 34, w, 16), Qt.AlignmentFlag.AlignVCenter, sub)
+            if note:
+                p.setPen(theme.color(theme.WARN))
+                x = fm.horizontalAdvance(sub)
+                text = fm.elidedText(note, Qt.TextElideMode.ElideRight, int(w - x))
+                p.drawText(QRectF(x, 34, w - x, 16), Qt.AlignmentFlag.AlignVCenter, text)
 
 
 class Sparkline(QWidget):
@@ -321,9 +338,11 @@ class Sparkline(QWidget):
         self.setFixedSize(96, 30)
         self._values: list[float] = []
         self._color = theme.UP
+        self._bounds: tuple[float, float] | None = None
 
-    def set_values(self, values: list[float], color: str) -> None:
-        self._values, self._color = list(values), color
+    def set_values(self, values: list[float], color: str, bounds: tuple[float, float] | None = None) -> None:
+        """bounds fixa a escala (ex.: 0–100 para porcentagem); sem ela, usa o mínimo e o máximo."""
+        self._values, self._color, self._bounds = list(values), color, bounds
         self.update()
 
     def paintEvent(self, _event: object) -> None:
@@ -331,7 +350,7 @@ class Sparkline(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        lo, hi = min(self._values), max(self._values)
+        lo, hi = self._bounds or (min(self._values), max(self._values))
         span = (hi - lo) or 1.0
         r = QRectF(self.rect()).adjusted(1.5, 3, -1.5, -3)
         step = r.width() / (len(self._values) - 1)

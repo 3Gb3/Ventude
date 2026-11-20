@@ -85,7 +85,7 @@ def parse_usage(data: Any, now: float | None = None) -> tuple[list[Window], str]
         key, label = _window_name(seconds)
         if any(w.key == key for w in windows):
             key = f"{key}_{name}"
-        windows.append(Window(key, label, round(max(0.0, min(100.0, used)), 1), reset))
+        windows.append(Window(key, label, round(max(0.0, min(100.0, used)), 1), reset, period=seconds))
     plan = str(find_key(data, "plan_type") or "")
     return windows, PLANS.get(plan.lower(), plan.capitalize())
 

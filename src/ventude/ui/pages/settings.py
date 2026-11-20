@@ -417,6 +417,12 @@ class SettingsPage(Page):
         )
         self.providers = ProviderTable(ctx)
         body.addWidget(self.providers)
+        detect = QPushButton(" Detectar IAs instaladas")
+        detect.setIcon(icons.icon("search", theme.TEXT, 15))
+        detect.setCursor(Qt.CursorShape.PointingHandCursor)
+        detect.clicked.connect(self._detect)
+        self.detect_status = label("", "Faint")
+        body.addLayout(hbox(detect, self.detect_status, None, spacing=10))
         self.rings = self._switch(s.pill_rings, "pill_rings")
         body.addWidget(
             setting_row("Anéis na ilha", "Liga ou desliga todos os anéis da ilha fechada.", self.rings)
@@ -611,6 +617,15 @@ class SettingsPage(Page):
             )
         )
         return card
+
+    def _detect(self) -> None:
+        self.detect_status.setText("Procurando o Codex, o Cursor e o Copilot neste PC…")
+
+        def done(found: list[str]) -> None:
+            names = ", ".join(PROVIDERS.get(p, p) for p in found)
+            self.detect_status.setText(f"Ligado: {names}." if found else "Nenhuma IA nova encontrada.")
+
+        self.ctx.detect_providers(done)
 
     def _sync_providers(self, settings: Settings) -> None:
         """Seções só das IAs ligadas e combos de fonte iguais à tabela."""

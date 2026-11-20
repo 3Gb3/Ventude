@@ -25,6 +25,7 @@ class Window:
     resets_at: float | None = None  # epoch (s)
     detail: str = ""
     group: str = ""  # Antigravity: família do modelo (Gemini, Claude, GPT, Outros)
+    period: float | None = None  # duração da janela em segundos (5h, 7 dias...), se conhecida
 
     def used_at(self, now: float | None = None) -> float | None:
         """Uso considerando renovações que já passaram desde a última leitura."""
@@ -34,6 +35,33 @@ class Window:
         if self.used is None:
             return None
         return max(0.0, min(100.0, self.used))
+
+    def exhausts_in(
+        self, now: float | None = None, history: list[tuple[float, float]] | None = None
+    ) -> float | None:
+        """Segundos até chegar a 100% no ritmo atual, se isso acontecer antes de renovar."""
+        now = time.time() if now is None else now
+        used = self.used_at(now)
+        if used is None or used < 5 or used >= 100:
+            return None
+        left = (self.resets_at - now) if self.resets_at else None
+        if left is not None and left <= 0:
+            return None
+        rate = None  # % por segundo
+        if self.period and left is not None:
+            elapsed = self.period - left
+            if elapsed >= max(600.0, self.period * 0.05):
+                rate = used / elapsed
+        if rate is None and history:
+            recent = [(t, u) for t, u in history if now - t <= 3600]
+            if len(recent) >= 2 and recent[-1][0] - recent[0][0] >= 600 and recent[-1][1] > recent[0][1]:
+                rate = (recent[-1][1] - recent[0][1]) / (recent[-1][0] - recent[0][0])
+        if not rate or rate <= 0:
+            return None
+        seconds = (100 - used) / rate
+        if left is not None and seconds >= left:
+            return None
+        return seconds if left is not None or seconds < 6 * 3600 else None
 
 
 @dataclass

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from ventude.core.timefmt import ago, resets_text
+from ventude.core.timefmt import ago, duration, resets_text
 from ventude.limits.model import Report, Window
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
 from ventude.ui.pages.base import Page, scroller
-from ventude.ui.widgets import Badge, Card, IconButton, UsageBar, hbox, label, repolish
+from ventude.ui.widgets import Badge, Card, IconButton, Sparkline, UsageBar, hbox, label, repolish
 
 HOW_TO = {
     "claude": "Usa o Claude Desktop ou o site? Cole a sessionKey do claude.ai em Ajustes "
@@ -67,6 +67,13 @@ class ProviderCard(Card):
         self.body.addLayout(hbox(dot, self.name, self.plan, None, self.refresh_btn, spacing=8))
         self.source = label("", "Faint")
         self.body.addWidget(self.source)
+        self.spark = Sparkline()
+        self.spark.setFixedHeight(26)
+        self.spark.setMinimumWidth(60)
+        self.spark.setMaximumWidth(16_777_215)
+        self.spark.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.spark.hide()
+        self.body.addWidget(self.spark)
         self.bars_box = QWidget()
         self.bars = QVBoxLayout(self.bars_box)
         self.bars.setContentsMargins(0, 2, 2, 0)
@@ -93,6 +100,7 @@ class ProviderCard(Card):
         self.refresh_btn.setToolTip("Consultando…" if busy else "Atualizar agora")
         self.source.setText(self._source_text(report, busy))
         self._fill_bars(report)
+        self._fill_spark(report)
         self._message(report)
 
     @staticmethod
@@ -148,9 +156,30 @@ class ProviderCard(Card):
             row.set_pin(state)
         self.scroll.setVisible(bool(windows))
 
+    def _fill_spark(self, report: Report) -> None:
+        """Curva do uso do limite que está no anel: o dia, ou a janela inteira se for maior."""
+        head = self.ctx.limits.headline(report)
+        if head is None or report.state not in ("ok", "stale"):
+            self.spark.hide()
+            return
+        span = max(86400.0, min(head.period or 0, 7 * 86400))
+        points = self.ctx.limits.history(self.provider, head.key, span)
+        values = [used for _, used in points]
+        self.spark.setVisible(len(values) >= 3)
+        if len(values) >= 3:
+            self.spark.set_values(values, theme.provider_color(self.provider), (0.0, 100.0))
+            hours = span / 3600
+            when = f"{hours:.0f} h" if hours <= 24 else f"{hours / 24:.0f} dias"
+            self.spark.setToolTip(f"Uso de {head.label} nas últimas {when}")
+
     def _fill_row(self, row: LimitRow, report: Report, window: Window) -> None:
         used = window.used_at()
         sub = resets_text(window.resets_at)
+        note = ""
+        if report.state == "ok":
+            history = self.ctx.limits.history(self.provider, window.key, 3600) if not window.period else None
+            left = window.exhausts_in(history=history)
+            note = f"ritmo alto: acaba em ~{duration(left)}" if left else ""
         if window.detail and window.key.startswith(("mode:", "credits")):
             sub = f"{sub} · {window.detail}" if sub else window.detail
         tip = window.detail if window.key.startswith("model:") else ""
@@ -161,6 +190,7 @@ class ProviderCard(Card):
             sub or "Sem data de renovação",
             tip,
             dim=report.state != "ok",
+            note=note,
         )
 
     def _toggle_pin(self, key: str) -> None:

@@ -238,7 +238,8 @@ def parse_usage(data: Any) -> list[Window]:
             continue
         if key.startswith("weekly_") and used <= 0 and not resets:
             continue  # janela por modelo sem uso nenhum: só polui a tela
-        windows.append(Window(key, label, used, resets))
+        period = 5 * 3600 if key == "session" else 7 * 86400
+        windows.append(Window(key, label, used, resets, period=period))
     extra = data.get("extra_usage")
     if isinstance(extra, dict) and extra.get("is_enabled"):
         used = as_float(extra.get("utilization"))

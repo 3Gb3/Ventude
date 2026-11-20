@@ -67,6 +67,32 @@ class AppContext(QObject):
         self.weather_timer.start()
         QTimer.singleShot(1200, self.refresh_weather)
         self.reminders.start()
+        if self.settings.layout_version < 4:  # primeira abertura da 1.2: liga as IAs já instaladas
+            self.detect_providers(lambda _found: self.update_settings(layout_version=4))
+
+    # ---------- IAs instaladas ----------
+    def detect_providers(self, done: Callable[[list[str]], None] | None = None) -> None:
+        """Liga Codex, Cursor e Copilot que tiverem login neste PC (e dá anel se couber)."""
+        from ventude.limits import detect
+
+        def apply(found: list[str]) -> None:
+            settings = self.settings
+            new = [p for p in found if p in self.limits.providers() and settings.provider_mode(p) == "off"]
+            changes: dict[str, object] = {f"{p}_mode": "auto" for p in new}
+            rings = settings.ring_providers
+            for provider in new:
+                current = settings.copy(ring_providers=rings, **changes)
+                if sum(current.ring_enabled(p) for p in self.limits.providers()) < 4:
+                    rings = current.with_ring(provider, True)
+            if new:
+                changes["ring_providers"] = rings
+                self.update_settings(**changes)
+                for provider in new:
+                    self.limits.refresh(provider, force=True)
+            if done:
+                done(new)
+
+        self.run(detect.installed, self.limits.home, done=apply, owner=self)
 
     # ---------- clima (um só lugar para a ilha, o Início e a aba Clima) ----------
     def refresh_weather(self, force: bool = False) -> None:

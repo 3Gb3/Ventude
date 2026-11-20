@@ -113,6 +113,8 @@ def parse_summary(data: Any) -> list[Window]:
     if not isinstance(data, dict):
         return []
     reset = parse_instant(data.get("billingCycleEnd"))
+    start = parse_instant(data.get("billingCycleStart"))
+    period = reset - start if reset and start and reset > start else 30 * 86400
     individual = data.get("individualUsage") if isinstance(data.get("individualUsage"), dict) else {}
     windows = []
     for name, key, label in (
@@ -126,7 +128,8 @@ def parse_summary(data: Any) -> list[Window]:
         if used is None or not limit:
             continue
         detail = f"{_money(used)} de {_money(limit)}"
-        windows.append(Window(key, label, round(max(0.0, min(100.0, used / limit * 100)), 1), reset, detail))
+        used_pct = round(max(0.0, min(100.0, used / limit * 100)), 1)
+        windows.append(Window(key, label, used_pct, reset, detail, period=period))
     return windows
 
 
@@ -151,9 +154,8 @@ def parse_requests(data: Any) -> list[Window]:
             continue
         label = f"{model} · requisições" if model != "gpt-4" else "Requisições rápidas"
         detail = f"{used:.0f} de {limit:.0f} no mês"
-        windows.append(
-            Window(f"requests:{model}", label, round(min(100.0, used / limit * 100), 1), reset, detail)
-        )
+        used_pct = round(min(100.0, used / limit * 100), 1)
+        windows.append(Window(f"requests:{model}", label, used_pct, reset, detail, period=30 * 86400))
     return windows
 
 

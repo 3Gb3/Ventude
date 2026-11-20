@@ -33,6 +33,8 @@ LOCAL_INTERVAL = {"antigravity": 120}  # consulta local, barata
 IDLE_LOCAL_INTERVAL = 240  # app local fechado: procura com menos frequência
 CACHE_TTL = 30 * 86400
 THRESHOLDS = (80, 95)
+SAMPLE_EVERY = 240  # s
+HISTORY_DAYS = 8
 
 
 class LimitsManager(QObject):
@@ -57,6 +59,8 @@ class LimitsManager(QObject):
         self._last_attempt: dict[str, float] = {}
         self._busy: set[str] = set()
         self._notified: set[tuple[str, str, float]] = set()
+        self._sampled: dict[tuple[str, str], tuple[float, float]] = {}
+        self._pruned = 0.0
         now = time.time()
         for provider in self.fetchers:
             cached = store.cache_get(f"limits:{provider}", allow_expired=True)
@@ -187,9 +191,31 @@ class LimitsManager(QObject):
         self.reports[provider] = report
         if report.state == "ok":
             self._threshold_alerts(old, report)
+            self._sample(report)
         if report.windows or report.state in ("setup", "error"):
             self.store.cache_set(f"limits:{provider}", report.to_dict(), CACHE_TTL)
         self.changed.emit(provider)
+
+    # ---------- histórico ----------
+    def _sample(self, report: Report) -> None:
+        """Guarda o uso de cada janela (no máximo a cada 4 min, ou quando muda) para o gráfico."""
+        now = time.time()
+        for window in report.windows:
+            used = window.used_at(now)
+            if used is None:
+                continue
+            key = (report.provider, window.key)
+            last = self._sampled.get(key)
+            if last and now - last[0] < SAMPLE_EVERY and abs(last[1] - used) < 0.5:
+                continue
+            self._sampled[key] = (now, used)
+            self.store.add_sample(report.provider, window.key, now, used)
+        if now - self._pruned > 3600:
+            self._pruned = now
+            self.store.prune_samples(now - HISTORY_DAYS * 86400)
+
+    def history(self, provider: str, key: str, seconds: float) -> list[tuple[float, float]]:
+        return self.store.samples(provider, key, time.time() - seconds)
 
     # ---------- avisos ----------
     def _notify(self, provider: str, title: str, message: str) -> None:

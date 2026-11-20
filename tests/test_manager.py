@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from ventude.core.config import Settings
 from ventude.core.tasks import Tasks
 from ventude.limits.manager import LimitsManager
@@ -100,3 +102,34 @@ def test_mode_off_short_circuits(qapp, store, home):
     manager.tick()
     assert manager.report("claude").state == "off"
     assert manager.visible_reports() == []
+
+
+def test_window_exhausts_in_by_pace_and_history():
+    from ventude.limits.model import Window
+
+    now = 10_000_000.0
+    # sessão de 5h: 2h passadas, 60% usado -> 100% em ~1h20, antes de renovar (3h)
+    fast = Window("session", "Sessão", 60, now + 3 * 3600, period=5 * 3600)
+    assert fast.exhausts_in(now) == pytest.approx(80 * 60, rel=0.01)
+    calm = Window("session", "Sessão", 20, now + 3 * 3600, period=5 * 3600)
+    assert calm.exhausts_in(now) is None  # no ritmo, sobra cota
+    early = Window("session", "Sessão", 30, now + 5 * 3600 - 60, period=5 * 3600)
+    assert early.exhausts_in(now) is None  # começo da janela: cedo demais para prever
+    model = Window("model:x", "Gemini", 50, now + 4 * 3600)
+    history = [(now - 1800, 40.0), (now - 900, 45.0), (now, 50.0)]  # +10% em 30 min
+    assert model.exhausts_in(now, history) == pytest.approx(9000, rel=0.01)
+    assert model.exhausts_in(now, None) is None
+
+
+def test_manager_keeps_usage_history(qapp, store, home):
+    manager, fake, _alerts, _ = make(qapp, store, home)
+    fake.result = Report("claude", "ok", [Window("session", "Sessão", 10, time.time() + 3600)])
+    manager.refresh("claude", force=True)
+    wait(qapp, manager, "claude")
+    points = manager.history("claude", "session", 3600)
+    assert points and points[-1][1] == 10
+    manager.refresh("claude", force=True)  # mesma leitura logo depois: não repete a amostra
+    wait(qapp, manager, "claude")
+    assert len(manager.history("claude", "session", 3600)) == len(points)
+    store.prune_samples(time.time() + 1)
+    assert manager.history("claude", "session", 3600) == []
