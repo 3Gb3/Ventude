@@ -296,7 +296,7 @@ class Pill(QWidget):
         self.eq.setVisible(shown)
         self.eq.set_playing(playing)
         self.eq.set_dim(not playing)
-        self.date.setVisible(not shown)
+        self.date.setVisible(not shown and self.ctx.settings.pill_date)
         for index in self._gaps:  # com música, o título ocupa o espaço livre
             self.row.setStretch(index, 0 if shown else 1)
         if state:
@@ -382,7 +382,7 @@ class Pill(QWidget):
         if self.has_media:
             title = self.title.full_text()
             parts += [22, max(80, min(self._text_width(self.title, title), 250)), 14]
-        else:
+        elif self.ctx.settings.pill_date:
             parts.append(self._text_width(self.date))
         if not self.shelf_chip.isHidden():
             parts.append(14 + 3 + self._text_width(self.shelf_count))
@@ -584,6 +584,7 @@ class Panel(QWidget):
         header.addWidget(self.pin)
         header.addWidget(self.close_btn)
         root.addLayout(header)
+        self.shell_mode = False
         self.stack = QStackedWidget()
         body = QVBoxLayout()
         body.setContentsMargins(4, 0, 4, 0)
@@ -605,6 +606,13 @@ class Panel(QWidget):
         self._coffee_changed()
         self._power_changed(ctx.power.pending)
 
+    # ---------- Ventude Shell ----------
+    def set_shell_mode(self, on: bool) -> None:
+        """Com o Shell ligado, energia, cafeína, conta-gotas e OCR moram no Iniciar e no painel rápido."""
+        self.shell_mode = on
+        for button in (self.color_btn, self.ocr_btn, self.coffee_btn, self.power_btn):
+            button.setVisible(not on)
+
     # ---------- cafeína e energia ----------
     def _coffee_changed(self) -> None:
         on = self.ctx.caffeine.active
@@ -624,7 +632,7 @@ class Panel(QWidget):
         )
 
     def show_power(self) -> None:
-        self.power_menu = PowerMenu(self.ctx.power.available(), self)
+        self.power_menu = PowerMenu(self.ctx.power.available(), self, runner=self.ctx.request_power)
         self.power_menu.acted.connect(self._power_done)
         self.power_menu.popup_below(self.power_btn)
 
@@ -850,9 +858,7 @@ class Island(QWidget):
         ctx.audio.master_feedback.connect(self._volume_feedback)
         ctx.audio.mic_feedback.connect(self._mic_feedback)
         ctx.qr_requested.connect(self.show_qr)
-        self.keys = system.KeyboardHook()
-        self.keys.start_pressed.connect(lambda: self.open_start(toggle=True))
-        self.keys.search_pressed.connect(lambda: self.open_start())
+        ctx.tool_requested.connect(self.run_tool)
         self._metrics_changed(ctx.hardware.last)
 
     # ---------- Sistema (métricas fixadas), privacidade e cafeína na pílula ----------
@@ -914,8 +920,11 @@ class Island(QWidget):
         self.expand()
         self.panel.show_qr(text)
 
-    # ---------- Menu Iniciar / Busca Universal (tecla Windows) ----------
+    # ---------- Busca Universal (na ilha) e Ventude Shell ----------
     def open_start(self, toggle: bool = False, text: str = "") -> None:
+        """Busca dentro da ilha (sem o Shell). Com o Shell, a busca é a tela de Pesquisa."""
+        if self.ctx.open_search(text):
+            return
         if toggle and self.expanded and self.panel.command.isVisible():
             self.collapse()
             return
@@ -929,12 +938,20 @@ class Island(QWidget):
         force_foreground(int(self.winId()))
         self.panel.command.open_bar(text, start=True)
 
-    def _update_hook(self) -> None:
-        want = self.ctx.settings.replace_start_menu
-        if want and not self.keys.active:
-            self.keys.install()
-        elif not want and self.keys.active:
-            self.keys.remove()
+    def set_shell_mode(self, on: bool) -> None:
+        self.panel.set_shell_mode(on)
+
+    def _search_elsewhere(self, text: str = "") -> bool:
+        """No Shell, digitar na ilha (ou Ctrl + K) abre a Pesquisa do Ventude."""
+        if not self.panel.shell_mode or self.ctx.shell is None:
+            return False
+        self.collapse()
+        return self.ctx.open_search(text)
+
+    def show_shell_settings(self) -> None:
+        page = self.panel.pages.get("settings")
+        if page is not None and hasattr(page, "scroll_to_shell"):
+            page.scroll_to_shell()
 
     # ---------- clima na ilha ----------
     def _weather_done(self, forecast: Forecast | None) -> None:
@@ -1294,13 +1311,19 @@ class Island(QWidget):
             return
         ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if self.expanded and ctrl and event.key() == Qt.Key.Key_K:
-            self.panel.command.open_bar()
+            if not self._search_elsewhere():
+                self.panel.command.open_bar()
             return
         typed = event.text()
         plain = not (
             event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
         )
         if self.expanded and plain and typed and typed.isprintable() and not typed.isspace():
+            if self._focus_in_field():
+                super().keyPressEvent(event)
+                return
+            if not self.panel.command.isVisible() and self._search_elsewhere(typed):
+                return
             bar = self.panel.command
             if not bar.isVisible():
                 bar.open_bar(typed)  # começou a digitar: vira busca
@@ -1316,6 +1339,15 @@ class Island(QWidget):
             self.panel.select("settings")  # Ctrl + 0 ou Ctrl + , : Ajustes (a aba que passa da 9ª)
             return
         super().keyPressEvent(event)
+
+    def _focus_in_field(self) -> bool:
+        """Digitando num campo de uma aba (ex.: nova tarefa): o texto fica lá."""
+        focus = QApplication.focusWidget()
+        return (
+            isinstance(focus, QLineEdit | QPlainTextEdit)
+            and focus is not self.panel.command.input
+            and self.isAncestorOf(focus)
+        )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.MiddleButton and not self.expanded and self.pill.has_media:
@@ -1604,7 +1636,7 @@ class Island(QWidget):
         self._weather_done(self.ctx.forecast)
         self._tick()
         self._update_hotkey()
-        self._update_hook()
+        self.pill.set_media(self.pill.media)  # data na ilha (ajuste)
         self._metrics_changed()
         self._privacy_changed()
         if not self._dragging and self.anim.state() != QPropertyAnimation.State.Running:
@@ -1638,10 +1670,11 @@ class Island(QWidget):
     def showEvent(self, event: object) -> None:
         super().showEvent(event)
         self._update_hotkey()
-        self._update_hook()
 
     def nativeEvent(self, event_type: object, message: object) -> tuple[bool, int]:  # noqa: N802
         if self._hotkey and system.is_hotkey_message(message):
+            if self.panel.shell_mode and self.ctx.settings.hotkey_command and self.ctx.open_search():
+                return True, 0  # no Shell, o atalho abre a Pesquisa
             opening = not self.expanded
             self.toggle()
             if opening and self.expanded and self.ctx.settings.hotkey_command:

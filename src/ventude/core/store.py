@@ -47,7 +47,20 @@ CREATE INDEX IF NOT EXISTS usage_samples_idx ON usage_samples(provider, key, ts)
 CREATE TABLE IF NOT EXISTS shelf_pins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL, value TEXT NOT NULL UNIQUE, name TEXT NOT NULL, added REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS pins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    place TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL,
+    target TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(place, target));
+CREATE TABLE IF NOT EXISTS launches (
+    target TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, ts REAL NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1);
 """
+PIN_PLACES = ("taskbar", "start")
+MAX_LAUNCHES = 60
 
 
 LEGACY_FILES = ("calendar.db", "lists.db", "cache.db", "assistant.db", "credentials.bin")
@@ -60,6 +73,29 @@ class Shortcut:
     label: str
     target: str
     position: int
+
+
+@dataclass(frozen=True)
+class Pin:
+    """App, pasta, arquivo, site ou página de configuração fixado na barra de tarefas ou no Iniciar."""
+
+    id: int
+    place: str  # taskbar | start
+    kind: str  # app | uwp | folder | file | url | system
+    label: str
+    target: str  # caminho, AppID da Loja, link ou ms-settings:
+    position: int
+
+
+@dataclass(frozen=True)
+class Launch:
+    """Algo aberto pela busca ou pelo Iniciar ("Pesquisas recentes")."""
+
+    target: str
+    kind: str
+    label: str
+    ts: float
+    count: int
 
 
 @dataclass(frozen=True)
@@ -309,6 +345,86 @@ class Store:
     def reorder_shortcuts(self, ids: list[int]) -> None:
         with self._lock, self._db:
             self._db.executemany("UPDATE shortcuts SET position=? WHERE id=?", list(enumerate(ids)))
+
+    # ---------- fixados na barra de tarefas e no Iniciar (2.0) ----------
+    def pins(self, place: str) -> list[Pin]:
+        return [
+            Pin(*r)
+            for r in self._all(
+                "SELECT id, place, kind, label, target, position FROM pins "
+                "WHERE place=? ORDER BY position, id",
+                (place,),
+            )
+        ]
+
+    def pinned(self, place: str, target: str) -> Pin | None:
+        key = target.strip().lower()
+        return next((p for p in self.pins(place) if p.target.lower() == key), None)
+
+    def add_pin(self, place: str, kind: str, label: str, target: str, first: bool = False) -> Pin | None:
+        if place not in PIN_PLACES or not target.strip() or self.pinned(place, target):
+            return None
+        if first:
+            self._exec("UPDATE pins SET position=position+1 WHERE place=?", (place,))
+            pos = 0
+        else:
+            pos = self._all("SELECT COALESCE(MAX(position), -1) + 1 FROM pins WHERE place=?", (place,))[0][0]
+        try:
+            cur = self._exec(
+                "INSERT INTO pins(place, kind, label, target, position) VALUES(?,?,?,?,?)",
+                (place, kind, label.strip() or target, target.strip(), pos),
+            )
+        except sqlite3.IntegrityError:
+            return None
+        return Pin(int(cur.lastrowid or 0), place, kind, label.strip() or target, target.strip(), pos)
+
+    def remove_pin(self, pin_id: int) -> None:
+        self._exec("DELETE FROM pins WHERE id=?", (pin_id,))
+
+    def reorder_pins(self, ids: list[int]) -> None:
+        with self._lock, self._db:
+            self._db.executemany("UPDATE pins SET position=? WHERE id=?", list(enumerate(ids)))
+
+    def move_pin_first(self, pin_id: int) -> None:
+        rows = self._all("SELECT place FROM pins WHERE id=?", (pin_id,))
+        if rows:
+            ids = [p.id for p in self.pins(str(rows[0][0])) if p.id != pin_id]
+            self.reorder_pins([pin_id, *ids])
+
+    # ---------- histórico da busca e do Iniciar ----------
+    def record_launch(self, kind: str, label: str, target: str, ts: float | None = None) -> None:
+        if not target:
+            return
+        self._exec(
+            "INSERT INTO launches(target, kind, label, ts, count) VALUES(?,?,?,?,1) "
+            "ON CONFLICT(target) DO UPDATE SET kind=excluded.kind, label=excluded.label, ts=excluded.ts, "
+            "count=count+1",
+            (target, kind, label, time.time() if ts is None else ts),
+        )
+        self._exec(
+            "DELETE FROM launches WHERE target NOT IN (SELECT target FROM launches ORDER BY ts DESC LIMIT ?)",
+            (MAX_LAUNCHES,),
+        )
+
+    def launches(self, limit: int = 12) -> list[Launch]:
+        return [
+            Launch(str(t), str(k), str(label), float(ts), int(c))
+            for t, k, label, ts, c in self._all(
+                "SELECT target, kind, label, ts, count FROM launches ORDER BY ts DESC LIMIT ?", (limit,)
+            )
+        ]
+
+    def forget_launch(self, target: str) -> None:
+        self._exec("DELETE FROM launches WHERE target=?", (target,))
+
+    def clear_launches(self) -> None:
+        self._exec("DELETE FROM launches")
+
+    def meta(self, key: str) -> str | None:
+        return self._meta(key)
+
+    def set_meta(self, key: str, value: str) -> None:
+        self._set_meta(key, value)
 
     # ---------- agenda ----------
     def add_event(self, title: str, day: date, start: dtime | None = None, end: dtime | None = None) -> Event:

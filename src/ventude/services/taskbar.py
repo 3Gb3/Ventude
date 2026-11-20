@@ -152,8 +152,43 @@ def set_work_area(rect: Rect) -> bool:
     return bool(_user32().SystemParametersInfoW(SPI_SETWORKAREA, 0, ctypes.byref(value), SPIF_SENDCHANGE))
 
 
+def monitor_scale(rect: Rect) -> float:
+    """Escala (1.0 = 100%) do monitor que contém o retângulo, para reservar a altura certa em pixels."""
+    if sys.platform != "win32":
+        return 1.0
+    try:
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        shcore = ctypes.windll.shcore  # type: ignore[attr-defined]
+        user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        user32.MonitorFromPoint.restype = wintypes.HMONITOR
+        center = wintypes.POINT((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
+        monitor = user32.MonitorFromPoint(center, 2)
+        dpi_x, dpi_y = wintypes.UINT(), wintypes.UINT()
+        shcore.GetDpiForMonitor.argtypes = [
+            wintypes.HMONITOR,
+            ctypes.c_int,
+            ctypes.POINTER(wintypes.UINT),
+            ctypes.POINTER(wintypes.UINT),
+        ]
+        if shcore.GetDpiForMonitor(monitor, 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)) == 0 and dpi_x.value:
+            return dpi_x.value / 96
+    except (OSError, AttributeError):
+        pass
+    return 1.0
+
+
+def work_rect(monitor: Rect, reserve: int) -> Rect:
+    """Área útil com `reserve` px livres embaixo (onde fica a barra do Ventude)."""
+    left, top, right, bottom = monitor
+    return (left, top, right, max(top + 1, bottom - max(0, reserve)))
+
+
 class TaskbarHider:
-    """Esconde e restaura a barra do Windows. restore() é seguro de chamar várias vezes."""
+    """Esconde e restaura a barra do Windows. restore() é seguro de chamar várias vezes.
+
+    `reserve(monitor)` diz quantos pixels deixar livres embaixo de cada monitor (a altura da barra do
+    Ventude), para as janelas maximizadas não ficarem por baixo dela. 0 = tela toda (ocultar automaticamente).
+    """
 
     def __init__(
         self,
@@ -162,6 +197,7 @@ class TaskbarHider:
         screens: Callable[[], list[tuple[Rect, Rect]]] = monitors,
         work_area: Callable[[Rect], bool] = set_work_area,
         marker: Path | None = None,
+        reserve: Callable[[Rect], int] | None = None,
     ) -> None:
         self._windows, self._screens, self._work_area = windows, screens, work_area
         self._show = show or (lambda hwnd, cmd: _user32().ShowWindow(hwnd, cmd))
@@ -169,7 +205,9 @@ class TaskbarHider:
             (lambda hwnd: bool(_user32().IsWindowVisible(hwnd))) if show is None else (lambda _h: True)
         )
         self.marker = marker or marker_path()
+        self.reserve: Callable[[Rect], int] = reserve or (lambda _mon: 0)
         self.hidden = False
+        self.peeking = False
         self._saved: list[tuple[Rect, Rect]] = []
 
     def hide(self) -> bool:
@@ -184,21 +222,34 @@ class TaskbarHider:
                 log.warning("Não deu para gravar o marcador da barra escondida", exc_info=True)
         for hwnd in bars:
             self._show(hwnd, SW_HIDE)
-        for mon, _work in self._screens():
-            self._work_area(mon)
+        self.peeking = False
+        self.apply_work_areas()
         self.hidden = True
         return True
 
+    def apply_work_areas(self) -> None:
+        """Área útil de cada monitor = tela menos a barra do Ventude (ou a tela toda)."""
+        for mon, work in self._screens():
+            wanted = work_rect(mon, self.reserve(mon))
+            if work != wanted:
+                self._work_area(wanted)
+
+    def peek(self, on: bool) -> None:
+        """Mostra a barra do Windows por um tempo (ex.: para usar um ícone da bandeja) e esconde de novo."""
+        if not self.hidden:
+            return
+        self.peeking = on
+        for hwnd in self._windows():
+            self._show(hwnd, SW_SHOW if on else SW_HIDE)
+
     def reassert(self) -> None:
         """O Explorer às vezes mostra a barra de novo (ex.: ao reiniciar): esconde outra vez."""
-        if not self.hidden:
+        if not self.hidden or self.peeking:
             return
         for hwnd in self._windows():
             if self._visible(hwnd):
                 self._show(hwnd, SW_HIDE)
-        for mon, work in self._screens():
-            if work != mon:
-                self._work_area(mon)
+        self.apply_work_areas()
 
     def restore(self) -> None:
         saved = self._saved
@@ -219,6 +270,7 @@ class TaskbarHider:
         self.marker.unlink(missing_ok=True)
         self._saved = []
         self.hidden = False
+        self.peeking = False
 
     def recover(self) -> bool:
         """Na abertura: se um Ventude anterior deixou a barra escondida, mostra de volta."""
@@ -238,6 +290,7 @@ class WindowInfo:
     minimized: bool = False
     maximized: bool = False
     foreground: bool = False
+    app_id: str = ""  # AppUserModelID (quando o app define), para agrupar como o Windows
 
 
 def _class_name(user32: object, hwnd: int) -> str:
@@ -302,6 +355,12 @@ def list_windows(own_pid: int | None = None) -> list[WindowInfo]:
     from ventude.services.winutil import process_path
 
     own_pid = os.getpid() if own_pid is None else own_pid
+    from ventude.services import com
+
+    try:
+        com.init()  # o AppUserModelID vem de uma interface COM
+    except OSError:
+        pass
     user32 = _user32()
     get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
     handles: list[int] = []
@@ -340,6 +399,7 @@ def list_windows(own_pid: int | None = None) -> list[WindowInfo]:
                 bool(user32.IsIconic(hwnd)),
                 bool(user32.IsZoomed(hwnd)),
                 hwnd == foreground,
+                window_app_id(hwnd),
             )
         )
     return out
@@ -378,8 +438,8 @@ def close(hwnd: int) -> None:
     _user32().PostMessageW(hwnd, WM_CLOSE, 0, 0)
 
 
-def covering_window(monitor: Rect, own_pid: int | None = None) -> bool:
-    """A janela em primeiro plano está maximizada ou em tela cheia neste monitor?"""
+def covering_window(monitor: Rect, own_pid: int | None = None, fullscreen_only: bool = False) -> bool:
+    """A janela em primeiro plano está maximizada (ou, com `fullscreen_only`, em tela cheia) neste monitor?"""
     if sys.platform != "win32":
         return False
     user32 = _user32()
@@ -394,6 +454,46 @@ def covering_window(monitor: Rect, own_pid: int | None = None) -> bool:
     center_x, center_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
     if not (left <= center_x < right and top <= center_y < bottom):
         return False
-    if user32.IsZoomed(hwnd):
+    if user32.IsZoomed(hwnd) and not fullscreen_only:
         return True
     return rect.left <= left and rect.top <= top and rect.right >= right and rect.bottom >= bottom
+
+
+def window_app_id(hwnd: int) -> str:
+    """AppUserModelID da janela (o que o Windows usa para agrupar na barra). '' quando o app não define."""
+    if sys.platform != "win32" or not hwnd:
+        return ""
+    from ventude.services import com
+
+    shell32 = ctypes.windll.shell32  # type: ignore[attr-defined]
+    shell32.SHGetPropertyStoreForWindow.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(com.GUID),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+    out = ctypes.c_void_p()
+    iid = com.guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99")  # IPropertyStore
+    try:
+        if (
+            shell32.SHGetPropertyStoreForWindow(hwnd, ctypes.byref(iid), ctypes.byref(out)) < 0
+            or not out.value
+        ):
+            return ""
+    except OSError:
+        return ""
+    store = com.ComPtr(out.value, "IPropertyStore")
+    key = com.PROPERTYKEY(com.guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5)  # PKEY_AppUserModel_ID
+    value = com.PROPVARIANT()
+    try:
+        store.call(
+            5,  # GetValue
+            [ctypes.POINTER(com.PROPERTYKEY), ctypes.POINTER(com.PROPVARIANT)],
+            ctypes.byref(key),
+            ctypes.byref(value),
+        )
+        return com.propvariant_text(value)
+    except OSError:
+        return ""
+    finally:
+        store.release()

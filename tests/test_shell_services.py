@@ -440,7 +440,17 @@ def test_taskbar_hide_restore_and_crash_recovery(tmp_path):
     )
     assert hider.hide() and hider.hidden and marker.exists()
     assert shown == [(11, SW_HIDE), (22, SW_HIDE)]
-    assert areas == [(0, 0, 1920, 1080), (1920, 0, 3840, 1080)]  # área útil vira a tela toda
+    assert areas == [(0, 0, 1920, 1080)]  # sem reserva: a área útil vira a tela toda (só onde mudou)
+    areas.clear()
+    hider.reserve = lambda mon: 60  # barra do Ventude com 48 px a 125%
+    hider.apply_work_areas()
+    assert areas == [(0, 0, 1920, 1020), (1920, 0, 3840, 1020)]  # janelas maximizadas não cobrem a barra
+    hider.peek(True)
+    assert shown[-2:] == [(11, SW_SHOW), (22, SW_SHOW)] and hider.peeking
+    hider.reassert()  # mostrando por um tempo: não esconde de novo
+    assert shown[-1] == (22, SW_SHOW)
+    hider.peek(False)
+    assert shown[-1] == (22, SW_HIDE) and not hider.peeking
     shown.clear()
     areas.clear()
     crashed = TaskbarHider(  # outra abertura do Ventude depois de um travamento
@@ -468,20 +478,185 @@ def test_app_window_rules_and_dock_grouping():
     assert not is_app_window(True, "Doc", 0, 0, True, "X", 10, 1)  # "cloaked" (outra área de trabalho)
     assert not is_app_window(True, "Ventude", 0, 0, False, "X", 1, 1)  # o próprio Ventude
     assert not is_app_window(True, "Doc", 99, 0, False, "X", 10, 1)  # tem dono (diálogo)
-    from types import SimpleNamespace
+    from ventude.core.store import Pin
+    from ventude.ui.shell.taskbar import build_items, store_families
 
-    from ventude.ui.dock import group_windows
-
-    pins = [SimpleNamespace(id=1, kind="app", label="Code", target=r"C:\Apps\Code.exe")]
+    claude_exe = r"C:\Program Files\WindowsApps\Claude_6.6395.0.0_x64__pzs8sxrjxfjjc\app\claude.exe"
+    pins = [
+        Pin(1, "taskbar", "app", "Code", r"C:\Apps\Code.exe", 0),
+        Pin(2, "taskbar", "uwp", "Calculadora", "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", 1),
+    ]
     windows = [
         WindowInfo(100, "projeto - Code", 5, r"C:\Apps\Code.exe", foreground=True),
         WindowInfo(101, "outro - Code", 6, r"c:\apps\code.exe"),
-        WindowInfo(200, "Firefox", 7, r"C:\Apps\Firefox.exe"),
+        WindowInfo(200, "Firefox", 7, r"C:\Apps\Firefox.exe", app_id="308046B0AF4A39CB"),
+        WindowInfo(201, "Outra aba", 7, r"C:\Apps\Firefox.exe", app_id="308046B0AF4A39CB"),
+        WindowInfo(
+            300,
+            "Calculadora",
+            8,
+            r"C:\Windows\calc.exe",
+            app_id="Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+        ),
+        WindowInfo(400, "Claude", 9, claude_exe),
     ]
-    items = group_windows(pins, windows)
-    assert [i.label for i in items][0] == "Code" and len(items) == 2
-    assert items[0].pinned and items[0].active and len(items[0].windows) == 2
-    assert not items[1].pinned and items[1].windows[0].hwnd == 200
+    store_apps = [indexer.entry("Claude", "Claude_pzs8sxrjxfjjc!Claude", "uwp")]
+    items = build_items(pins, windows, store_families(store_apps))
+    assert [i.label for i in items][:2] == ["Code", "Calculadora"] and len(items) == 4
+    code, calculator, firefox, claude = items
+    assert code.pinned and code.active and len(code.windows) == 2  # mesmo .exe, maiúsculas diferentes
+    assert calculator.pinned and calculator.windows[0].hwnd == 300  # casou pelo AppUserModelID
+    assert not firefox.pinned and [w.hwnd for w in firefox.windows] == [200, 201]
+    assert (
+        claude.kind == "uwp" and claude.icon_target == "Claude_pzs8sxrjxfjjc!Claude"
+    )  # app da Loja: ícone real
+    from ventude.services import apps
+
+    assert apps.package_family(claude_exe) == "Claude_pzs8sxrjxfjjc"
+    assert apps.package_family(r"C:\Apps\Code.exe") == ""
+
+
+# ---------- Ventude Shell: catálogo, fixados e histórico ----------
+def test_app_categories_seeds_and_system_items():
+    from ventude.services import apps
+
+    assert apps.category("Visual Studio Code") == "Desenvolvimento"
+    assert apps.category("Claude") == "Inteligência Artificial"
+    assert apps.category("Antigravity") == "Inteligência Artificial"
+    assert apps.category("Microsoft Edge") == "Navegadores"
+    assert apps.category("WhatsApp") == "Comunicação"
+    assert apps.category("League of Legends") == "Jogos"
+    assert apps.category("Spotify") == "Entretenimento"
+    assert apps.category("Paint") == "Criatividade"
+    assert apps.category("Calculadora") == "Utilitários e Ferramentas"
+    assert apps.category("Bloco de Notas") == "Produtividade"
+    assert apps.category("Codex") == "Inteligência Artificial"  # "code" não pega "codex"
+    assert apps.category("Xyzzy") == apps.OTHER
+    names = ["Spotify", "Calculadora", "Firefox", "Steam", "Paint", "Configurações", "Algo"]
+    assert apps.pick_start_seeds(names) == [
+        "Firefox",
+        "Configurações",
+        "Calculadora",
+        "Spotify",
+        "Steam",
+        "Paint",
+    ]
+    assert [i.title for i in apps.match_system("wi")][0] == "Wi-Fi"
+    assert apps.match_system("lixeira")[0].target == "shell:RecycleBinFolder"
+    assert apps.match_system("x") == []
+    assert (
+        apps.resolve_known_folder(r"{F38BF404-1D43-42F2-9305-67DE0B28FC23}\explorer.exe")
+        .lower()
+        .endswith(r"windows\explorer.exe")
+    )
+    assert apps.first_name("Fulano de Tal") == "Fulano" and apps.first_name("") == "Você"
+
+
+def test_relative_times_like_windows():
+    from datetime import datetime
+
+    from ventude.services import apps
+
+    now = datetime(2026, 11, 20, 10, 29).timestamp()
+    assert apps.relative_time(now - 20, now) == "agora"
+    assert apps.relative_time(now - 60, now) == "há 1 minuto"
+    assert apps.relative_time(now - 5 * 60, now) == "há 5 minutos"
+    assert apps.relative_time(now - 3 * 3600, now) == "há 3 horas"
+    assert apps.relative_time(datetime(2026, 11, 19, 10, 12).timestamp(), now) == "Ontem às 10:12"
+    assert apps.relative_time(datetime(2026, 11, 11, 9, 0).timestamp(), now) == "há 9 dias"
+
+
+def test_pins_and_launch_history(store):
+    first = store.add_pin("taskbar", "app", "Code", r"C:\Apps\Code.exe")
+    assert (
+        first is not None and store.add_pin("taskbar", "app", "Code", r"c:\apps\code.exe") is None
+    )  # repetido
+    store.add_pin("taskbar", "uwp", "Calculadora", "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App")
+    store.add_pin("start", "app", "Code", r"C:\Apps\Code.exe")  # outro lugar: pode
+    assert store.add_pin("nenhum", "app", "X", "y") is None
+    assert [p.label for p in store.pins("taskbar")] == ["Code", "Calculadora"]
+    calc_pin = store.pins("taskbar")[1]
+    store.move_pin_first(calc_pin.id)
+    assert [p.label for p in store.pins("taskbar")] == ["Calculadora", "Code"]
+    store.add_pin("taskbar", "folder", "Downloads", r"C:\Users\x\Downloads", first=True)
+    assert store.pins("taskbar")[0].label == "Downloads"
+    store.remove_pin(first.id)
+    assert store.pinned("taskbar", r"C:\Apps\Code.exe") is None and store.pinned("start", r"C:\Apps\Code.exe")
+    store.record_launch("app", "Code", r"C:\Apps\Code.exe", ts=100)
+    store.record_launch("system", "Wi-Fi", "ms-settings:network-wifi", ts=200)
+    store.record_launch("app", "Code", r"C:\Apps\Code.exe", ts=300)
+    launches = store.launches()
+    assert [(l.label, l.count) for l in launches] == [("Code", 2), ("Wi-Fi", 1)]  # noqa: E741
+    store.forget_launch("ms-settings:network-wifi")
+    assert len(store.launches()) == 1
+    for index in range(80):
+        store.record_launch("file", f"f{index}", f"C:\\f{index}", ts=1000 + index)
+    assert len(store.launches(100)) == 60  # guarda só os 60 mais recentes
+    store.clear_launches()
+    assert store.launches() == []
+
+
+def test_store_apps_from_start_menu_list():
+    rows = [
+        {"Name": "Calculadora", "AppID": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"},
+        {"Name": "Explorador de Arquivos", "AppID": "Microsoft.Windows.Explorer"},
+        {"Name": "Code", "AppID": "Microsoft.VisualStudioCode"},  # já veio por .lnk
+        {"Name": "Site", "AppID": "https://example.com"},
+        {"Name": "Uninstall App", "AppID": "{GUID}\\uninst.exe"},
+        {"Name": "Calculadora", "AppID": "duplicado"},
+    ]
+    names = [(e.name, e.kind) for e in indexer.store_entries(rows, {"code"})]
+    assert names == [("Calculadora", "uwp"), ("Explorador de Arquivos", "uwp")]
+
+
+def test_recent_files_reads_windows_recent_links(tmp_path):
+    from ventude.services import apps
+
+    target = tmp_path / "Relatório.docx"
+    target.write_text("x")
+    recent = tmp_path / "Recent"
+    recent.mkdir()
+    link = recent / "Relatório.docx.lnk"
+    link.write_bytes(b"")
+    (recent / "ms-screenclip---x.lnk").write_bytes(b"")
+    import ventude.services.winutil as winutil
+
+    original = winutil.lnk_target
+    winutil.lnk_target = lambda path: str(target) if "Relat" in str(path) else ""
+    try:
+        files = apps.recent_files(5, recent)
+    finally:
+        winutil.lnk_target = original
+    assert [(f.name, f.is_dir) for f in files] == [("Relatório.docx", False)]
+
+
+def test_shell_icons_without_windows_fall_back(qapp):
+    from PySide6.QtGui import QPixmap
+
+    from ventude.services import shellicons
+
+    assert shellicons.parsing_name("uwp", "App!Id") == "shell:AppsFolder\\App!Id"
+    assert shellicons.parsing_name("url", "https://x") == ""
+    assert shellicons.parsing_name("app", r"C:\a.exe") == r"C:\a.exe"
+    cache = shellicons.IconCache()
+    cache.enabled = False
+    assert cache.pixmap(r"C:\a.exe", 24) is None
+    cache.enabled = True
+    seen = []
+    cache.changed.connect(seen.append)
+    cache.put(r"C:\a.exe", 24, QPixmap(48, 48))
+    assert (
+        cache.ready(r"C:\A.EXE", 24) and cache.pixmap(r"C:\a.exe", 24) is not None and seen == [r"C:\a.exe"]
+    )
+
+
+def test_dwm_helpers_are_safe():
+    from ventude.services import dwm
+
+    assert dwm.fit((1920, 1080), (200, 120)) == (200, 112)
+    assert dwm.fit((0, 0), (200, 120)) == (200, 120)
+    assert dwm.register_thumbnail(0, 0) == 0 and not dwm.place_thumbnail(0, (0, 0, 1, 1))
+    assert dwm._color_ref(0xB0101216) == 0xB0161210
 
 
 # ---------- tecla Windows ----------

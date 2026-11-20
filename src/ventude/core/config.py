@@ -21,7 +21,7 @@ MODULES: list[tuple[str, str, str]] = [
 ]
 ALWAYS_ON = {"home", "settings"}
 DEFAULT_MODULES = "limits,hardware,audio,shortcuts,shelf,agenda,tasks,weather,market,news"
-LAYOUT_VERSION = 5  # 5: abas Sistema e Áudio (1.2)
+LAYOUT_VERSION = 6  # 5: abas Sistema e Áudio (1.2) · 6: Ventude Shell ligado (2.0)
 DEFAULT_SYMBOLS = "^BVSP:Ibovespa,BRL=X:Dólar,BTC-USD:Bitcoin,PETR4.SA:Petrobras,VALE3.SA:Vale,AAPL:Apple"
 DEFAULT_NEWS = "G1,BBC Brasil,Tecnoblog"
 ANIMATION_SPEEDS = {"rapida": 170, "normal": 260, "suave": 380}
@@ -68,8 +68,18 @@ class Settings:
     pill_privacy: bool = True  # pontinhos de microfone (laranja) e câmera (verde) em uso
     clipboard_history: bool = True  # o que você copia (Ctrl + C) vai para a Estante
     lyrics_enabled: bool = True  # letra sincronizada (lrclib.net) no player do Início
-    replace_taskbar: bool = False  # esconde a barra do Windows e mostra o Dock do Ventude
+    replace_taskbar: bool = False  # esconde a barra do Windows e mostra a barra de tarefas do Ventude
     replace_start_menu: bool = False  # tecla Windows e Win + S abrem a busca do Ventude
+    # ---------- Ventude Shell (2.0) ----------
+    taskbar_autohide: bool = False  # a barra some e volta ao encostar o mouse embaixo
+    taskbar_align: str = "center"  # center | left
+    taskbar_weather: bool = True  # clima no canto esquerdo da barra
+    taskbar_all_monitors: bool = True  # uma barra em cada monitor
+    shell_glass: bool = True  # efeito de vidro (acrylic) na barra, no Iniciar e na busca
+    power_animation: bool = True  # "Até logo!": escurece as telas antes de desligar, reiniciar...
+    shell_greeting: bool = True  # "Bom dia!" ao ligar o PC
+    start_view: str = "category"  # Iniciar > Todos: category | grid | list
+    pill_date: bool = True  # data na ilha fechada (no Shell, ela fica no relógio da barra)
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3
@@ -173,6 +183,10 @@ class Settings:
         for name in ("codex_mode", "cursor_mode", "copilot_mode"):
             if getattr(s, name) not in ("auto", "off"):
                 setattr(s, name, "off")
+        if s.taskbar_align not in ("center", "left"):
+            s.taskbar_align = "center"
+        if s.start_view not in ("category", "grid", "list"):
+            s.start_view = "category"
         if "layout_version" not in data or int(data.get("layout_version") or 0) < 3:
             # Versões antigas tinham outro tamanho de ilha e uma IA própria.
             s.layout_version = 3

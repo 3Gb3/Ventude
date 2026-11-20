@@ -41,6 +41,13 @@ class Tray(QSystemTrayIcon):
             icons.icon("refresh", theme.TEXT_2, 15), "Atualizar limites das IAs", ctx.limits.refresh_all
         )
         menu.addSeparator()
+        self.shell_action = menu.addAction(
+            icons.icon("dock", theme.TEXT_2, 15), "Barra de tarefas do Ventude"
+        )
+        self.shell_action.setCheckable(True)
+        self.shell_action.setChecked(ctx.settings.replace_taskbar)
+        self.shell_action.toggled.connect(lambda on: ctx.update_settings(replace_taskbar=on))
+        ctx.settings_changed.connect(self._sync_shell)
         self.monitors = menu.addMenu(icons.icon("monitor", theme.TEXT_2, 15), "Monitor")
         self.monitors.aboutToShow.connect(self._fill_monitors)
         menu.addAction(icons.icon("settings", theme.TEXT_2, 15), "Ajustes", lambda: self._open("settings"))
@@ -52,6 +59,13 @@ class Tray(QSystemTrayIcon):
         ctx.tray_message.connect(self._alert)
         ctx.limits.changed.connect(lambda _p: self._tooltip())
         self._tooltip()
+
+    def _sync_shell(self, settings: object) -> None:
+        on = bool(getattr(settings, "replace_taskbar", False))
+        if self.shell_action.isChecked() != on:
+            self.shell_action.blockSignals(True)
+            self.shell_action.setChecked(on)
+            self.shell_action.blockSignals(False)
 
     def _tooltip(self) -> None:
         self.setToolTip(f"Ventude\n{self.ctx.limits.summary()}")

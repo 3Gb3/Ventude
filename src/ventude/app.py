@@ -55,10 +55,11 @@ def _check_for_update(tasks: Tasks, app: QApplication) -> None:
     tasks.run(updates.check, __version__, done=found)
 
 
-def _install_failsafes(app: QApplication, dock: object, island: object) -> None:
+def _install_failsafes(app: QApplication, shell: object) -> None:
     """A barra do Windows sempre volta e a tecla Windows sempre é solta: ao sair, ao fechar o Qt
     e em qualquer erro não tratado."""
-    hider = dock.hider  # type: ignore[attr-defined]
+    hider = shell.hider  # type: ignore[attr-defined]
+    keys = shell.keys  # type: ignore[attr-defined]
 
     def restore_shell() -> None:
         try:
@@ -67,7 +68,7 @@ def _install_failsafes(app: QApplication, dock: object, island: object) -> None:
         except Exception:  # noqa: BLE001
             log.exception("Falha ao restaurar a barra de tarefas")
         try:
-            island.keys.remove()  # type: ignore[attr-defined]
+            keys.remove()
         except Exception:  # noqa: BLE001
             log.exception("Falha ao remover o atalho da tecla Windows")
 
@@ -78,7 +79,7 @@ def _install_failsafes(app: QApplication, dock: object, island: object) -> None:
     def excepthook(kind, value, tb) -> None:  # noqa: ANN001
         log.error("Erro inesperado", exc_info=(kind, value, tb))
         try:
-            dock.emergency()  # type: ignore[attr-defined]
+            shell.emergency()  # type: ignore[attr-defined]
         except Exception:  # noqa: BLE001
             restore_shell()
         previous(kind, value, tb)
@@ -115,11 +116,11 @@ def run() -> int:
     if ctx.settings.start_with_windows and system.autostart_supported():
         system.set_autostart(True)  # mantém o caminho certo se o projeto mudou de pasta
     island = Island(ctx)
-    tray = Tray(ctx, island)
-    from ventude.ui.dock import DockController
+    from ventude.ui.shell.controller import ShellController
 
-    dock = DockController(ctx, island.open_start)
-    _install_failsafes(app, dock, island)
+    shell = ShellController(ctx, island)  # barra, Iniciar, Pesquisa, tecla Windows e "Até logo!"
+    tray = Tray(ctx, island)
+    _install_failsafes(app, shell)
 
     def reveal() -> None:
         connection = server.nextPendingConnection()
@@ -136,6 +137,7 @@ def run() -> int:
         if ctx.settings.monitor_index >= len(QGuiApplication.screens()):
             ctx.update_settings(monitor_index=0, island_position_json="")
         island.reposition()
+        QTimer.singleShot(300, shell.screens_changed)
 
     app.screenAdded.connect(screens_changed)
     app.screenRemoved.connect(screens_changed)
@@ -149,15 +151,14 @@ def run() -> int:
     ctx.start()
     tray.show()
     island.show()
-    dock.start()
+    shell.start()
     log.info("Ventude %s iniciado", __version__)
     tasks.run(net.browser_transport, done=lambda name: log.info("Conexão com claude.ai/grok.com: %s", name))
     if updates.enabled():
         QTimer.singleShot(3000, lambda: _check_for_update(tasks, app))
     code = app.exec()
 
-    dock.restore()
-    island.keys.remove()
+    shell.shutdown()
     ctx.stop()
     tray.hide()
     ctx.media.stop()

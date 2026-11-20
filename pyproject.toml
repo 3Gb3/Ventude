@@ -1,7 +1,7 @@
 [project]
 name = "ventude"
-version = "1.2.0"
-description = "Dynamic Island leve para Windows: limites das suas IAs, mídia, clima, agenda e atalhos"
+version = "2.0.0"
+description = "Dynamic Island e shell para Windows: barra de tarefas, Menu Iniciar e Pesquisa próprios, limites das suas IAs, mídia, clima, agenda e atalhos"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

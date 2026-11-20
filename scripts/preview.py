@@ -1,10 +1,16 @@
 """Gera capturas da interface com dados de demonstração (não toca nos seus dados).
 
-uv run python scripts/preview.py [pasta_de_saida]
+uv run python scripts/preview.py [pasta_de_saida] [--shell]
+
+--shell gera só as telas do Ventude Shell (2.0): área de trabalho com a barra de tarefas, Menu Iniciar,
+Pesquisa, painéis, prévias, cortinas de energia e a animação "Até logo!" (PNG animado). O vidro (acrylic)
+é simulado desfocando o papel de parede atrás de cada janela. Ícones: os reais do Windows para uma lista
+fixa de apps comuns (quando instalados); o resto é de demonstração.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -13,11 +19,28 @@ from datetime import date, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+OUT = Path(next((a for a in sys.argv[1:] if not a.startswith("--")), "preview")).resolve()
+SHELL_ONLY = "--shell" in sys.argv
+# Tela de 1920×1080 no modo sem janela (o Qt lê a configuração de um arquivo relativo à pasta atual).
+_screen_dir = tempfile.mkdtemp(prefix="ventude-screen-")
+Path(_screen_dir, "screens.json").write_text(
+    json.dumps(
+        {
+            "screens": [
+                {"name": "Tela", "x": 0, "y": 0, "width": 1920, "height": 1080, "logicalDpi": 96, "dpr": 1}
+            ]
+        }
+    ),
+    encoding="utf-8",
+)
+os.chdir(_screen_dir)
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen:configfile=screens.json")
+if sys.platform == "win32":  # sem janela, o Qt só acha as fontes do Windows se apontarmos a pasta
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 os.environ["VENTUDE_HOME"] = tempfile.mkdtemp(prefix="ventude-preview-")
 os.environ["VENTUDE_USER_HOME"] = tempfile.mkdtemp(prefix="ventude-home-")
 
-from PySide6.QtCore import QPointF, QRectF, Qt  # noqa: E402
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QRadialGradient  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -343,9 +366,9 @@ def settle(island, ms: int = 450) -> None:  # noqa: ANN001
 
 
 def main() -> None:
-    out = Path(sys.argv[1] if len(sys.argv) > 1 else "preview")
+    out = OUT
     out.mkdir(parents=True, exist_ok=True)
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv[:1])
     from ventude.ui import theme
     from ventude.ui.context import AppContext
     from ventude.ui.island import Island
@@ -370,6 +393,10 @@ def main() -> None:
     island.show()
     ctx.limits.refresh_all()
     settle(island, 800)
+    if SHELL_ONLY:
+        shell_v2_screens(ctx, island, media, out)
+        print(f"Capturas em {out}")
+        return
     shot(island, out / "00-ilha.png", 18)
     state = MediaState(
         "Midnight City",
@@ -501,6 +528,7 @@ def main() -> None:
     settle(island, 300)
     shot(island, out / "31-ajustes-ias.png")
     shell_screens(ctx, island, media, out)
+    shell_v2_screens(ctx, island, media, out)
     print(f"Capturas em {out.resolve()}")
 
 
@@ -510,7 +538,6 @@ def shell_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     from ventude.services.audio import AppSession, AudioState, Device
     from ventude.services.hardware import Battery, Gpu, Snapshot
     from ventude.services.privacy import PrivacyState
-    from ventude.ui.dock import Dock, DockItem
     from ventude.ui.power_menu import PowerMenu
 
     island.collapse()
@@ -612,18 +639,547 @@ def shell_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     settle(island, 300)
     shot(menu, out / "47-energia.png", 18)
     menu.hide()
-    dock = Dock(ctx, lambda: None)
-    items = [
-        DockItem("a", "Explorador", str(Path(sys.executable)), windows=[]),
-        DockItem("b", "Python", sys.executable, kind="window"),
-    ]
-    dock.set_items(items)
-    dock.place()
-    dock.show()
-    settle(island, 300)
-    shot(dock, out / "48-dock.png", 18)
-    dock.hide()
     ctx.caffeine.stop()
+
+
+# ---------- Ventude Shell (2.0) ----------
+W, H = 1920, 1080
+DEMO_APPS = (
+    "Microsoft Edge",
+    "Firefox",
+    "Google Chrome",
+    "Explorador de Arquivos",
+    "Configurações",
+    "Microsoft Store",
+    "Fotos",
+    "Calculadora",
+    "Bloco de Notas",
+    "Paint",
+    "Ferramenta de Captura",
+    "Relógio",
+    "Terminal",
+    "Windows PowerShell",
+    "Spotify",
+    "Discord",
+    "WhatsApp",
+    "Steam",
+    "Visual Studio Code",
+    "Cursor",
+    "Claude",
+    "ChatGPT",
+    "Antigravity",
+    "Xbox",
+    "Outlook",
+    "LinkedIn",
+    "OBS Studio",
+    "Notion",
+    "Obsidian",
+    "VLC media player",
+    "Gerenciador de Tarefas",
+    "Microsoft Teams",
+    "Telegram",
+    "Epic Games Launcher",
+    "Riot Client",
+    "HandBrake",
+    "Blender",
+)
+
+
+def demo_catalog() -> list:
+    """Apps de demonstração com os ícones reais do Windows (só os desta lista fixa, se instalados)."""
+    from ventude.services import indexer
+
+    found = indexer.scan_apps(indexer.start_menu_dirs())
+    found += indexer.scan_store_apps({a.key for a in found})
+    wanted = {name.lower(): name for name in DEMO_APPS}
+    chosen: dict[str, object] = {}
+    for entry in found:
+        key = entry.name.lower()
+        for wanted_key, label in wanted.items():
+            if key == wanted_key or (key.startswith(wanted_key) and len(key) <= len(wanted_key) + 8):
+                chosen.setdefault(label, indexer.entry(label, entry.path, entry.kind))
+    if "Explorador de Arquivos" not in chosen:
+        chosen["Explorador de Arquivos"] = indexer.entry(
+            "Explorador de Arquivos", r"C:\Windows\explorer.exe", "app"
+        )
+    if "Bloco de Notas" not in chosen and Path(r"C:\Windows\System32\notepad.exe").exists():
+        chosen["Bloco de Notas"] = indexer.entry("Bloco de Notas", r"C:\Windows\System32\notepad.exe", "app")
+    return sorted(chosen.values(), key=lambda e: e.key)
+
+
+def wallpaper() -> QImage:
+    """Papel de parede de demonstração (ondas suaves em azul e verde)."""
+    image = QImage(W, H, QImage.Format.Format_ARGB32)
+    p = QPainter(image)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    g = QLinearGradient(0, 0, W, H)
+    g.setColorAt(0, QColor("#0E1A2B"))
+    g.setColorAt(0.55, QColor("#13293D"))
+    g.setColorAt(1, QColor("#0B1320"))
+    p.fillRect(0, 0, W, H, g)
+    for cx, cy, radius, color in (
+        (W * 0.78, H * 0.30, 620, QColor(110, 231, 183, 70)),
+        (W * 0.22, H * 0.85, 700, QColor(80, 140, 255, 70)),
+        (W * 0.55, H * 0.62, 420, QColor(180, 120, 255, 50)),
+    ):
+        r = QRadialGradient(QPointF(cx, cy), radius)
+        r.setColorAt(0, color)
+        r.setColorAt(1, QColor(color.red(), color.green(), color.blue(), 0))
+        p.fillRect(0, 0, W, H, r)
+    from PySide6.QtGui import QPainterPath, QPen
+
+    for index in range(7):
+        path = QPainterPath()
+        y0 = H * 0.18 + index * 46
+        path.moveTo(-50, y0)
+        path.cubicTo(W * 0.3, y0 - 160 + index * 12, W * 0.62, y0 + 220 - index * 8, W + 50, y0 + 40)
+        p.setPen(QPen(QColor(255, 255, 255, 10 + index * 3), 1.4))
+        p.drawPath(path)
+    p.end()
+    return image
+
+
+def mock_window(title: str, accent: str, w: int, h: int) -> QImage:
+    """Janela de app de mentira (para a área de trabalho e as prévias)."""
+    image = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    p = QPainter(image)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor("#1E2128"))
+    p.drawRoundedRect(QRectF(0, 0, w, h), 8, 8)
+    p.setBrush(QColor("#252932"))
+    p.drawRoundedRect(QRectF(0, 0, w, 40), 8, 8)
+    p.drawRect(QRectF(0, 20, w, 20))
+    p.setPen(QColor("#C9CED6"))
+    from ventude.ui import theme
+
+    p.setFont(theme.font(13))
+    p.drawText(QRectF(16, 0, w - 160, 40), Qt.AlignmentFlag.AlignVCenter, title)
+    for index, x in enumerate((w - 110, w - 72, w - 34)):
+        p.setPen(QColor("#8A919C") if index < 2 else QColor("#8A919C"))
+        p.drawText(QRectF(x - 10, 0, 30, 40), Qt.AlignmentFlag.AlignCenter, ("–", "▢", "✕")[index])
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(accent))
+    p.drawRoundedRect(QRectF(24, 64, w * 0.38, 18), 6, 6)
+    p.setBrush(QColor("#2C313B"))
+    for row in range(int((h - 120) / 34)):
+        width = w * (0.82 - (row % 4) * 0.13)
+        p.drawRoundedRect(QRectF(24, 104 + row * 34, width, 12), 6, 6)
+    p.setBrush(QColor(accent).darker(160))
+    p.drawRoundedRect(QRectF(w * 0.62, 64, w * 0.32, h * 0.42), 10, 10)
+    p.end()
+    return image
+
+
+def blurred(image: QImage, rect) -> QImage:  # noqa: ANN001
+    """Desfoque barato (reduz e amplia duas vezes): imita o acrylic do Windows nas prévias."""
+    crop = image.copy(rect)
+    w, h = max(1, crop.width()), max(1, crop.height())
+    smooth = Qt.TransformationMode.SmoothTransformation
+    ignore = Qt.AspectRatioMode.IgnoreAspectRatio
+    small = crop.scaled(max(1, w // 6), max(1, h // 6), ignore, smooth)
+    small = small.scaled(max(1, w // 18), max(1, h // 18), ignore, smooth)
+    return small.scaled(w, h, ignore, smooth)
+
+
+def put(
+    canvas: QImage, widget, x: int, y: int, radius: int = 10, glass: bool = True, shadow: bool = True
+) -> None:  # noqa: ANN001
+    """Desenha a janela na área de trabalho de demonstração: sombra, vidro desfocado e o conteúdo."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QPainterPath
+
+    QApplication.processEvents()
+    pixmap = widget.grab()
+    w, h = (
+        round(pixmap.width() / pixmap.devicePixelRatio()),
+        round(pixmap.height() / pixmap.devicePixelRatio()),
+    )
+    rect = QRect(x, y, w, h)
+    under = blurred(canvas, rect) if glass else None
+    p = QPainter(canvas)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    if shadow:
+        p.setPen(Qt.PenStyle.NoPen)
+        for step in range(14, 0, -1):
+            p.setBrush(QColor(0, 0, 0, 7))
+            p.drawRoundedRect(
+                QRectF(rect).adjusted(-step, -step + 6, step, step + 6), radius + step, radius + step
+            )
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(rect), radius, radius)
+    p.setClipPath(path)
+    if under is not None:
+        p.drawImage(rect.topLeft(), under)
+    p.drawPixmap(QRectF(rect), pixmap, QRectF(pixmap.rect()))
+    p.end()
+
+
+def write_apng(path: Path, frames: list[QImage], delay_ms: int, last_ms: int = 1500) -> None:
+    """PNG animado (APNG) sem bibliotecas extras: abre animado no navegador."""
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    first = frames[0]
+    w, h = first.width(), first.height()
+    parts = [b"\x89PNG\r\n\x1a\n", chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))]
+    parts.append(chunk(b"acTL", struct.pack(">II", len(frames), 0)))
+    sequence = 0
+    for index, frame in enumerate(frames):
+        image = frame.convertToFormat(QImage.Format.Format_RGB888)
+        stride = image.bytesPerLine()
+        bits = bytes(image.constBits())
+        raw = b"".join(b"\x00" + bits[y * stride : y * stride + w * 3] for y in range(h))
+        data = zlib.compress(raw, 6)
+        delay = last_ms if index == len(frames) - 1 else delay_ms
+        parts.append(chunk(b"fcTL", struct.pack(">IIIIIHHBB", sequence, w, h, 0, 0, delay, 1000, 0, 0)))
+        sequence += 1
+        if index == 0:
+            parts.append(chunk(b"IDAT", data))
+        else:
+            parts.append(chunk(b"fdAT", struct.pack(">I", sequence) + data))
+            sequence += 1
+    parts.append(chunk(b"IEND", b""))
+    path.write_bytes(b"".join(parts))
+
+
+def shell_v2_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
+    """Telas do Ventude Shell (2.0), compostas numa área de trabalho de 1920×1080."""
+
+    from ventude.services import indexer, shellicons
+    from ventude.services import taskbar as taskbar_service
+    from ventude.services.taskbar import TaskbarHider
+    from ventude.services.weather import Place
+    from ventude.ui.shell.controller import ShellController
+    from ventude.ui.shell.curtain import PowerFx
+
+    island._cancel_toasts()
+    island.collapse()
+    media.state = None
+    media.state_changed.emit(None)
+    ctx.update_settings(pinned_metrics_json="", animation="rapida", replace_taskbar=False)
+    # ---------- dados de demonstração ----------
+    catalog = demo_catalog()
+    by_name = {e.name: e for e in catalog}
+    ctx.indexer.apps = catalog
+    folders = Path(tempfile.mkdtemp(prefix="ventude-demo-"))
+    demo_files = []
+    for name in ("Projetos", "Ventude_Notch", "Fotos da viagem"):
+        (folders / name).mkdir()
+        demo_files.append(indexer.entry(name, str(folders / name), "folder"))
+    for name in ("Relatório Q4.docx", "Orçamento 2027.xlsx", "Apresentação.pptx", "contrato.pdf", "logo.png"):
+        (folders / name).write_bytes(b"")
+        demo_files.append(indexer.entry(name, str(folders / name), "file"))
+    ctx.indexer.files = demo_files
+    log: list[object] = []
+    hider = TaskbarHider(
+        windows=lambda: [1],
+        show=lambda hwnd, cmd: log.append(cmd),
+        screens=lambda: [((0, 0, W, H), (0, 0, W, H - 48))],
+        work_area=lambda rect: True,
+        marker=folders / "barra.json",
+    )
+    windows: list = []  # janelas de demonstração (preenchidas mais abaixo)
+    taskbar_service.list_windows = lambda own_pid=None: list(windows)  # type: ignore[assignment]
+    taskbar_service.covering_window = lambda *a, **k: False  # type: ignore[assignment]
+    fx = PowerFx(ctx, runner=lambda key: (True, ""))  # prévia: nunca desliga nada
+    shell = ShellController(ctx, island, hider, fx=fx)
+    store = ctx.store
+    shell.seed_start_pins()
+    for name in ("Microsoft Edge", "Firefox", "WhatsApp", "LinkedIn", "Relógio", "OBS Studio"):
+        entry = by_name.get(name)
+        if entry is not None:
+            store.add_pin("start", entry.kind, entry.name, entry.path)
+    for name in ("Explorador de Arquivos", "Firefox", "Microsoft Store", "Discord", "Spotify", "Claude"):
+        entry = by_name.get(name)
+        if entry is not None:
+            store.add_pin("taskbar", entry.kind, entry.name, entry.path)
+    now = time.time()
+    for label, minutes in (
+        ("Antigravity", 1),
+        ("Claude", 1),
+        ("Windows PowerShell", 16 * 60),
+        ("Spotify", 20 * 60),
+        ("Steam", 21 * 60),
+    ):
+        entry = by_name.get(label)
+        if entry is not None:
+            store.record_launch(entry.kind, entry.name, entry.path, ts=now - minutes * 60)
+    store.record_launch("system", "Configurações", "ms-settings:", ts=now - 26 * 3600)
+    store.record_launch("system", "Lixeira", "shell:RecycleBinFolder", ts=now - 9 * 86400)
+    for index, item in enumerate(demo_files[3:]):
+        store.record_launch("file", item.name, item.path, ts=now - (3 + index * 7) * 3600)
+    city = Place("São Paulo", "Brasil", -23.55, -46.633, "São Paulo")
+    ctx.update_settings(weather_city_json=city.to_json())
+    ctx.refresh_weather()
+    settle(island, 600)
+    # ---------- ícones reais (carregados antes de fotografar) ----------
+    names = [shellicons.parsing_name(e.kind, e.path) for e in catalog + demo_files]
+    names += [shellicons.parsing_name(p.kind, p.target) for p in store.pins("taskbar") + store.pins("start")]
+    for size in (16, 22, 24, 30, 32, 48, 56):
+        for name in names:
+            ctx.icons.pixmap(name, size)
+    end = time.monotonic() + 25
+    while time.monotonic() < end and not all(ctx.icons.ready(n, s) for n in names for s in (24, 32) if n):
+        QApplication.processEvents()
+        time.sleep(0.02)
+    # ---------- barra de tarefas ----------
+    ctx.update_settings(replace_taskbar=True, pill_date=False, pill_weather=False)
+    settle(island, 500)
+    bar = shell.taskbars[0]
+    bar.force_glass_look = True
+    from ventude.services.taskbar import WindowInfo
+
+    def window(label: str, title: str, hwnd: int, foreground: bool = False) -> None:
+        entry = by_name.get(label)
+        if entry is not None:
+            app_id = entry.path if entry.kind == "uwp" else ""
+            exe = "" if entry.kind == "uwp" else (apps_lnk_target(entry.path) or entry.path)
+            windows.append(WindowInfo(hwnd, title, hwnd, exe, foreground=foreground, app_id=app_id))
+
+    def apps_lnk_target(path: str) -> str:
+        from ventude.services.winutil import lnk_target
+
+        return lnk_target(path) if path.lower().endswith(".lnk") else path
+
+    window("Explorador de Arquivos", "Downloads - Explorador de Arquivos", 101)
+    window("Explorador de Arquivos", "Projetos - Explorador de Arquivos", 102)
+    window("Firefox", "Ventude_Notch · GitHub — Mozilla Firefox", 201, foreground=True)
+    window("Discord", "#geral | Ventude - Discord", 301)
+    window("Spotify", "Spotify Premium", 401)
+    window("Visual Studio Code", "taskbar.py - Ventude_Notch - Visual Studio Code", 501)
+    window("Steam", "Steam", 601)
+    shell.apply_windows(windows)
+    from ventude.services.audio import AudioState, Device
+
+    demo_audio = AudioState(
+        outputs=(
+            Device("1", "Alto-falantes (Realtek High Definition Audio)", "render", True),
+            Device("2", "Fones de ouvido (WH-1000XM4)", "render"),
+        ),
+        inputs=(Device("3", "Microfone (USB)", "capture", True),),
+        master=0.62,
+        mic=0.8,
+    )
+    ctx.audio.state = demo_audio
+    ctx.audio.changed.emit(demo_audio)
+    shell.update_status()
+    bar.clock.set_time(datetime_now(), True)
+    settle(island, 700)
+    desktop = wallpaper()
+    p = QPainter(desktop)
+    p.drawImage(330, 110, mock_window("Ventude_Notch · GitHub — Mozilla Firefox", "#6EE7B7", 1260, 780))
+    p.end()
+    put(desktop, island, (W - island.width()) // 2, island.y(), radius=19, glass=False, shadow=False)
+    QImage(desktop)
+    put(desktop, bar, 0, H - 48, radius=0, shadow=False)
+    desktop.save(str(out / "50-shell-area-de-trabalho.png"))
+    desktop.copy(0, H - 120, W, 120).save(str(out / "51-barra-de-tarefas.png"))
+    desktop.copy(0, H - 80, 760, 80).scaled(
+        1520, 160, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+    ).save(str(out / "51b-barra-esquerda-zoom.png"))
+    desktop.copy(W - 560, H - 80, 560, 80).scaled(
+        1120, 160, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+    ).save(str(out / "51c-barra-direita-zoom.png"))
+    with_bar = QImage(desktop)
+
+    def scene(name: str, widget, x: int, y: int, *extra) -> None:  # noqa: ANN001
+        canvas = QImage(with_bar)
+        put(canvas, widget, x, y)
+        for other, ox, oy in extra:
+            put(canvas, other, ox, oy)
+        canvas.save(str(out / name))
+
+    # ---------- Menu Iniciar ----------
+    ctx.update_settings(start_view="category")
+    shell.toggle_start(bar)
+    menu = shell.start_menu
+    menu.force_glass_look = True
+    menu.set_person("Você", "")
+    settle(island, 900)
+    rect = shell.menu_rect(680, 740, bar)
+    scene("52-menu-iniciar.png", menu, rect.x(), rect.y())
+    area = menu.home_scroll.verticalScrollBar()
+    area.setValue(area.maximum())
+    settle(island, 300)
+    scene("53-menu-iniciar-todos.png", menu, rect.x(), rect.y())
+    ai = next((t for t in menu.categories.tiles if t.label == "Inteligência Artificial"), None)
+    if ai is not None:
+        menu._open_category(ai)
+        settle(island, 600)
+        scene("54-menu-iniciar-categoria.png", menu, rect.x(), rect.y())
+        menu.show_home()
+    area.setValue(0)
+    menu.input.setText("con")
+    settle(island, 400)
+    scene("55-menu-iniciar-busca.png", menu, rect.x(), rect.y())
+    menu.input.clear()
+    settle(island, 200)
+    # ---------- Energia ----------
+    shell.toggle_flyout("power", menu.power_btn)
+    power_flyout = shell.flyouts["power"]
+    power_flyout.force_glass_look = True
+    settle(island, 500)
+    anchor = menu.power_btn.mapTo(menu, QPoint(0, 0))
+    px = rect.x() + anchor.x() + menu.power_btn.width() - power_flyout.width() + 8
+    py = rect.y() + anchor.y() - power_flyout.height() - 4
+    canvas = QImage(with_bar)
+    put(canvas, menu, rect.x(), rect.y())
+    put(canvas, power_flyout, px, py)
+    canvas.save(str(out / "56-energia.png"))
+    power_flyout.hide()
+    menu.hide()
+    # ---------- Pesquisa (tecla Windows) ----------
+    shell.open_search(bar=bar)
+    search = shell.search
+    search.force_glass_look = True
+    search.recent.avatar.set_person("Você")
+    search.recent.refresh()
+    settle(island, 700)
+    srect = shell.menu_rect(760, 700, bar)
+    scene("57-pesquisa-recentes.png", search, srect.x(), srect.y())
+    search.input.setText("con")
+    settle(island, 500)
+    scene("58-pesquisa-resultados.png", search, srect.x(), srect.y())
+    search.input.setText("wi-fi")
+    settle(island, 400)
+    scene("59-pesquisa-configuracoes.png", search, srect.x(), srect.y())
+    search.input.setText("1450 * 5,85")
+    settle(island, 400)
+    scene("60-pesquisa-calculadora.png", search, srect.x(), srect.y())
+    search.hide()
+    # ---------- painéis da barra ----------
+    ctx.caffeine._apply = lambda _flags: True
+    ctx.caffeine.start(3600)
+    for name, anchor_widget, file in (
+        ("quick", bar.quick, "61-painel-rapido.png"),
+        ("calendar", bar.clock, "62-calendario.png"),
+    ):
+        shell.toggle_flyout(name, anchor_widget, bar)
+        flyout = shell.flyouts[name]
+        flyout.force_glass_look = True
+        if name == "quick":
+            flyout.set_network("wifi", "Casa 5G")
+        settle(island, 600)
+        a = anchor_widget.mapTo(bar, QPoint(0, 0))
+        fx_x = min(W - flyout.width() - 12, a.x() + anchor_widget.width() - flyout.width() + 8)
+        scene(file, flyout, fx_x, H - 48 - flyout.height() - 12)
+        flyout.hide()
+    ctx.caffeine.stop()
+    # ---------- prévias ao vivo ----------
+    target = next((b for b in bar.buttons.values() if len(b.item.windows) >= 2), None) or next(
+        (b for b in bar.buttons.values() if b.item.windows), None
+    )
+    if target is not None:
+        shell._show_thumbs(target)
+        thumbs = shell.thumbs
+        thumbs.force_glass_look = True
+        thumbs.handles = []
+        thumbs.preview_images = {
+            w.hwnd: mock_window(w.title, ("#6EE7B7", "#8EB8F5", "#F6C86B")[i % 3], 1280, 760)
+            for i, w in enumerate(thumbs.windows)
+        }
+        settle(island, 500)
+        a = target.mapTo(bar, QPoint(target.width() // 2, 0))
+        tx = max(8, min(W - thumbs.width() - 8, a.x() - thumbs.width() // 2))
+        scene("63-previas.png", thumbs, tx, H - 48 - thumbs.height() - 8)
+        thumbs.hide_now()
+    # ---------- ilha com o Shell ----------
+    island.expand("home")
+    settle(island, 900)
+    shot(island, out / "64-ilha-no-shell.png")
+    island.collapse()
+    settle(island, 600)
+
+    # ---------- cortinas de energia ----------
+    def curtain_frame(key: str, t_ms: float, greet: bool = False) -> QImage:
+        phase_start = {"t": 0.0}
+        clock = {"t": 0.0}
+        fx._elapsed = lambda: clock["t"] - phase_start["t"]
+        original_enter = PowerFx._enter
+
+        def enter(self, phase: str) -> None:  # noqa: ANN001
+            self.phase = phase
+            phase_start["t"] = clock["t"]
+
+        fx._enter = enter.__get__(fx)
+        _ = original_enter
+        if greet:
+            fx.greet("Você", "27° e parcialmente nublado")
+        else:
+            fx.play(key)
+        fx.timer.stop()
+        for curtain in fx.curtains:
+            curtain.hide()
+        step = 0.0
+        while step <= t_ms:
+            clock["t"] = step
+            fx._tick()
+            step += 20
+        primary = next(c for c in fx.curtains if c.primary)
+        primary.resize(W, H)
+        canvas = QImage(with_bar)
+        painter = QPainter(canvas)
+        painter.drawPixmap(0, 0, primary.grab())
+        painter.end()
+        fx.timer.stop()
+        fx._close_curtains()
+        fx.phase = ""
+        return canvas
+
+    curtain_frame("shutdown", 1500).save(str(out / "65-ate-logo.png"))
+    grid = QImage(W, H, QImage.Format.Format_RGB32)
+    painter = QPainter(grid)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    for index, (key, t, greet) in enumerate(
+        (("restart", 1300, False), ("sleep", 1100, False), ("lock", 600, False), ("", 900, True))
+    ):
+        frame = curtain_frame(key, t, greet).scaled(
+            W // 2, H // 2, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+        )
+        painter.drawImage((index % 2) * (W // 2), (index // 2) * (H // 2), frame)
+    painter.setPen(QColor(255, 255, 255, 40))
+    painter.drawLine(W // 2, 0, W // 2, H)
+    painter.drawLine(0, H // 2, W, H // 2)
+    painter.end()
+    grid.save(str(out / "66-reiniciar-suspender-bloquear-bom-dia.png"))
+    frames = []
+    for t in range(0, 2600, 50):
+        frames.append(
+            curtain_frame("shutdown", t).scaled(
+                768, 432, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+        )
+    strip = QImage(5 * 768 // 2, 432 // 2, QImage.Format.Format_RGB32)
+    painter = QPainter(strip)
+    for index, t_index in enumerate((0, 6, 14, 30, len(frames) - 1)):
+        painter.drawImage(
+            index * 384,
+            0,
+            frames[t_index].scaled(
+                384, 216, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+            ),
+        )
+    painter.end()
+    strip.save(str(out / "67-ate-logo-sequencia.png"))
+    write_apng(out / "68-ate-logo-animado.png", frames, 50)
+    shell.restore()
+    for widget in (*shell.taskbars, shell.start_menu, shell.search, *shell.flyouts.values()):
+        if widget is not None:
+            widget.hide()
+
+
+def datetime_now():  # noqa: ANN201
+    from datetime import datetime
+
+    return datetime.now()
 
 
 if __name__ == "__main__":

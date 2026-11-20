@@ -44,7 +44,10 @@ src/ventude/
     calc.py            calculadora segura da busca (ast, sem eval)
     indexer.py         índice de apps, pastas e arquivos + abrir no Terminal/editor
     power.py           Central de Energia e atualização do Windows pendente
-    taskbar.py         esconder/restaurar a barra do Windows e listar janelas (Alt + Tab)
+    taskbar.py         esconder/restaurar a barra do Windows (com espaço reservado), janelas e AppUserModelID
+    apps.py            catálogo do Shell: categorias, Configurações do Windows, recentes, conta, bandeja
+    shellicons.py      ícones reais do Windows (IShellItemImageFactory) numa thread própria
+    dwm.py             prévias ao vivo das janelas, vidro (acrylic) e cantos do Windows 11
   ui/
     theme.py           paleta, fonte do sistema e folha de estilo única
     icons.py           ícones SVG de traço (sem fontes de ícones)
@@ -52,14 +55,33 @@ src/ventude/
     context.py         AppContext: serviços + ajustes vivos + sinais compartilhados + clima central
     island.py          janela da ilha: pílula (zonas), painel, avisos, animação, arraste, hover, atalho
     toast.py           avisos na ilha e lembretes da Agenda
-    command.py         barra de comandos / Menu Iniciar / busca universal
+    command.py         CommandEngine (motor da busca, usado em todo lugar) + barra de comandos da ilha
     capture.py         sobreposição de tela: conta-gotas e seleção para OCR
     qr.py              cartão do QR Code dentro da ilha
-    power_menu.py      menu da Central de Energia (confirmação em dois cliques)
-    dock.py            Dock do Ventude + DockController (barra do Windows sempre restaurada)
+    power_menu.py      menu da Central de Energia na ilha (sem o Shell)
     tray.py            ícone e menu da bandeja, avisos
     pages/             uma classe por aba, criada só quando a aba é aberta
+    shell/             Ventude Shell (2.0)
+      controller.py    ShellController: barras, Iniciar, Pesquisa, painéis, hook da tecla Windows, restauração
+      taskbar.py       barra de tarefas (uma por monitor), agrupamento das janelas, botões animados
+      start_menu.py    Menu Iniciar: Fixado, Recente, Todos (Categoria/Grade/Lista), conta e Energia
+      search.py        Pesquisa: recentes, resultados por seção e painel de ações (também dentro do Iniciar)
+      flyouts.py       painel rápido, calendário, ícones ocultos da bandeja e menu de Energia
+      thumbs.py        prévias ao vivo das janelas (DWM)
+      tiles.py         grades desenhadas à mão do Iniciar (entram em cascata)
+      curtain.py       PowerFx: "Até logo!" antes de desligar/reiniciar/suspender/bloquear e "Bom dia!"
+      common.py        janela de vidro com animação de abrir/fechar, botões, ícones reais, avatar
 ```
+
+## Ventude Shell (2.0)
+
+- **Ligar/desligar**: `replace_taskbar` (barra) e `replace_start_menu` (tecla Windows). A primeira abertura da 2.0 (layout 6) liga os dois e tira data e clima da ilha. O `ShellController` só existe no app (os testes passam uma barra do Windows de mentira e uma energia falsa).
+- **Espaço da barra**: o `TaskbarHider` esconde `Shell_TrayWnd`/`Shell_SecondaryTrayWnd` e define a área útil de cada monitor como a tela menos a altura da barra do Ventude (48 px × escala do monitor). Com "ocultar automaticamente", a área útil é a tela toda e a barra desce até o mouse encostar embaixo. Em tela cheia (jogos, vídeos), a barra some.
+- **Agrupamento**: janela e fixado casam pelo AppUserModelID (`SHGetPropertyStoreForWindow`), pela família do pacote da Loja (`WindowsApps\Nome_versão__editor`) ou pelo .exe (atalhos .lnk resolvidos). Apps da Loja usam o ícone de `shell:AppsFolder\AppID`.
+- **Fixados e histórico**: tabelas `pins` (lugar `taskbar`/`start`) e `launches` (Pesquisas recentes) no SQLite. Na primeira abertura, a barra começa com os fixados da barra do Windows e o Iniciar com apps conhecidos que estiverem instalados.
+- **Tecla Windows**: `WinKeyLogic` (o mesmo da 1.2) num hook `WH_KEYBOARD_LL`; Win sozinha abre/fecha a Pesquisa e Win + S abre. Teclas injetadas (Visão de tarefas, Win + D, Win + P enviados pela barra) passam direto.
+- **Energia**: tudo passa por `AppContext.request_power()`. Com o Shell, o `PowerFx` abre uma cortina por monitor, escurece, mostra a despedida com a contagem (Esc/Cancelar desistem), escurece de vez, executa e (bloquear/suspender/hibernar) some depois. Se desligar/reiniciar não acontecer em 15 s, a cortina sai e avisa.
+- **Vidro**: `SetWindowCompositionAttribute` (acrylic) + cantos arredondados e borda do Windows 11 via DWM; sem suporte, as janelas ficam opacas.
 
 ## Threads
 
@@ -67,12 +89,13 @@ src/ventude/
 - **Pool `ventude-*` (4 threads):** HTTP, leitura de credenciais, descoberta do Antigravity. O resultado volta por sinal Qt enfileirado (`Tasks.run(..., done=...)`).
 - **`ventude-media`:** loop asyncio do WinRT; eventos chegam à interface por sinais.
 - **`ventude-audio`:** COM inicializado uma vez; fila de comandos de áudio que junta os repetidos (só o último valor de um slider é aplicado) e relê o estado depois de cada lote.
-- **`ventude-keys`:** só com "Tecla Windows abre o Ventude" ligado: hook `WH_KEYBOARD_LL` com laço de mensagens próprio, para a digitação nunca depender da thread da interface. A decisão de cada tecla fica em `WinKeyLogic` (testável sem hook).
-- **Leituras do Sistema, privacidade e lista de janelas do Dock** rodam no pool; o `HardwareMonitor` faz uma leitura por vez.
+- **`ventude-keys`:** só com "Tecla Windows abre a Pesquisa do Ventude" ligado: hook `WH_KEYBOARD_LL` com laço de mensagens próprio, para a digitação nunca depender da thread da interface. A decisão de cada tecla fica em `WinKeyLogic` (testável sem hook).
+- **`ventude-icons`:** COM em STA; carrega os ícones reais do Windows em fila e entrega `QImage` à interface (o `QPixmap` é feito na thread da interface).
+- **Leituras do Sistema, privacidade, lista de janelas da barra, bandeja e arquivos recentes** rodam no pool; o `HardwareMonitor` faz uma leitura por vez.
 
 ## Serviços que mexem no sistema
 
-Nenhum serviço que altera o Windows roda antes de `AppContext.start()` (chamado só pelo app): os testes criam o contexto sem iniciar nada. A barra de tarefas e o hook de teclado têm várias camadas de restauração: desligar o ajuste, `aboutToQuit`, `atexit`, `sys.excepthook` (`DockController.emergency`) e, para um processo morto à força, o marcador `barra-escondida.json` lido na próxima abertura.
+Nenhum serviço que altera o Windows roda antes de `AppContext.start()` / `ShellController.start()` (chamados só pelo app): os testes criam o contexto sem iniciar nada. A barra de tarefas e o hook de teclado têm várias camadas de restauração: desligar o ajuste, `aboutToQuit`, `atexit`, `sys.excepthook` (`ShellController.emergency`) e, para um processo morto à força, o marcador `barra-escondida.json` lido na próxima abertura (que também devolve a área útil original de cada monitor).
 
 ## Limites das IAs
 

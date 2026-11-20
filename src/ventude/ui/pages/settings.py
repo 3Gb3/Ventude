@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -378,24 +379,12 @@ class SettingsPage(Page):
                 self.weather_locate,
             )
         )
-        self.replace_taskbar = self._switch(s.replace_taskbar, "replace_taskbar")
-        self.replace_taskbar.setEnabled(system.autostart_supported())
+        self.pill_date = self._switch(s.pill_date, "pill_date")
         body.addWidget(
             setting_row(
-                "Substituir barra de tarefas pelo Dock do Ventude",
-                "Esconde a barra do Windows (junto com os ícones da bandeja dela) e mostra o Dock: apps "
-                "fixados, janelas abertas e relógio. A barra sempre volta ao desligar ou fechar o Ventude.",
-                self.replace_taskbar,
-            )
-        )
-        self.replace_start = self._switch(s.replace_start_menu, "replace_start_menu")
-        self.replace_start.setEnabled(system.autostart_supported())
-        body.addWidget(
-            setting_row(
-                "Tecla Windows abre o Ventude",
-                "Win sozinha e Win + S abrem o Menu Iniciar / Busca do Ventude (apps, pastas, arquivos, "
-                "calculadora, energia). Win + E, D, L, V, Tab, setas e outros atalhos seguem do Windows.",
-                self.replace_start,
+                "Data na ilha",
+                "Dia da semana na ilha fechada. Com o Ventude Shell, a data já aparece no relógio da barra.",
+                self.pill_date,
             )
         )
         self.clipboard = self._switch(s.clipboard_history, "clipboard_history")
@@ -430,6 +419,86 @@ class SettingsPage(Page):
                 "Letra da música no Início",
                 "Verso atual sincronizado no player. Busca no lrclib.net (envia só título e artista).",
                 self.lyrics,
+            )
+        )
+        column.addWidget(card)
+
+        # ---------- Ventude Shell (2.0) ----------
+        card, body = section("Ventude Shell", theme.ACCENT)
+        self.shell_card = card
+        body.addWidget(
+            label(
+                "Barra de tarefas, Menu Iniciar e Pesquisa do Ventude no lugar dos do Windows. A barra do "
+                "Windows sempre volta ao desligar aqui ou fechar o Ventude.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        windows_only = system.autostart_supported()
+        self.replace_taskbar = self._switch(s.replace_taskbar, "replace_taskbar")
+        self.replace_taskbar.setEnabled(windows_only)
+        body.addWidget(
+            setting_row(
+                "Barra de tarefas do Ventude",
+                "Clima, Iniciar, Pesquisa, apps fixados e abertos (com prévia ao vivo), painel rápido de "
+                "rede e volume, relógio com calendário. Botão direito na barra: alinhar, ocultar, voltar.",
+                self.replace_taskbar,
+            )
+        )
+        self.replace_start = self._switch(s.replace_start_menu, "replace_start_menu")
+        self.replace_start.setEnabled(windows_only)
+        body.addWidget(
+            setting_row(
+                "Tecla Windows abre a Pesquisa do Ventude",
+                "Win sozinha e Win + S abrem a Pesquisa (apps, pastas, arquivos, Configurações, calculadora, "
+                "comandos). Win + E, D, L, V, Tab, setas e os outros atalhos continuam do Windows.",
+                self.replace_start,
+            )
+        )
+        self.taskbar_align = combo([("Centralizados", "center"), ("À esquerda", "left")], s.taskbar_align)
+        self.taskbar_align.currentIndexChanged.connect(
+            lambda: self._set(taskbar_align=self.taskbar_align.currentData())
+        )
+        body.addWidget(setting_row("Ícones da barra", "Onde ficam o Iniciar e os apps.", self.taskbar_align))
+        self.autohide = self._switch(s.taskbar_autohide, "taskbar_autohide")
+        body.addWidget(
+            setting_row(
+                "Ocultar a barra automaticamente",
+                "A barra desce e volta quando o mouse encosta embaixo. As janelas usam a tela toda.",
+                self.autohide,
+            )
+        )
+        self.taskbar_weather = self._switch(s.taskbar_weather, "taskbar_weather")
+        body.addWidget(
+            setting_row(
+                "Clima na barra", "Temperatura e aviso de chuva no canto esquerdo.", self.taskbar_weather
+            )
+        )
+        self.all_monitors = self._switch(s.taskbar_all_monitors, "taskbar_all_monitors")
+        body.addWidget(setting_row("Barra em todos os monitores", "", self.all_monitors))
+        self.glass = self._switch(s.shell_glass, "shell_glass")
+        body.addWidget(
+            setting_row(
+                "Efeito de vidro",
+                "Desfoque (acrylic) atrás da barra, do Iniciar e da Pesquisa.",
+                self.glass,
+            )
+        )
+        self.power_animation = self._switch(s.power_animation, "power_animation")
+        body.addWidget(
+            setting_row(
+                "Animação de energia",
+                "Antes de desligar, reiniciar, suspender, bloquear ou sair, as telas escurecem e aparece "
+                "“Até logo!” com alguns segundos para cancelar (Esc).",
+                self.power_animation,
+            )
+        )
+        self.greeting = self._switch(s.shell_greeting, "shell_greeting")
+        body.addWidget(
+            setting_row(
+                "Saudação ao ligar",
+                "“Bom dia, …!” com a data e o clima logo depois de ligar o PC.",
+                self.greeting,
             )
         )
         column.addWidget(card)
@@ -534,6 +603,7 @@ class SettingsPage(Page):
         column.addWidget(card)
         column.addStretch(1)
         self._building = False
+        ctx.settings_changed.connect(self.sync)
         ctx.settings_changed.connect(self._sync_providers)
         self._sync_providers(ctx.settings)
 
@@ -743,6 +813,29 @@ class SettingsPage(Page):
 
     def sync(self, settings: Settings) -> None:
         self._fill_monitors()
+        # Mudanças feitas fora daqui (menu da barra, bandeja): os botões acompanham.
+        for switch, value in (
+            (self.replace_taskbar, settings.replace_taskbar),
+            (self.replace_start, settings.replace_start_menu),
+            (self.autohide, settings.taskbar_autohide),
+            (self.pill_date, settings.pill_date),
+            (self.weather_pill, settings.pill_weather),
+        ):
+            if switch.isChecked() != value:
+                switch.blockSignals(True)
+                switch.setChecked(value)
+                switch.blockSignals(False)
+        index = self.taskbar_align.findData(settings.taskbar_align)
+        if index >= 0 and index != self.taskbar_align.currentIndex():
+            self.taskbar_align.blockSignals(True)
+            self.taskbar_align.setCurrentIndex(index)
+            self.taskbar_align.blockSignals(False)
+
+    def scroll_to_shell(self) -> None:
+        """Abre os Ajustes já na seção do Ventude Shell (menu da barra, painel rápido)."""
+        area = self.findChild(QScrollArea)
+        if area is not None:
+            area.verticalScrollBar().setValue(max(0, self.shell_card.y() - 8))
 
     def on_show(self) -> None:
         self._fill_monitors()

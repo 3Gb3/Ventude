@@ -1,6 +1,34 @@
 # Progresso
 
-## Versão 1.2.0 (em andamento, branch `new_version_1.2`)
+## Versão 2.0.0: Ventude Shell (branch `2.0.0`)
+
+Ainda não está na `main`. O Ventude deixa de ser só uma Dynamic Island e passa a substituir a barra de tarefas, o Menu Iniciar e a Pesquisa do Windows.
+
+- [x] **Barra de tarefas** (uma por monitor, opcional só no principal): clima com aviso de chuva; Iniciar, Pesquisa e Visão de tarefas; fixados + janelas abertas agrupadas pelo AppUserModelID, pacote da Loja ou .exe, com ícones reais do Windows; indicador animado (aberto/em foco), ícone que aparece com um "pop" e pula enquanto o app abre; clique foca/minimiza/alterna, clique do meio abre outra janela, menu com fixar/desafixar (barra e Iniciar), abrir local, maximizar/restaurar e fechar; prévias ao vivo (DWM) ao parar o mouse; ícones ocultos da bandeja; rede/volume/bateria (roda muda o volume); relógio com data; cantinho de mostrar a área de trabalho; menu da barra (Gerenciador de Tarefas, alinhar, ocultar automaticamente, voltar para a barra do Windows).
+- [x] **Área útil reservada**: janelas maximizadas param acima da barra; com "ocultar automaticamente", usam a tela toda e a barra volta ao encostar o mouse embaixo. Em tela cheia, a barra some.
+- [x] **Menu Iniciar**: pesquisa no topo; Fixado (3 linhas, "Mostrar mais"); Recente (abertos pelo Ventude + arquivos recentes do Windows, "Mostrar tudo"); Todos por Categoria (IA, Desenvolvimento, Navegadores, Comunicação, Produtividade, Entretenimento, Jogos, Criatividade, Utilitários), Grade ou Lista; rodapé com foto e nome da conta, Ajustes, Explorador e Energia. Fixados iniciais: apps conhecidos que estiverem instalados.
+- [x] **Pesquisa** (tecla Windows, Win + S, lupa da barra): Pesquisas recentes com hora relativa e X para tirar; resultados por seção com Melhor correspondência e painel de ações (Abrir, Executar como administrador, Abrir local, Fixar no Iniciar/na barra, Terminal/editor, Copiar caminho); páginas de Configurações do Windows e itens do sistema (Lixeira, Painel de Controle...); "Pesquisar na web"; todos os comandos do Ventude.
+- [x] **Painel rápido**: rede (Wi-Fi com o nome da rede ou Ethernet), Bluetooth, Cafeína, Microfone, Conta-gotas, Capturar texto, Foco, Luz noturna, Projetar, volume e saída de áudio. **Calendário** com a agenda do dia e Foco de 25 min.
+- [x] **Animações de energia**: cortina em todas as telas com "Até logo!" (desligar), "Já volto!" (reiniciar), "Até daqui a pouco!" (suspender), "Até mais tarde!" (hibernar), "Até já!" (bloquear), "Até a próxima, Fulano!" (sair) e as versões com atualização; contagem com Esc/Cancelar; cortina some depois de bloquear/suspender; aviso se o Windows não desligar. "Bom dia/Boa tarde/Boa noite, Fulano!" ao ligar o PC.
+- [x] **Abrir e fechar animados**: Iniciar, Pesquisa e painéis sobem com fade; os blocos do Iniciar entram em cascata; a barra sobe ao iniciar e desce em tela cheia.
+- [x] **Ilha mais enxuta**: com o Shell, energia, cafeína, conta-gotas e OCR saem do topo do painel; data e clima saem da pílula (ajustes "Data na ilha" e "Clima na ilha"); digitar ou Ctrl + K abre a Pesquisa; o atalho global com "abre a barra de comandos" abre a Pesquisa.
+- [x] **Ajustes > Ventude Shell**: barra, tecla Windows, alinhamento, ocultar automaticamente, clima na barra, todos os monitores, vidro, animação de energia e saudação. Bandeja com "Barra de tarefas do Ventude".
+- [x] Testes novos (154 no total), prévias `scripts/preview.py --shell` e documentação.
+
+### Conferido nesta máquina
+
+- Rodando de verdade (sem esconder a barra do Windows): 3 barras (uma por monitor) com vidro, janelas abertas agrupadas com AppID, prévia DWM registrada, Iniciar/Pesquisa/painel rápido abrindo com vidro e ícones reais; a barra do Windows não foi tocada.
+
+### A validar no seu PC
+
+- Ligar o Shell de verdade: a barra do Windows some e volta (desligar o ajuste, sair, "Voltar para a barra do Windows"), janelas maximizadas acima da barra nos 3 monitores e com escalas diferentes.
+- Tecla Windows abrindo a Pesquisa (e Win + E/D/L/V/Tab, Win + Shift + S continuando do Windows).
+- Prévias ao vivo ao parar o mouse num app aberto. Arrastar para reordenar os fixados ainda não existe (no Iniciar, use "Mover para o início").
+- Animação de energia de verdade: bloquear e suspender (a cortina some ao voltar); desligar/reiniciar com apps abertos.
+- Saudação ao ligar o PC (só aparece nos primeiros 4 minutos depois de ligar).
+- Ícones ocultos da bandeja (registro `NotifyIconSettings` do Windows 11) e o botão "Bandeja do Windows".
+
+## Versão 1.2.0 (branch `new_version_1.2`)
 
 Ainda não está na `main`: outros ajustes entram nesta branch antes.
 

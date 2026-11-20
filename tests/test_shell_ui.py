@@ -1,7 +1,9 @@
 """Interface do pacote "Ventude Shell & Sistema": ilha, pílula, abas novas, busca e Dock."""
 
+import sys
 import time
 
+import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QGuiApplication, QKeyEvent, QWheelEvent
 
@@ -317,52 +319,250 @@ def test_command_bar_search_calculator_folders_and_power(qapp, island, app_ctx, 
     assert [c.title for c in bar.commands("sistema")] == ["Abrir Sistema"]
 
 
-def test_win_key_toggles_start_menu(qapp, island, app_ctx):
-    settle(qapp, 200)
-    island.keys.start_pressed.emit()
-    settle(qapp, 100)
-    assert island.expanded and island.panel.command.isVisible()
-    island.keys.start_pressed.emit()  # de novo: fecha
-    settle(qapp, 100)
-    assert not island.expanded
-    island.keys.search_pressed.emit()
-    settle(qapp, 100)
-    assert island.expanded and island.panel.command.isVisible()
-    assert not island.keys.active  # o hook só liga com o ajuste (e no app de verdade)
+# ---------- Ventude Shell (2.0) ----------
+def wait_for(qapp, condition, seconds=3.0):
+    end = time.monotonic() + seconds
+    while not condition() and time.monotonic() < end:
+        qapp.processEvents()
+        time.sleep(0.01)
+    return condition()
 
 
-# ---------- Dock ----------
-def test_dock_controller_hides_and_always_restores(qapp, app_ctx, tmp_path, monkeypatch):
+@pytest.fixture
+def shell(qapp, app_ctx, island, tmp_path, monkeypatch):
+    """ShellController com uma barra do Windows de mentira: nunca esconde a barra de verdade."""
     from ventude.services import taskbar
-    from ventude.services.taskbar import TaskbarHider
-    from ventude.ui.dock import DockController
+    from ventude.services.taskbar import TaskbarHider, WindowInfo
+    from ventude.ui.shell.controller import ShellController
 
     log = []
     hider = TaskbarHider(
         windows=lambda: [1],
-        show=lambda hwnd, cmd: log.append(cmd),
-        screens=lambda: [((0, 0, 100, 100), (0, 0, 100, 90))],
-        work_area=lambda rect: True,
-        marker=tmp_path / "m.json",
+        show=lambda hwnd, cmd: log.append(("show", cmd)),
+        screens=lambda: [((0, 0, 1920, 1080), (0, 0, 1920, 1040))],
+        work_area=lambda rect: log.append(("area", rect)) or True,
+        marker=tmp_path / "barra.json",
     )
-    monkeypatch.setattr(taskbar, "list_windows", lambda own_pid=None: [])
-    monkeypatch.setattr(taskbar, "covering_window", lambda rect, own_pid=None: False)
-    monkeypatch.setattr("ventude.ui.dock.sys.platform", "win32")
-    starts = []
-    controller = DockController(app_ctx, lambda: starts.append(1), hider)
-    controller.start()
-    assert controller.dock is None and log == []  # desligado: nada muda
+    windows = [WindowInfo(10, "Documento - Editor", 1, sys.executable, foreground=True)]
+    monkeypatch.setattr(taskbar, "list_windows", lambda own_pid=None: list(windows))
+    monkeypatch.setattr(taskbar, "covering_window", lambda *a, **k: False)
+    monkeypatch.setattr(taskbar, "monitor_scale", lambda rect: 1.25)
+    monkeypatch.setattr(taskbar, "activate", lambda hwnd: log.append(("activate", hwnd)) or True)
+    monkeypatch.setattr(taskbar, "minimize", lambda hwnd: log.append(("minimize", hwnd)))
+    from ventude.ui.shell.curtain import PowerFx
+
+    fake_power = PowerFx(app_ctx, runner=lambda k: log.append(("power", k)) or (True, ""), time_scale=0.05)
+    controller = ShellController(app_ctx, island, hider, fx=fake_power)  # nunca desliga o PC de verdade
+    controller.test_log = log
+    controller.test_windows = windows
+    yield controller
+    controller.restore()
+    for widget in [
+        *controller.taskbars,
+        controller.start_menu,
+        controller.search,
+        *controller.flyouts.values(),
+    ]:
+        if widget is not None:
+            widget.hide()
+            widget.deleteLater()
+    app_ctx.shell = None
+    app_ctx.power_fx = None
+
+
+def test_shell_taskbar_hides_windows_bar_and_always_restores(qapp, app_ctx, island, shell):
+    from ventude.services.taskbar import SW_HIDE, SW_SHOW
+
+    log = shell.test_log
+    shell.start()
+    assert not shell.taskbars and not any(kind == "show" for kind, _ in log)  # desligado: nada muda
+    assert [p.label for p in app_ctx.store.pins("taskbar")] == ["Explorador de Arquivos"]  # semente
     app_ctx.update_settings(replace_taskbar=True)
-    assert hider.hidden and log == [taskbar.SW_HIDE] and controller.dock.isVisible()
-    controller.dock.click(controller.dock.start)
-    assert starts == [1]
-    controller.emergency()  # erro inesperado: a barra volta na hora
-    assert not hider.hidden and log[-1] == taskbar.SW_SHOW and not controller.dock.isVisible()
-    controller.sync()
-    assert not hider.hidden  # continua restaurada até mexer no ajuste
+    assert shell.hider.hidden and ("show", SW_HIDE) in log
+    assert ("area", (0, 0, 1920, 1020)) in log  # 48 px a 125% reservados para a barra do Ventude
+    bar = shell.taskbars[0]
+    assert bar.isVisible() and island.panel.power_btn.isHidden()  # energia saiu da ilha
+    assert wait_for(qapp, lambda: len(bar.items) == 2)
+    explorer, editor = bar.items
+    assert explorer.pinned and not explorer.windows and editor.windows[0].hwnd == 10
+    shell.item_clicked(bar.buttons[editor.key])  # em foco: minimiza
+    assert ("minimize", 10) in log
+    from PySide6.QtGui import QContextMenuEvent
+
+    menus = []
+    shell.taskbar_menu = lambda b, pos: menus.append(pos)
+    button = bar.buttons[editor.key]
+
+    def right_click(pos):
+        return QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos, bar.mapToGlobal(pos))
+
+    bar.contextMenuEvent(right_click(button.mapTo(bar, button.rect().center())))
+    assert menus == []  # botão direito num app: só o menu do app
+    bar.contextMenuEvent(right_click(QPoint(4, 24)))
+    assert len(menus) == 1  # área vazia: menu da barra
+    bar.start.clicked.emit()
+    assert wait_for(qapp, lambda: shell.start_menu is not None and shell.start_menu.isVisible())
+    log.clear()
+    shell.emergency()  # erro inesperado: a barra do Windows volta na hora
+    assert not shell.hider.hidden and ("show", SW_SHOW) in log and not bar.isVisible()
+    shell.sync()
+    assert not shell.hider.hidden  # continua restaurada até mexer no ajuste
     app_ctx.update_settings(replace_taskbar=False)
     app_ctx.update_settings(replace_taskbar=True)
-    assert hider.hidden
+    assert shell.hider.hidden
+    app_ctx.update_settings(taskbar_autohide=True)
+    assert ("area", (0, 0, 1920, 1080)) in log  # ocultar automaticamente: tela toda para as janelas
     app_ctx.update_settings(replace_taskbar=False)
-    assert not hider.hidden and not (tmp_path / "m.json").exists()
-    controller.dock.deleteLater()
+    assert not shell.hider.hidden and not shell.hider.marker.exists()
+    assert not island.panel.power_btn.isHidden()  # sem o Shell, a energia volta para a ilha
+
+
+def test_win_key_opens_the_search_screen(qapp, app_ctx, island, shell):
+    shell.keys.start_pressed.emit()
+    assert wait_for(qapp, lambda: shell.search is not None and shell.search.isVisible())
+    shell.keys.start_pressed.emit()  # de novo: fecha
+    assert wait_for(qapp, lambda: not shell.search.isVisible())
+    shell.keys.search_pressed.emit()  # Win + S
+    assert wait_for(qapp, lambda: shell.search.isVisible())
+    assert not shell.keys.active  # o hook só liga com o ajuste (e no app de verdade)
+    shell.search.hide()
+    island.expand()
+    settle(qapp, 250)
+    island.set_shell_mode(True)
+    island.keyPressEvent(key(Qt.Key.Key_D, text="d"))  # digitar na ilha abre a Pesquisa
+    assert wait_for(qapp, lambda: shell.search.isVisible()) and shell.search.input.text() == "d"
+
+
+def test_search_screen_results_detail_pins_and_recent(qapp, app_ctx, shell, monkeypatch, tmp_path):
+    from ventude.services import indexer
+
+    folder = tmp_path / "Projetos"
+    folder.mkdir()
+    app_ctx.indexer.apps = [
+        indexer.entry("Calculadora", "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", "uwp")
+    ]
+    app_ctx.indexer.files = [indexer.entry("Projetos", str(folder), "folder")]
+    launched = []
+    monkeypatch.setattr(indexer, "launch", lambda e: launched.append(e.path) or (True, ""))
+    shell.open_search()
+    screen = shell.search
+    assert wait_for(qapp, screen.isVisible)
+    assert (
+        screen.stack.currentWidget() is screen.recent
+        and screen.recent.heading.text() == "Experimente digitar"
+    )
+    screen.input.setText("calc")
+    rows = screen.results.list.rows
+    assert rows[0].text == "Melhor correspondência" and rows[1].command.title == "Calculadora"
+    actions = [text for _, text, _ in screen.results.actions_for(rows[1].command)]
+    assert actions[0] == "Abrir" and "Fixar no Iniciar" in actions and "Fixar na barra de tarefas" in actions
+    screen.results._toggle_pin("start", rows[1].command)
+    assert app_ctx.store.pinned("start", "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App") is not None
+    screen.input.setText("wi-fi")
+    titles = {r.command.title: r.command.section for r in screen.results.list.rows if r.command}
+    assert titles.get("Wi-Fi") == "Configurações"  # páginas de Configurações do Windows
+    screen.input.setText("1450 * 5,85")
+    assert screen.results.list.rows[1].command.title == "= 8482,5"
+    screen.input.setText("calc")
+    screen.results.handle_key(key(Qt.Key.Key_Return))
+    assert launched == ["Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"]
+    assert app_ctx.store.launches()[0].label == "Calculadora"  # vai para "Pesquisas recentes"
+    assert wait_for(qapp, lambda: not screen.isVisible())
+    shell.open_search()
+    assert wait_for(qapp, screen.isVisible)
+    assert screen.recent.heading.text() == "Pesquisas recentes" and len(screen.recent._widgets) == 1
+
+
+def test_start_menu_pins_categories_and_search(qapp, app_ctx, shell, monkeypatch):
+    from ventude.services import indexer
+
+    app_ctx.indexer.apps = [
+        indexer.entry("Calculadora", "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", "uwp"),
+        indexer.entry("Discord", sys.executable, "app"),
+        indexer.entry("Steam", sys.executable + "x", "app"),
+        indexer.entry("Spotify", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "uwp"),
+        indexer.entry("Claude", "Claude_pzs8sxrjxfjjc!Claude", "uwp"),
+    ]
+    shell.seed_start_pins()
+    assert [p.label for p in app_ctx.store.pins("start")] == ["Calculadora", "Spotify", "Discord", "Steam"]
+    shell.seed_start_pins()  # só uma vez
+    assert len(app_ctx.store.pins("start")) == 4
+    app_ctx.store.record_launch("app", "Discord", sys.executable)
+    shell.toggle_start()
+    menu = shell.start_menu
+    assert wait_for(qapp, menu.isVisible)
+    assert [t.label for t in menu.pinned.tiles] == ["Calculadora", "Spotify", "Discord", "Steam"]
+    assert menu.recent.tiles[0].label == "Discord" and menu.recent.tiles[0].subtitle == "agora"
+    categories = {t.label: [c.label for c in t.children] for t in menu.categories.tiles}
+    assert categories["Jogos"] == ["Steam"] and categories["Inteligência Artificial"] == ["Claude"]
+    assert categories["Comunicação"] == ["Discord"] and categories["Entretenimento"] == ["Spotify"]
+    menu._open_category(next(t for t in menu.categories.tiles if t.label == "Jogos"))
+    assert menu.pages.currentWidget() is menu.category_page and menu.category_grid.tiles[0].label == "Steam"
+    menu.input.setText("disc")
+    assert menu.pages.currentWidget() is menu.results_page
+    assert menu.results.list.rows[1].command.title == "Discord"
+    menu.eventFilter(menu.input, key(Qt.Key.Key_Escape))  # Esc limpa a busca...
+    assert menu.input.text() == "" and menu.pages.currentWidget() is menu.home_scroll
+    menu.eventFilter(menu.input, key(Qt.Key.Key_Escape))  # ...e depois fecha
+    assert wait_for(qapp, lambda: not menu.isVisible())
+    menu.view.setCurrentIndex(2)  # Exibição: Lista
+    assert app_ctx.settings.start_view == "list"
+
+
+def test_quick_settings_calendar_and_power_flyouts(qapp, app_ctx, shell, monkeypatch):
+    app_ctx.update_settings(replace_taskbar=True)
+    bar = shell.taskbars[0]
+    app_ctx.caffeine._apply = lambda _flags: True  # não mexe no estado de energia do PC
+    shell.toggle_flyout("quick", bar.quick, bar)
+    quick = shell.flyouts["quick"]
+    assert wait_for(qapp, quick.isVisible)
+    quick.caffeine.clicked.emit()
+    assert app_ctx.caffeine.active and quick.caffeine.on
+    app_ctx.caffeine.stop()
+    shell.toggle_flyout("calendar", bar.clock, bar)
+    calendar_flyout = shell.flyouts["calendar"]
+    assert wait_for(qapp, calendar_flyout.isVisible) and calendar_flyout.day_label.text() == "Hoje"
+    asked = []
+    monkeypatch.setattr(app_ctx, "request_power", lambda key: asked.append(key) or (True, ""))
+    shell.toggle_flyout("power", bar.start)
+    power_flyout = shell.flyouts["power"]
+    titles = [b.text for b in power_flyout._buttons if hasattr(b, "text") and isinstance(b.text, str)]
+    assert titles[:2] == ["Bloquear o PC", "Sair da sessão"] and titles[-1] == "Desligar"
+    power_flyout._choose("shutdown")
+    assert wait_for(qapp, lambda: asked == ["shutdown"])  # passa pela cortina ("Até logo!")
+
+
+def test_power_curtain_counts_down_runs_and_cancels(qapp, app_ctx, monkeypatch):
+    from ventude.services import power
+    from ventude.ui.shell.curtain import PowerFx
+
+    ran = []
+    monkeypatch.setattr(power, "run", lambda k: ran.append(f"direto:{k}") or (True, ""))  # nunca o de verdade
+    fx = PowerFx(app_ctx, runner=lambda k: ran.append(k) or (True, ""), time_scale=0.05)
+    app_ctx.power_fx = fx
+    try:
+        assert app_ctx.request_power("shutdown") == (True, "")
+        assert fx.active and fx.title == "Até logo!" and fx.curtains and fx.cancellable
+        assert ran == []  # primeiro escurece e mostra a despedida...
+        assert wait_for(qapp, lambda: ran == ["shutdown"])  # ...depois desliga
+        assert fx.phase == "gone" and not fx.cancellable
+        fx.skip()
+        assert not fx.active and not fx.curtains
+        fx.play("restart")
+        assert fx.title == "Já volto!"
+        fx.curtains[0].keyPressEvent(key(Qt.Key.Key_Escape))  # Esc cancela
+        assert wait_for(qapp, lambda: not fx.active) and ran == ["shutdown"]
+        fx.play("lock")  # bloquear: a cortina some sozinha depois
+        assert wait_for(qapp, lambda: not fx.active) and ran == ["shutdown", "lock"]
+        failing = PowerFx(app_ctx, runner=lambda k: (False, "A hibernação está desligada"), time_scale=0.05)
+        failing.play("hibernate")
+        assert wait_for(qapp, lambda: failing.error) and failing.title == "Não deu"
+        failing.skip()
+        fx.greet("Fulano de Tal", "27° e sol")
+        assert fx.title.endswith(", Fulano!") and "27° e sol" in fx.subtitle
+        assert wait_for(qapp, lambda: not fx.active)
+        app_ctx.update_settings(power_animation=False)
+        assert app_ctx.request_power("lock") == (True, "") and ran[-1] == "direto:lock"  # sem animação
+        assert not fx.active
+    finally:
+        app_ctx.power_fx = None

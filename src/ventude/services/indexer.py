@@ -158,14 +158,27 @@ def scan_store_apps(known: set[str]) -> list[Entry]:
     except (OSError, subprocess.SubprocessError, ValueError):
         log.debug("Get-StartApps indisponível", exc_info=True)
         return []
+    return store_entries(data, known)
+
+
+def store_entries(data: object, known: set[str]) -> list[Entry]:
+    """Linhas do Get-StartApps -> apps abertos por shell:AppsFolder (Loja e os que não têm .lnk, como o
+    Explorador de Arquivos). Os que já vieram por atalho .lnk, links da web e desinstaladores ficam
+    de fora."""
     rows = data if isinstance(data, list) else [data]
     out = []
+    seen = set(known)
     for row in rows:
         if not isinstance(row, dict):
             continue
-        name, app_id = str(row.get("Name") or ""), str(row.get("AppID") or "")
-        if "!" in app_id and name and name.lower() not in known:
-            out.append(entry(name, app_id, "uwp"))
+        name, app_id = str(row.get("Name") or "").strip(), str(row.get("AppID") or "").strip()
+        lowered = name.lower()
+        if not name or not app_id or lowered in seen or app_id.lower().startswith(("http:", "https:")):
+            continue
+        if any(word in lowered for word in SKIP_APPS):
+            continue
+        seen.add(lowered)
+        out.append(entry(name, app_id, "uwp"))
     return out
 
 
@@ -350,6 +363,7 @@ class Indexer(QObject):
     """Mantém o índice em memória; a varredura roda no pool de threads."""
 
     ready = Signal(int)  # quantos itens
+    apps_ready = Signal(int)  # os apps já estão prontos (o Iniciar não espera os arquivos)
 
     def __init__(self, run: Callable[..., None], home: Path | None = None) -> None:
         super().__init__()
@@ -374,7 +388,9 @@ class Indexer(QObject):
     def _build(self) -> tuple[list[Entry], list[Entry]]:
         apps = scan_apps(start_menu_dirs())
         apps += scan_store_apps({a.key for a in apps})
+        apps.sort(key=lambda a: a.key)
         self.apps = apps  # os apps aparecem na busca antes de terminar os arquivos
+        self.apps_ready.emit(len(apps))  # sinal enfileirado: chega na thread da interface
         return apps, scan_files(file_roots(self.home))
 
     def _done(self, result: tuple[list[Entry], list[Entry]]) -> None:

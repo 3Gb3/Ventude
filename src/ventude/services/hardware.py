@@ -469,6 +469,34 @@ def network_totals() -> tuple[int, int] | None:
         iphlpapi.FreeMibTable(table)
 
 
+IF_TYPE_ETHERNET, IF_TYPE_WIFI = 6, 71
+
+
+def network_kind() -> str:
+    """'wifi', 'ethernet' ou '' (sem rede) pela placa física conectada (ícone da barra de tarefas)."""
+    if sys.platform != "win32" or ctypes.sizeof(MIB_IF_ROW2) != 1352:
+        return ""
+    iphlpapi = ctypes.windll.iphlpapi  # type: ignore[attr-defined]
+    table = ctypes.c_void_p()
+    if iphlpapi.GetIfTable2(ctypes.byref(table)) != 0 or not table.value:
+        return ""
+    try:
+        entries = ctypes.c_ulong.from_address(table.value).value
+        rows = (MIB_IF_ROW2 * entries).from_address(table.value + 8)
+        kinds = {
+            int(row.Type)
+            for row in rows
+            if row.Flags & 0x1 and not row.Flags & 0x2 and row.OperStatus == 1 and row.MediaConnectState == 1
+        }
+    finally:
+        iphlpapi.FreeMibTable(table)
+    if IF_TYPE_ETHERNET in kinds:
+        return "ethernet"
+    if IF_TYPE_WIFI in kinds:
+        return "wifi"
+    return ""
+
+
 def ping(host: str, timeout_ms: int = 1000) -> float | None:
     """Ida e volta em ms por ICMP (sem precisar de administrador). None sem resposta."""
     iphlpapi = ctypes.windll.iphlpapi  # type: ignore[attr-defined]

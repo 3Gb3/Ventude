@@ -1,9 +1,9 @@
-"""Ventude: uma Dynamic Island leve para Windows."""
+"""Ventude: uma Dynamic Island e shell leve para Windows."""
 
 try:  # gerado pelo build da main (scripts/stamp_version.py)
     from ventude._build import VERSION as __version__
 except ImportError:  # rodando do código-fonte
-    __version__ = "1.2.0"
+    __version__ = "2.0.0"
 
 
 def main() -> int:

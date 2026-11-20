@@ -1,9 +1,8 @@
-"""Barra de comandos / Menu Iniciar do Ventude: busca universal e ações rápidas.
+"""Busca universal do Ventude: o motor (CommandEngine) e a barra de comandos dentro da ilha (CommandBar).
 
-Abre pelo atalho global (Ctrl + Alt + Espaço), pela tecla Windows (se ligado), por Ctrl + K ou ao
-começar a digitar no painel. Exemplos: "github", "code" (apps), "/p projetos" (só pastas),
-"1450 * 5,85" (calculadora), "t: revisar PR", "a: call 15h", "timer 15m", "pomodoro",
-"qr https://...", "cafeina 2h", "reiniciar", "cor", "ocr".
+O motor é o mesmo da tela de Pesquisa e do Menu Iniciar do Ventude Shell. Exemplos: "github", "code"
+(apps), "/p projetos" (só pastas), "1450 * 5,85" (calculadora), "t: revisar PR", "a: call 15h",
+"timer 15m", "pomodoro", "qr https://...", "cafeina 2h", "wi-fi" (Configurações), "reiniciar", "cor", "ocr".
 
 Pastas: Enter abre no Explorer, Ctrl + Enter abre o Terminal nela e Shift + Enter, o Cursor/VS Code.
 Reiniciar, desligar e sair da sessão pedem Enter duas vezes.
@@ -12,9 +11,11 @@ Reiniciar, desligar e sair da sessão pedem Enter duas vezes.
 from __future__ import annotations
 
 import re
+import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from urllib.parse import quote_plus
 
 from PySide6.QtCore import QEvent, QFileInfo, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QIcon, QKeyEvent
@@ -30,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ventude.core.config import MODULES
-from ventude.services import calc, indexer, launcher, power
+from ventude.services import apps, calc, indexer, launcher, power
 from ventude.services.timer import countdown, parse_duration
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
@@ -58,6 +59,16 @@ TAB_WORDS = {
     "settings": ("ajustes", "configurações", "configuracoes", "settings"),
 }
 CAFFEINE_WORDS = ("cafeina", "cafeína", "caffeine", "acordado")
+KIND_LABELS = {
+    "app": "Aplicativo",
+    "uwp": "Aplicativo",
+    "folder": "Pasta",
+    "file": "Arquivo",
+    "system": "Sistema",
+    "url": "Site",
+    "web": "Web",
+}
+SECTION_ORDER = ("Apps", "Configurações", "Pastas", "Arquivos", "Atalhos", "Ventude", "Energia", "Web")
 
 
 @dataclass
@@ -71,6 +82,13 @@ class Command:
     actions: list[tuple[str, str, Callable[[], str]]] = field(default_factory=list)  # botões na linha
     confirm: bool = False  # destrutivo: pede Enter de novo
     path: str = ""  # para o ícone real do app/pasta/arquivo
+    kind: str = ""  # app | uwp | folder | file | system | url | web | ventude | calc | power
+    target: str = ""  # o que fixar/guardar no histórico (caminho, AppID, ms-settings:, link)
+    section: str = "Ventude"
+
+    @property
+    def pinnable(self) -> bool:
+        return self.kind in ("app", "uwp", "folder", "file", "system", "url") and bool(self.target)
 
 
 def parse_event(text: str, today: date | None = None) -> tuple[str, date, object, object]:
@@ -112,6 +130,323 @@ def parse_caffeine(text: str) -> tuple[bool, float | None] | None:
     return None
 
 
+class CommandEngine(QObject):
+    """Monta os resultados da busca e executa as ações (usado pela ilha, pela Pesquisa e pelo Iniciar)."""
+
+    navigate = Signal(str)  # abrir uma aba da ilha
+    tool = Signal(str)  # "color" | "ocr"
+    dismiss = Signal()  # a ação abriu outra coisa: quem mostra a busca pode fechar
+
+    def __init__(self, ctx: AppContext, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.ctx = ctx
+
+    # ---------- resultados ----------
+    def commands(
+        self, text: str, start_mode: bool = False, limit: int = MAX_RESULTS, shell: bool = False
+    ) -> list[Command]:
+        text = text.strip()
+        lowered = text.lower()
+        out: list[Command] = []
+        if not text:
+            return self.start_suggestions(limit) if start_mode else []
+        if result := calc.calculate(text):
+            out.append(
+                Command(
+                    "calculator",
+                    f"= {result}",
+                    "Enter copia o resultado",
+                    lambda r=result: self._copy(r),
+                    kind="calc",
+                    section="Calculadora",
+                )
+            )
+        if match := re.match(r"^(t:|tarefa\s)(.+)$", text, re.IGNORECASE):
+            body = match.group(2).strip()
+            if body:
+                out.append(
+                    Command("check-square", f"Criar tarefa: {body}", "Tarefas", lambda b=body: self._task(b))
+                )
+        if match := re.match(r"^(a:|agenda\s)(.+)$", text, re.IGNORECASE):
+            title, day, start, end = parse_event(match.group(2))
+            if title:
+                when = "hoje" if day == date.today() else "amanhã"
+                if start:
+                    when += f" · {start:%H:%M}" + (f"–{end:%H:%M}" if end else "")
+                out.append(
+                    Command(
+                        "calendar",
+                        f"Agendar: {title}",
+                        when,
+                        lambda t=title, d=day, s=start, e=end: self._event(t, d, s, e),
+                    )
+                )
+        if match := re.match(r"^(timer|t)\s+(.+)$", text, re.IGNORECASE):
+            seconds = parse_duration(match.group(2))
+            if seconds:
+                out.append(
+                    Command(
+                        "clock",
+                        f"Timer de {countdown(seconds)}",
+                        "Aparece na ilha",
+                        lambda s=seconds: self._timer(s),
+                    )
+                )
+        if match := re.match(r"^qr\s+(.+)$", text, re.IGNORECASE | re.DOTALL):
+            body = match.group(1).strip()
+            out.append(Command("qr", "Mostrar QR Code", body[:60], lambda b=body: self._qr(b)))
+        caffeine = parse_caffeine(text)
+        if caffeine is not None:
+            on, seconds = caffeine
+            if on:
+                when = f"por {countdown(seconds)}" if seconds else "até você desligar"
+                out.append(
+                    Command(
+                        "coffee", f"Cafeína {when}", "Tela sempre acesa", lambda s=seconds: self._caffeine(s)
+                    )
+                )
+            else:
+                out.append(Command("coffee", "Desligar a Cafeína", "O PC volta a dormir", self._caffeine_off))
+        if lowered in ("pomodoro", "foco"):
+            out.append(Command("clock", "Pomodoro: 25 min de foco + 5 de pausa", "Timer", self._pomodoro))
+        if lowered in ("parar", "parar timer", "stop") and self.ctx.timer.state:
+            out.append(Command("close", "Parar o timer", "Timer", self._stop_timer))
+        if lowered in ("cor", "conta-gotas", "contagotas", "color"):
+            out.append(
+                Command(
+                    "droplet",
+                    "Conta-gotas",
+                    "Copia a cor de qualquer ponto da tela",
+                    lambda: self._tool("color"),
+                )
+            )
+        if lowered in ("ocr", "texto", "capturar texto"):
+            out.append(
+                Command(
+                    "search",
+                    "Capturar texto da tela (OCR)",
+                    "Copia o texto da região escolhida",
+                    lambda: self._tool("ocr"),
+                )
+            )
+        for action in power.matching(text):
+            if action.needs_update and not self.ctx.power.pending:
+                continue
+            out.append(
+                Command(
+                    action.icon,
+                    action.title,
+                    "Energia · Enter duas vezes para confirmar" if action.destructive else "Energia",
+                    lambda k=action.key: self._power(k),
+                    confirm=action.destructive,
+                    kind="power",
+                    section="Energia",
+                )
+            )
+        enabled = {k for k, _, _ in MODULES if self.ctx.settings.module_enabled(k)}
+        tabs: list[Command] = []
+        for key, tab_title, icon_name in MODULES:
+            words = TAB_WORDS.get(key, ())
+            if key in enabled and any(w.startswith(lowered) or lowered.startswith(w) for w in words):
+                tabs.append(
+                    Command(icon_name, f"Abrir {tab_title}", "Aba do Ventude", lambda k=key: self._tab(k))
+                )
+        if not shell:
+            out += tabs  # na ilha, as abas vêm antes; na Pesquisa do Shell, depois dos apps
+        for shortcut in self.ctx.store.shortcuts():
+            if lowered in shortcut.label.lower() or lowered in shortcut.target.lower():
+                out.append(self._shortcut_command(shortcut))
+        if len(text) >= 2:
+            entries = self.ctx.indexer.search(text, max(limit, MAX_RESULTS))
+            found = [self._entry_command(e) for e in entries]
+            app_titles = {c.title.lower() for c in found if c.kind in ("app", "uwp")}
+            out += [c for c in found if c.kind in ("app", "uwp")]
+            if shell or start_mode:
+                out += [
+                    self._system_command(item)
+                    for item in apps.match_system(text)
+                    if item.title.lower() not in app_titles
+                ]
+            out += [c for c in found if c.kind not in ("app", "uwp")]
+        if shell:
+            out += tabs
+            if len(text) >= 2:
+                out.append(self._web_command(text))
+        seen: set[tuple[str, str]] = set()
+        unique = []
+        for command in out:  # o mesmo app pode vir dos atalhos e do índice
+            key = (command.title.lower(), command.path.lower())
+            if key not in seen:
+                seen.add(key)
+                unique.append(command)
+        return unique[:limit]
+
+    def start_suggestions(self, limit: int = MAX_RESULTS) -> list[Command]:
+        """Busca vazia: os atalhos fixados."""
+        return [self._shortcut_command(s) for s in self.ctx.store.shortcuts()[:limit]]
+
+    def _shortcut_command(self, shortcut: object) -> Command:
+        kind, target, name = shortcut.kind, shortcut.target, shortcut.label  # type: ignore[attr-defined]
+        command = Command(
+            "globe" if kind == "url" else ("folder" if kind == "folder" else "external"),
+            name,
+            target,
+            lambda: self._shortcut(kind, target, name),
+            path="" if kind == "url" else target,
+            kind=kind if kind in ("app", "folder", "file", "url") else "app",
+            target=target,
+            section="Atalhos",
+        )
+        if kind == "folder":
+            self._folder_actions(command, target)
+        return command
+
+    def _entry_command(self, entry: indexer.Entry) -> Command:
+        subtitle = {"app": "Aplicativo", "uwp": "Aplicativo", "folder": entry.path, "file": entry.path}[
+            entry.kind
+        ]
+        command = Command(
+            {"app": "apps", "uwp": "apps", "folder": "folder", "file": "file"}[entry.kind],
+            entry.name,
+            subtitle,
+            lambda e=entry: self._launch(e),
+            path="" if entry.kind == "uwp" else entry.path,
+            kind=entry.kind,
+            target=entry.path,
+            section={"app": "Apps", "uwp": "Apps", "folder": "Pastas", "file": "Arquivos"}[entry.kind],
+        )
+        if entry.is_folder:
+            self._folder_actions(command, entry.path)
+        return command
+
+    def _system_command(self, item: apps.SystemItem) -> Command:
+        return Command(
+            item.icon,
+            item.title,
+            "Sistema",
+            lambda i=item: self._system(i),
+            kind="system",
+            target=item.target,
+            section="Configurações",
+        )
+
+    def _web_command(self, text: str) -> Command:
+        return Command(
+            "globe",
+            f"Pesquisar na web: {text}",
+            "Abre no navegador",
+            lambda t=text: self._web(t),
+            kind="web",
+            target=text,
+            section="Web",
+        )
+
+    def _folder_actions(self, command: Command, folder: str) -> None:
+        command.ctrl = lambda f=folder: self._terminal(f)
+        command.shift = lambda f=folder: self._editor(f)
+        command.actions = [
+            ("terminal", "Abrir no Terminal (Ctrl + Enter)", command.ctrl),
+            ("code", "Abrir no Cursor / VS Code (Shift + Enter)", command.shift),
+        ]
+
+    # ---------- ações ----------
+    def _remember(self, kind: str, label: str, target: str) -> None:
+        try:
+            self.ctx.store.record_launch(kind, label, target)
+        except Exception:  # noqa: BLE001 - histórico nunca atrapalha abrir
+            pass
+
+    def _task(self, text: str) -> str:
+        lists = self.ctx.store.lists()
+        list_id = lists[0].id if lists else self.ctx.store.add_list("Geral").id
+        self.ctx.store.add_item(list_id, text)
+        self.ctx.data_changed.emit("tasks")
+        return f"Tarefa criada: {text}"
+
+    def _event(self, title: str, day: date, start: object, end: object) -> str:
+        self.ctx.store.add_event(title, day, start, end)  # type: ignore[arg-type]
+        self.ctx.data_changed.emit("events")
+        return f"Agendado: {title}"
+
+    def _timer(self, seconds: float) -> str:
+        self.ctx.timer.start(seconds)
+        return f"Timer de {countdown(seconds)} iniciado"
+
+    def _pomodoro(self) -> str:
+        self.ctx.timer.start_pomodoro()
+        return "Pomodoro iniciado: 25 min de foco"
+
+    def _stop_timer(self) -> str:
+        self.ctx.timer.stop()
+        return "Timer parado"
+
+    def _tool(self, name: str) -> str:
+        self.dismiss.emit()
+        self.tool.emit(name)
+        return ""
+
+    def _tab(self, key: str) -> str:
+        self.dismiss.emit()
+        self.navigate.emit(key)
+        return ""
+
+    def _copy(self, text: str) -> str:
+        QGuiApplication.clipboard().setText(text)
+        return f"{text} copiado"
+
+    def _qr(self, text: str) -> str:
+        self.dismiss.emit()
+        self.ctx.qr_requested.emit(text)
+        return ""
+
+    def _caffeine(self, seconds: float | None) -> str:
+        self.ctx.caffeine.start(seconds)
+        return self.ctx.caffeine.describe()
+
+    def _caffeine_off(self) -> str:
+        self.ctx.caffeine.stop()
+        return "Cafeína desligada"
+
+    def _power(self, key: str) -> str:
+        ok, message = self.ctx.request_power(key)
+        if self.ctx.power_fx is not None:
+            self.dismiss.emit()
+            return ""
+        if ok:
+            return f"{power.BY_KEY[key].title}…" if key not in ("lock", "sleep", "hibernate") else ""
+        return f"Não deu: {message}"
+
+    def _shortcut(self, kind: str, target: str, name: str) -> str:
+        ok, error = launcher.open_target(kind, target)
+        if ok:
+            self._remember(kind if kind in KIND_LABELS else "app", name, target)
+        return f"Abrindo {name}" if ok else f"Não deu para abrir: {error}"
+
+    def _launch(self, entry: indexer.Entry) -> str:
+        ok, error = indexer.launch(entry)
+        if ok:
+            self._remember(entry.kind, entry.name, entry.path)
+        return f"Abrindo {entry.name}" if ok else f"Não deu para abrir: {error}"
+
+    def _system(self, item: apps.SystemItem) -> str:
+        ok, error = apps.open_system(item.target)
+        if ok:
+            self._remember("system", item.title, item.target)
+        return f"Abrindo {item.title}" if ok else f"Não deu para abrir: {error}"
+
+    def _web(self, text: str) -> str:
+        webbrowser.open(f"https://www.google.com/search?q={quote_plus(text)}")
+        return "Abrindo o navegador"
+
+    def _terminal(self, folder: str) -> str:
+        ok, error = indexer.open_terminal(folder)
+        return "Terminal aberto na pasta" if ok else f"Não deu para abrir o Terminal: {error}"
+
+    def _editor(self, folder: str) -> str:
+        ok, name = indexer.open_in_editor(folder)
+        return f"Abrindo no {name}" if ok else name
+
+
 class ResultRow(QWidget):
     """Uma linha de resultado: ícone, título, detalhe e botões de ação (Terminal, editor...)."""
 
@@ -146,6 +481,10 @@ class CommandBar(QFrame):
     def __init__(self, ctx: AppContext, parent: QWidget) -> None:
         super().__init__(parent)
         self.ctx = ctx
+        self.engine = CommandEngine(ctx, self)
+        self.engine.navigate.connect(self.navigate.emit)
+        self.engine.tool.connect(self.tool.emit)
+        self.engine.dismiss.connect(self.close_bar)
         self.setObjectName("CommandBar")
         self.setStyleSheet(
             f"QFrame#CommandBar {{ background: {theme.SURFACE_2}; border: 1px solid {theme.STROKE_2};"
@@ -227,153 +566,7 @@ class CommandBar(QFrame):
 
     # ---------- resultados ----------
     def commands(self, text: str) -> list[Command]:
-        text = text.strip()
-        lowered = text.lower()
-        out: list[Command] = []
-        if not text:
-            return self._start_suggestions() if self.start_mode else []
-        if result := calc.calculate(text):
-            out.append(
-                Command(
-                    "calculator", f"= {result}", "Enter copia o resultado", lambda r=result: self._copy(r)
-                )
-            )
-        if match := re.match(r"^(t:|tarefa\s)(.+)$", text, re.IGNORECASE):
-            body = match.group(2).strip()
-            if body:
-                out.append(
-                    Command("check-square", f"Criar tarefa: {body}", "Tarefas", lambda b=body: self._task(b))
-                )
-        if match := re.match(r"^(a:|agenda\s)(.+)$", text, re.IGNORECASE):
-            title, day, start, end = parse_event(match.group(2))
-            if title:
-                when = "hoje" if day == date.today() else "amanhã"
-                if start:
-                    when += f" · {start:%H:%M}" + (f"–{end:%H:%M}" if end else "")
-                out.append(
-                    Command(
-                        "calendar",
-                        f"Agendar: {title}",
-                        when,
-                        lambda t=title, d=day, s=start, e=end: self._event(t, d, s, e),
-                    )
-                )
-        if match := re.match(r"^(timer|t)\s+(.+)$", text, re.IGNORECASE):
-            seconds = parse_duration(match.group(2))
-            if seconds:
-                out.append(
-                    Command(
-                        "clock",
-                        f"Timer de {countdown(seconds)}",
-                        "Aparece na ilha",
-                        lambda s=seconds: self._timer(s),
-                    )
-                )
-        if match := re.match(r"^qr\s+(.+)$", text, re.IGNORECASE | re.DOTALL):
-            body = match.group(1).strip()
-            out.append(Command("qr", "Mostrar QR Code", body[:60], lambda b=body: self._qr(b)))
-        caffeine = parse_caffeine(text)
-        if caffeine is not None:
-            on, seconds = caffeine
-            if on:
-                when = f"por {countdown(seconds)}" if seconds else "até você desligar"
-                out.append(
-                    Command(
-                        "coffee", f"Cafeína {when}", "Tela sempre acesa", lambda s=seconds: self._caffeine(s)
-                    )
-                )
-            else:
-                out.append(Command("coffee", "Desligar a Cafeína", "O PC volta a dormir", self._caffeine_off))
-        if lowered in ("pomodoro", "foco"):
-            out.append(Command("clock", "Pomodoro: 25 min de foco + 5 de pausa", "Timer", self._pomodoro))
-        if lowered in ("parar", "parar timer", "stop") and self.ctx.timer.state:
-            out.append(Command("close", "Parar o timer", "Timer", self._stop_timer))
-        if lowered in ("cor", "conta-gotas", "contagotas", "color"):
-            out.append(
-                Command(
-                    "droplet",
-                    "Conta-gotas",
-                    "Copia a cor de qualquer ponto da tela",
-                    lambda: self._tool("color"),
-                )
-            )
-        if lowered in ("ocr", "texto", "capturar texto"):
-            out.append(
-                Command(
-                    "search",
-                    "Capturar texto da tela (OCR)",
-                    "Copia o texto da região escolhida",
-                    lambda: self._tool("ocr"),
-                )
-            )
-        for action in power.matching(text):
-            if action.needs_update and not self.ctx.power.pending:
-                continue
-            out.append(
-                Command(
-                    action.icon,
-                    action.title,
-                    "Energia · Enter duas vezes para confirmar" if action.destructive else "Energia",
-                    lambda k=action.key: self._power(k),
-                    confirm=action.destructive,
-                )
-            )
-        enabled = {k for k, _, _ in MODULES if self.ctx.settings.module_enabled(k)}
-        for key, tab_title, icon_name in MODULES:
-            words = TAB_WORDS.get(key, ())
-            if key in enabled and any(w.startswith(lowered) or lowered.startswith(w) for w in words):
-                out.append(Command(icon_name, f"Abrir {tab_title}", "Aba", lambda k=key: self._tab(k)))
-        for shortcut in self.ctx.store.shortcuts():
-            if lowered in shortcut.label.lower() or lowered in shortcut.target.lower():
-                out.append(self._shortcut_command(shortcut))
-        if len(text) >= 2:
-            out += [self._entry_command(e) for e in self.ctx.indexer.search(text, MAX_RESULTS)]
-        seen: set[tuple[str, str]] = set()
-        unique = []
-        for command in out:  # o mesmo app pode vir dos atalhos e do índice
-            key = (command.title.lower(), command.path.lower())
-            if key not in seen:
-                seen.add(key)
-                unique.append(command)
-        return unique[:MAX_RESULTS]
-
-    def _start_suggestions(self) -> list[Command]:
-        """Menu Iniciar vazio: os atalhos fixados."""
-        return [self._shortcut_command(s) for s in self.ctx.store.shortcuts()[:MAX_RESULTS]]
-
-    def _shortcut_command(self, shortcut: object) -> Command:
-        kind, target, name = shortcut.kind, shortcut.target, shortcut.label  # type: ignore[attr-defined]
-        command = Command(
-            "globe" if kind == "url" else ("folder" if kind == "folder" else "external"),
-            name,
-            target,
-            lambda: self._shortcut(kind, target, name),
-            path="" if kind == "url" else target,
-        )
-        if kind == "folder":
-            self._folder_actions(command, target)
-        return command
-
-    def _entry_command(self, entry: indexer.Entry) -> Command:
-        subtitle = {"app": "App", "uwp": "App da Loja", "folder": entry.path, "file": entry.path}[entry.kind]
-        command = Command(
-            {"app": "apps", "uwp": "apps", "folder": "folder", "file": "file"}[entry.kind],
-            entry.name,
-            subtitle,
-            lambda e=entry: self._launch(e),
-            path="" if entry.kind == "uwp" else entry.path,
-        )
-        if entry.is_folder:
-            self._folder_actions(command, entry.path)
-        return command
-
-    def _folder_actions(self, command: Command, folder: str) -> None:
-        command.ctrl = lambda f=folder: self._terminal(f)
-        command.shift = lambda f=folder: self._editor(f)
-        command.actions = [
-            ("terminal", "Abrir no Terminal (Ctrl + Enter)", command.ctrl),
-            ("code", "Abrir no Cursor / VS Code (Shift + Enter)", command.shift),
-        ]
+        return self.engine.commands(text, self.start_mode)
 
     def _icon(self, command: Command) -> QIcon:
         if command.path and command.icon in ("apps", "external", "folder", "file"):
@@ -426,6 +619,8 @@ class CommandBar(QFrame):
     def _run_action(self, action: Callable[[], str]) -> None:
         self._armed = ""
         message = action()
+        if not self.isVisible():
+            return  # a ação já fechou a barra (abriu uma aba, uma ferramenta...)
         if message:
             self.results.clear()
             self.results.hide()
@@ -434,77 +629,3 @@ class CommandBar(QFrame):
             self._close_timer.start()
         else:
             self.close_bar()
-
-    # ---------- ações ----------
-    def _task(self, text: str) -> str:
-        lists = self.ctx.store.lists()
-        list_id = lists[0].id if lists else self.ctx.store.add_list("Geral").id
-        self.ctx.store.add_item(list_id, text)
-        self.ctx.data_changed.emit("tasks")
-        return f"Tarefa criada: {text}"
-
-    def _event(self, title: str, day: date, start: object, end: object) -> str:
-        self.ctx.store.add_event(title, day, start, end)  # type: ignore[arg-type]
-        self.ctx.data_changed.emit("events")
-        return f"Agendado: {title}"
-
-    def _timer(self, seconds: float) -> str:
-        self.ctx.timer.start(seconds)
-        return f"Timer de {countdown(seconds)} iniciado"
-
-    def _pomodoro(self) -> str:
-        self.ctx.timer.start_pomodoro()
-        return "Pomodoro iniciado: 25 min de foco"
-
-    def _stop_timer(self) -> str:
-        self.ctx.timer.stop()
-        return "Timer parado"
-
-    def _tool(self, name: str) -> str:
-        self.close_bar()
-        self.tool.emit(name)
-        return ""
-
-    def _tab(self, key: str) -> str:
-        self.close_bar()
-        self.navigate.emit(key)
-        return ""
-
-    def _copy(self, text: str) -> str:
-        QGuiApplication.clipboard().setText(text)
-        return f"{text} copiado"
-
-    def _qr(self, text: str) -> str:
-        self.close_bar()
-        self.ctx.qr_requested.emit(text)
-        return ""
-
-    def _caffeine(self, seconds: float | None) -> str:
-        self.ctx.caffeine.start(seconds)
-        return self.ctx.caffeine.describe()
-
-    def _caffeine_off(self) -> str:
-        self.ctx.caffeine.stop()
-        return "Cafeína desligada"
-
-    def _power(self, key: str) -> str:
-        ok, message = power.run(key)
-        if ok:
-            return f"{power.BY_KEY[key].title}…" if key not in ("lock", "sleep", "hibernate") else ""
-        return f"Não deu: {message}"
-
-    def _shortcut(self, kind: str, target: str, name: str) -> str:
-        ok, error = launcher.open_target(kind, target)
-        return f"Abrindo {name}" if ok else f"Não deu para abrir: {error}"
-
-    def _launch(self, entry: indexer.Entry) -> str:
-        ok, error = indexer.launch(entry)
-        return f"Abrindo {entry.name}" if ok else f"Não deu para abrir: {error}"
-
-    def _terminal(self, folder: str) -> str:
-        ok, error = indexer.open_terminal(folder)
-        return "Terminal aberto na pasta" if ok else f"Não deu para abrir o Terminal: {error}"
-
-    def _editor(self, folder: str) -> str:
-        ok, name = indexer.open_in_editor(folder)
-        return f"Abrindo no {name}" if ok else name

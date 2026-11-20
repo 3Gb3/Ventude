@@ -23,6 +23,7 @@ from ventude.services.news import NewsService
 from ventude.services.power import PowerService
 from ventude.services.privacy import PrivacyMonitor
 from ventude.services.shelf import ShelfService
+from ventude.services.shellicons import IconCache
 from ventude.services.timer import TimerService
 from ventude.services.weather import Forecast, Place, WeatherService
 
@@ -40,6 +41,7 @@ class AppContext(QObject):
     weather_changed = Signal(object)  # Forecast | None: ilha, Início e Clima juntos
     weather_failed = Signal(str)
     qr_requested = Signal(str)  # texto/link para mostrar como QR Code dentro da ilha
+    tool_requested = Signal(str)  # "color" | "ocr" pedidos fora da ilha (painel rápido, Pesquisa)
 
     def __init__(
         self,
@@ -72,6 +74,10 @@ class AppContext(QObject):
         self.power = PowerService()
         self.lyrics = LyricsService(store, self.run)
         self.indexer = Indexer(self.run)
+        self.icons = IconCache()  # ícones reais do Windows (barra, Iniciar e busca)
+        # Ventude Shell (2.0): o app liga estes dois; nos testes ficam vazios e tudo cai no modo da ilha.
+        self.shell: object | None = None  # ShellController
+        self.power_fx: object | None = None  # PowerFx: "Até logo!" antes de desligar, reiniciar...
         self.settings_changed.connect(lambda _s: self.hardware.sync())
         self.forecast: Forecast | None = None
         self.weather_busy = False
@@ -91,11 +97,21 @@ class AppContext(QObject):
         QTimer.singleShot(1200, self.refresh_weather)
         self.reminders.start()
         version = self.settings.layout_version
-        if version < LAYOUT_VERSION:  # primeira abertura da 1.2: abas novas já ligadas
+        if version < LAYOUT_VERSION:  # primeira abertura da 1.2/2.0: abas novas e Shell já ligados
             modules = self.settings.enabled_modules() | {"hardware", "audio"}
             if version < 4:
                 modules |= {"shelf"}
-            self.update_settings(modules=",".join(sorted(modules)), layout_version=LAYOUT_VERSION)
+            changes: dict[str, object] = {
+                "modules": ",".join(sorted(modules)),
+                "layout_version": LAYOUT_VERSION,
+            }
+            if version < 6:
+                # 2.0: o Ventude vira o shell. Barra, Iniciar e tecla Windows ligados; data e clima saem da
+                # ilha porque agora ficam na barra de tarefas (dá para voltar em Ajustes).
+                changes.update(
+                    replace_taskbar=True, replace_start_menu=True, pill_weather=False, pill_date=False
+                )
+            self.update_settings(**changes)
             if version < 4:
                 self.detect_providers()
         self.hardware.start()
@@ -189,6 +205,29 @@ class AppContext(QObject):
             self._weather_city = settings.weather_city_json
             self.forecast = None
             self.refresh_weather()
+
+    # ---------- Ventude Shell ----------
+    def request_power(self, key: str) -> tuple[bool, str]:
+        """Bloquear, suspender, desligar... Com o Shell, passa pela animação ("Até logo!") antes."""
+        from ventude.services import power
+
+        if self.power_fx is not None and self.settings.power_animation:
+            self.power_fx.play(key)  # type: ignore[attr-defined]
+            return True, ""
+        return power.run(key)
+
+    def open_search(self, text: str = "") -> bool:
+        """Abre a tela de Pesquisa do Shell (False se o Shell não estiver rodando)."""
+        if self.shell is None:
+            return False
+        self.shell.open_search(text)  # type: ignore[attr-defined]
+        return True
+
+    def open_start(self) -> bool:
+        if self.shell is None:
+            return False
+        self.shell.toggle_start()  # type: ignore[attr-defined]
+        return True
 
     def update_settings(self, **changes: object) -> Settings:
         updated = self.settings.copy(**changes)

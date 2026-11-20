@@ -1,6 +1,39 @@
 # Ventude
 
-Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma pílula discreta, mostra a hora, o clima, a música tocando e **quanto ainda resta dos seus limites no Claude, no Gemini (Antigravity), no Grok, no Codex (ChatGPT), no Cursor e no GitHub Copilot**. Passe o mouse para abrir o painel completo.
+Uma Dynamic Island e um **shell próprio** para Windows 10 e 11. No topo, uma pílula discreta mostra a hora, a música tocando e **quanto ainda resta dos seus limites no Claude, no Gemini (Antigravity), no Grok, no Codex (ChatGPT), no Cursor e no GitHub Copilot**; passe o mouse para abrir o painel completo. Embaixo, desde a 2.0, o **Ventude Shell** substitui a barra de tarefas, o Menu Iniciar e a Pesquisa do Windows.
+
+## Ventude Shell (2.0)
+
+<p align="center">
+  <img src="docs/screens/shell-iniciar.webp" alt="Menu Iniciar do Ventude com fixados, recentes e a barra de tarefas" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screens/shell-pesquisa.webp" alt="Pesquisa (tecla Windows) com as pesquisas recentes" width="49%">
+  <img src="docs/screens/shell-pesquisa-resultados.webp" alt="Resultados da Pesquisa com o painel de ações" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/shell-iniciar-todos.webp" alt="Todos os apps por categoria" width="49%">
+  <img src="docs/screens/shell-painel-rapido.webp" alt="Painel rápido: rede, cafeína, microfone, ferramentas e volume" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/shell-ate-logo.webp" alt="Animação de desligar: Até logo!" width="49%">
+  <img src="docs/screens/shell-despedidas.webp" alt="Reiniciar, suspender, bloquear e a saudação ao ligar" width="49%">
+</p>
+
+| Parte | O que faz |
+|-------|-----------|
+| **Barra de tarefas** | Clima à esquerda (com aviso de chuva). No centro: Iniciar (logo do Ventude), Pesquisa, Visão de tarefas, apps fixados e janelas abertas agrupadas como no Windows, com o ícone real do app. Traço curto = aberto, traço longo verde = em foco. Clique foca/minimiza, clique do meio abre outra janela, parar o mouse mostra **prévias ao vivo** das janelas (com fechar), e o ícone "pula" enquanto o app abre. À direita: ícones ocultos da bandeja, rede/volume/bateria (roda do mouse muda o volume), relógio com data e o cantinho de mostrar a área de trabalho. Uma barra por monitor; some em tela cheia; dá para alinhar à esquerda e ocultar automaticamente (botão direito na barra). |
+| **Menu Iniciar** | Campo de pesquisa, **Fixado** (botão direito: desafixar, mover para o início, fixar na barra, abrir local, executar como administrador), **Recente** (o que você abriu e os arquivos recentes do Windows) e **Todos** por Categoria, Grade ou Lista. Rodapé com sua foto e nome (bloquear, sair, conta), Ajustes, Explorador e **Energia**. |
+| **Pesquisa** | **Tecla Windows** (e Win + S) abre a Pesquisa do Ventude. Vazia, mostra as **Pesquisas recentes** (com o X para tirar). Ao digitar: Melhor correspondência + Apps, Configurações do Windows, Pastas, Arquivos, comandos do Ventude e "Pesquisar na web", com um painel de ações (Abrir, Executar como administrador, Abrir local, Fixar no Iniciar/na barra, Terminal e editor nas pastas). Calculadora, `t:` tarefa, `a:` compromisso, `timer`, `qr`, `cafeina`, `/p pasta` continuam valendo. |
+| **Painel rápido** | Rede (Wi-Fi/Ethernet), Bluetooth, Cafeína, Microfone, Conta-gotas, Capturar texto (OCR), Foco (Pomodoro), Luz noturna e Projetar; volume com a escolha da saída de áudio. |
+| **Calendário** | Mês com os dias que têm compromisso, a agenda do dia escolhido, "Abrir a Agenda" e Foco de 25 min. |
+| **Energia com animação** | Desligar, reiniciar, suspender, hibernar, bloquear e sair escurecem **todas as telas** e mostram uma despedida ("Até logo!", "Já volto!", "Até daqui a pouco!", "Até já!") com uma linha de contagem; **Esc** ou "Cancelar" desistem. Bloquear/suspender: a cortina some sozinha depois. Ao ligar o PC: "Bom dia, Fulano!" com a data e o clima. |
+
+A ilha ficou mais enxuta no Shell: energia, cafeína, conta-gotas e OCR moram no Iniciar e no painel rápido; data e clima foram para a barra (dá para voltar em Ajustes). Digitar com a ilha aberta (ou Ctrl + K) abre a Pesquisa do Ventude.
+
+**Segurança da barra do Windows**: ela volta ao desligar o Shell (Ajustes > Ventude Shell, menu da bandeja ou botão direito na barra > "Voltar para a barra do Windows"), ao fechar o Ventude, em qualquer erro e, se o Ventude for fechado à força, na próxima abertura. A tecla Windows também é sempre solta. Os ícones da bandeja de outros apps ficam no "^" (clique abre o app) e o botão "Bandeja do Windows" mostra a barra original por alguns segundos.
+
+## A ilha
 
 <p align="center">
   <img src="docs/screens/ilha.png" alt="Ilha fechada com data, clima, hora e anéis de uso das IAs" height="60">
@@ -55,10 +88,9 @@ Também tem:
 - **Timer e Pomodoro** pelo Início ou pela barra de comandos, com a contagem na ilha e um pulso ao terminar.
 - **Barra de comandos** (atalho global, Ctrl + K ou começar a digitar): abre atalhos, cria tarefas (`t: revisar PR`), compromissos (`a: call 15h`, `a: dentista amanhã 9h-10h`) e timers (`timer 15m`, `pomodoro`).
 - **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows) no topo do painel.
-- **Busca universal / Menu Iniciar**: apps instalados (inclusive da Loja), pastas e arquivos do usuário. Pasta: Enter abre no Explorer, Ctrl + Enter abre o Terminal nela e Shift + Enter abre no Cursor/VS Code. `/p nome` busca só pastas, `1450 * 5,85` calcula e copia, `qr texto` mostra um QR Code.
-- **Tecla Windows** (opcional, em Ajustes): Win sozinha e Win + S abrem a busca do Ventude; os outros atalhos com Win continuam do Windows.
-- **Dock do Ventude** (opcional): esconde a barra de tarefas do Windows e mostra um dock com os apps fixados, as janelas abertas e o relógio. A barra do Windows sempre volta ao desligar o ajuste ou fechar o Ventude.
-- **Central de Energia** no topo do painel e na busca: bloquear, suspender, hibernar, reiniciar, desligar, sair da sessão e, com atualização do Windows pendente, atualizar e reiniciar/desligar. As ações que fecham tudo pedem um segundo clique (ou Enter).
+- **Busca universal**: apps instalados (inclusive da Loja), pastas e arquivos do usuário. Pasta: Enter abre no Explorer, Ctrl + Enter abre o Terminal nela e Shift + Enter abre no Cursor/VS Code. `/p nome` busca só pastas, `1450 * 5,85` calcula e copia, `qr texto` mostra um QR Code. No Shell, é a tela de Pesquisa; sem ele, a barra de comandos da ilha.
+- **Tecla Windows** (Ajustes > Ventude Shell): Win sozinha e Win + S abrem a Pesquisa do Ventude; os outros atalhos com Win continuam do Windows.
+- **Energia**: bloquear, suspender, hibernar, reiniciar, desligar, sair da sessão e, com atualização do Windows pendente, atualizar e reiniciar/desligar. No Shell, pelo Iniciar, sempre com a animação "Até logo!" (dá para cancelar); sem o Shell, no topo do painel.
 - **Modo Cafeína** (xícara no topo do painel ou `cafeina 2h`): o Windows não apaga a tela nem suspende.
 - **Privacidade na ilha**: ponto laranja com o microfone em uso, verde com a câmera, com o nome do app. Clique no laranja muta o microfone.
 - **Letra sincronizada** da música no Início (lrclib.net).
@@ -106,7 +138,7 @@ Baixe o **`Ventude-Setup.exe`** da [última versão](https://github.com/3Gb3/Ven
 
 ### Atualizações
 
-Toda alteração na branch `main` gera uma versão nova automaticamente. A primeira de cada linha é a versão do `pyproject.toml` (hoje **1.1.0**); as seguintes sobem só o último número (1.1.1, 1.1.2...). Ao **iniciar**, o Ventude instalado confere se há uma versão mais nova e pergunta se você quer atualizar. Se aceitar, ele baixa, confere o arquivo, instala em silêncio e reabre sozinho. Ele não procura atualizações enquanto está aberto.
+Toda alteração na branch `main` gera uma versão nova automaticamente. A primeira de cada linha é a versão do `pyproject.toml` (hoje **2.0.0**); as seguintes sobem só o último número (2.0.1, 2.0.2...). Ao **iniciar**, o Ventude instalado confere se há uma versão mais nova e pergunta se você quer atualizar. Se aceitar, ele baixa, confere o arquivo, instala em silêncio e reabre sozinho. Ele não procura atualizações enquanto está aberto.
 
 ## Rodar pelo código-fonte
 
@@ -148,6 +180,6 @@ uv run pytest
 uv run python scripts/preview.py preview
 ```
 
-O `preview.py` gera capturas de todas as telas com dados de demonstração, sem tocar nos seus dados.
+O `preview.py` gera capturas de todas as telas com dados de demonstração, sem tocar nos seus dados. Com `--shell`, gera só as do Ventude Shell numa área de trabalho de 1920×1080 (inclusive a animação "Até logo!" em PNG animado).
 
 Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/PACKAGING.md](docs/PACKAGING.md).

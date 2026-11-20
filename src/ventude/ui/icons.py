@@ -159,6 +159,31 @@ PATHS: dict[str, str] = {
     "power-badge": '<path d="M12 2.5v5"/><path d="M6.4 5.6a8 8 0 1 0 11.2 0"/><path d="M12 11v6M9.5 14.5 12 17l2.5-2.5"/>',
     "log-out": '<path d="M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9"/>'
     '<path d="m15.5 16.5 4.5-4.5-4.5-4.5M20 12H9"/>',
+    # ---------- Ventude Shell (2.0) ----------
+    "ethernet": '<rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/>'
+    '<path d="M9 8.5h6v4H9z"/>',
+    "wifi-off": '<path d="M2.5 9a14 14 0 0 1 6.5-3.6M14.5 5.3A14 14 0 0 1 21.5 9M5.5 12.5a9.5 9.5 0 0 1 4.3-2.3'
+    'M8.5 16a5 5 0 0 1 7 0M3.5 3.5l17 17"/><path d="M12 19.5h.01" stroke-width="2.6"/>',
+    "task-view": '<rect x="3" y="7" width="13" height="12" rx="2"/><path d="M8 4h11a2 2 0 0 1 2 2v9.5"/>',
+    "grid": '<rect x="3" y="3" width="5" height="5" rx="1.2"/><rect x="9.5" y="3" width="5" height="5" rx="1.2"/>'
+    '<rect x="16" y="3" width="5" height="5" rx="1.2"/><rect x="3" y="9.5" width="5" height="5" rx="1.2"/>'
+    '<rect x="9.5" y="9.5" width="5" height="5" rx="1.2"/><rect x="16" y="9.5" width="5" height="5" rx="1.2"/>'
+    '<rect x="3" y="16" width="5" height="5" rx="1.2"/><rect x="9.5" y="16" width="5" height="5" rx="1.2"/>'
+    '<rect x="16" y="16" width="5" height="5" rx="1.2"/>',
+    "user": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    "image": '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/>'
+    '<path d="m21 15-5-5L5 21"/>',
+    "document": '<path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8Z"/>'
+    '<path d="M14 2.5V8h5.5M8.5 13h7M8.5 16.5h5"/>',
+    "sliders": '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+    "night": '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/><path d="M17 3v3M15.5 4.5h3"/>',
+    "focus": '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/>',
+    "back": '<path d="M19 12H5M11 18l-6-6 6-6"/>',
+    "x-circle": '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
+    "shield": '<path d="M12 21.5s7.5-3.5 7.5-9.5V5.5L12 2.5l-7.5 3V12c0 6 7.5 9.5 7.5 9.5Z"/>',
+    "admin": '<path d="M12 21.5s7.5-3.5 7.5-9.5V5.5L12 2.5l-7.5 3V12c0 6 7.5 9.5 7.5 9.5Z"/><path d="m9 12 2 2 4-4"/>',
+    "folder-open": '<path d="M3 19.5V6a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V10"/>'
+    '<path d="M3 19.5 6 11h16l-3 8.5Z"/>',
 }
 
 
