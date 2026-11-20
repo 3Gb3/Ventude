@@ -54,7 +54,7 @@ from ventude.core.config import MODULES, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
 from ventude.services import system
 from ventude.services.media import MediaState
-from ventude.services.weather import Forecast, Place
+from ventude.services.weather import Forecast
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
 from ventude.ui.pages.agenda import AgendaPage
@@ -128,11 +128,15 @@ class Pill(QWidget):
         self.weather_icon.setFixedSize(16, 16)
         self.weather_temp = label("", "")
         self.weather_temp.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 12px; font-weight: 600;")
+        self.weather_rain = label("", "")
+        self.weather_rain.setStyleSheet(f"color: {theme.SKY}; font-size: 11px; font-weight: 700;")
+        self.weather_rain.hide()
         weather_row = QHBoxLayout(self.weather)
         weather_row.setContentsMargins(0, 0, 0, 0)
         weather_row.setSpacing(4)
         weather_row.addWidget(self.weather_icon)
         weather_row.addWidget(self.weather_temp)
+        weather_row.addWidget(self.weather_rain)
         self.weather.hide()
         row.addWidget(self.art)
         row.addWidget(self.date)
@@ -222,11 +226,17 @@ class Pill(QWidget):
         if forecast is None or not self.ctx.settings.pill_weather:
             self.weather.hide()
             return
-        glyph = forecast.icon
+        rain = forecast.rain_soon()
+        glyph = "rain" if rain else forecast.icon
         color = theme.SUN if glyph in ("sun", "cloud-sun") else theme.SKY
         self.weather_icon.setPixmap(icons.pixmap(glyph, color, 16))
         self.weather_temp.setText(f"{forecast.temp:.0f}°")
-        self.weather.setToolTip(f"{forecast.place}: {forecast.temp:.0f}°, {forecast.description}")
+        self.weather_rain.setText(f"{rain}%" if rain else "")
+        self.weather_rain.setVisible(bool(rain))
+        tip = f"{forecast.place}: {forecast.temp:.0f}°, {forecast.description}"
+        if rain:
+            tip += f"\nChuva provável na próxima hora ({rain}%)"
+        self.weather.setToolTip(tip)
         self.weather.show()
 
     def preferred_width(self) -> int:
@@ -475,11 +485,6 @@ class Island(QWidget):
         self.clock_timer = QTimer(self, interval=1000)
         self.clock_timer.timeout.connect(self._tick)
         self.clock_timer.start()
-        self.weather_timer = QTimer(self, interval=15 * 60_000)
-        self.weather_timer.timeout.connect(self.refresh_weather)
-        self.weather_timer.start()
-        self._weather_key = ""
-        self._weather_busy = False
         self.fullscreen_timer = QTimer(self, interval=1500)
         self.fullscreen_timer.timeout.connect(self._check_fullscreen)
         if system.autostart_supported():
@@ -497,28 +502,11 @@ class Island(QWidget):
         self._tick()
         self.pill.refresh_rings()
         self.setGeometry(self.target_rect(False))
-        QTimer.singleShot(1500, self.refresh_weather)
+        ctx.weather_changed.connect(self._weather_done)
+        self._weather_done(ctx.forecast)
 
     # ---------- clima na ilha ----------
-    def refresh_weather(self) -> None:
-        settings = self.ctx.settings
-        place = Place.from_json(settings.weather_city_json)
-        self._weather_key = f"{settings.weather_city_json}|{settings.pill_weather}"
-        if not place or not settings.pill_weather:
-            self._weather_done(None)
-            return
-        if self._weather_busy:
-            return
-        self._weather_busy = True
-        self.ctx.run(
-            lambda: self.ctx.weather.forecast(place),
-            done=self._weather_done,
-            fail=lambda _e: setattr(self, "_weather_busy", False),
-            owner=self,
-        )
-
     def _weather_done(self, forecast: Forecast | None) -> None:
-        self._weather_busy = False
         before = self.pill.weather.isHidden()
         self.pill.set_weather(forecast)
         if before != self.pill.weather.isHidden():
@@ -873,8 +861,7 @@ class Island(QWidget):
     def _settings_changed(self, settings: Settings) -> None:
         self.panel.rebuild_tabs()
         self.pill.refresh_rings()
-        if f"{settings.weather_city_json}|{settings.pill_weather}" != self._weather_key:
-            self.refresh_weather()
+        self._weather_done(self.ctx.forecast)
         self._tick()
         self._update_hotkey()
         if not self._dragging and self.anim.state() != QPropertyAnimation.State.Running:

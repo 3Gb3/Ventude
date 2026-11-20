@@ -48,6 +48,7 @@ class Settings:
     copilot_mode: str = "off"  # auto | off
     ring_providers: str = "claude,antigravity,grok"  # IAs com anel na ilha e no Início
     pill_weather: bool = True
+    weather_auto_locate: bool = True  # sem cidade escolhida, estima pelo IP
     pinned_limits_json: str = ""  # {"provedor": "chave da janela"} mostrada no anel
     media_source: str = "spotify"  # spotify | any
     hover_delay_ms: int = 0

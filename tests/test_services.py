@@ -226,3 +226,23 @@ def test_weather_hourly_and_day_details():
     assert uv_level(9.2) == "Muito alto" and uv_level(1) == "Baixo" and uv_level(None) == ""
     old = parse_forecast(FORECAST, "X")  # resposta antiga, sem hora a hora
     assert old.hours == [] and old.days[0]["hum_mean"] is None
+
+
+def test_weather_rain_soon_and_ip_location():
+    from datetime import datetime
+
+    from ventude.services.weather import Forecast, parse_ip_location
+
+    hours = [
+        {"time": f"2026-11-20T{h:02d}:00", "rain": r} for h, r in ((13, 10), (14, 30), (15, 75), (16, 90))
+    ]
+    f = Forecast("X", 20, 20, 50, 5, 3, True, [], hours)
+    assert f.rain_soon(datetime(2026, 11, 20, 13, 40)) is None  # 13h e 14h: chance baixa
+    assert f.rain_soon(datetime(2026, 11, 20, 14, 5)) == 75
+    ipinfo = parse_ip_location(
+        {"city": "Cachoeirinha", "region": "RS", "country": "BR", "loc": "-29.9,-51.1"}
+    )
+    assert ipinfo.name == "Cachoeirinha" and ipinfo.lat == -29.9 and ipinfo.admin1 == "RS"
+    ipwho = parse_ip_location({"success": True, "city": "Porto", "latitude": 41.1, "longitude": -8.6})
+    assert ipwho.lon == -8.6
+    assert parse_ip_location({"success": False}) is None and parse_ip_location({"loc": "1,2"}) is None

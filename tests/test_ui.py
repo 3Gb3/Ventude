@@ -299,3 +299,19 @@ def test_weather_on_the_pill(qapp, island, app_ctx, store):
     app_ctx.update_settings(pill_weather=False)
     settle(qapp, 100)
     assert island.pill.weather.isHidden()
+
+
+def test_weather_located_by_ip_when_no_city(qapp, app_ctx, monkeypatch):
+    from ventude.services.weather import Place
+
+    found = Place("Cachoeirinha", "BR", -29.9, -51.1, "RS")
+    monkeypatch.setattr(app_ctx.weather, "locate", lambda: found)
+    calls = []
+    monkeypatch.setattr(app_ctx.weather, "forecast", lambda place, force=False: calls.append(place) or None)
+    app_ctx.refresh_weather()
+    end = time.monotonic() + 2
+    while not app_ctx.settings.weather_city_json and time.monotonic() < end:
+        qapp.processEvents()
+    assert Place.from_json(app_ctx.settings.weather_city_json) == found
+    settle(qapp, 200)
+    assert calls and calls[0] == found  # a cidade nova já dispara a busca do clima

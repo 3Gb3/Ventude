@@ -323,6 +323,14 @@ class SettingsPage(Page):
                 self.weather_pill,
             )
         )
+        self.weather_locate = self._switch(s.weather_auto_locate, "weather_auto_locate")
+        body.addWidget(
+            setting_row(
+                "Achar a cidade sozinho",
+                "Sem cidade escolhida na aba Clima, estima pelo seu IP (ipinfo.io) na abertura.",
+                self.weather_locate,
+            )
+        )
         column.addWidget(card)
 
         # ---------- abas ----------

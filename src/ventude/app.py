@@ -110,6 +110,7 @@ def run() -> int:
 
     ctx.media.start()
     ctx.limits.start()
+    ctx.start()
     tray.show()
     island.show()
     log.info("Ventude %s iniciado", __version__)

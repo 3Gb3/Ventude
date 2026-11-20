@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 from ventude.core import net
 from ventude.core.store import Store
 
 GEOCODE = "https://geocoding-api.open-meteo.com/v1/search"
+IP_LOOKUPS = ("https://ipinfo.io/json", "https://ipwho.is/")
+RAIN_ALERT = 60  # % de chance de chuva que acende o aviso na ilha
 FORECAST = "https://api.open-meteo.com/v1/forecast"
 TTL = 20 * 60
 WMO = {
@@ -145,6 +148,14 @@ class Forecast:
         """As 24 horas de um dia (data ISO, ex.: 2026-11-19)."""
         return [h for h in self.hours if str(h.get("time", "")).startswith(day)]
 
+    def rain_soon(self, now: datetime | None = None) -> int | None:
+        """Chance de chuva (%) nesta hora ou na próxima, se for alta; senão None."""
+        now = now or datetime.now()
+        wanted = {f"{(now + timedelta(hours=h)):%Y-%m-%dT%H}:00" for h in (0, 1)}
+        chances = [int(h.get("rain") or 0) for h in self.hours if h.get("time") in wanted]
+        best = max(chances, default=0)
+        return best if best >= RAIN_ALERT else None
+
 
 def _series(block: dict[str, Any], name: str, index: int) -> Any:
     values = block.get(name) or []
@@ -216,6 +227,23 @@ def parse_forecast(data: dict[str, Any], place_label: str) -> Forecast:
     )
 
 
+def parse_ip_location(data: Any) -> Place | None:
+    """Resposta do ipinfo.io ({"loc": "lat,lon"}) ou do ipwho.is ({"latitude": ...})."""
+    if not isinstance(data, dict) or data.get("success") is False:
+        return None
+    lat, lon = data.get("latitude"), data.get("longitude")
+    if (lat is None or lon is None) and isinstance(data.get("loc"), str) and "," in data["loc"]:
+        lat, lon = data["loc"].split(",", 1)
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    city = str(data.get("city") or "").strip()
+    if not city:
+        return None
+    return Place(city, str(data.get("country") or ""), lat, lon, str(data.get("region") or ""))
+
+
 class WeatherService:
     def __init__(self, store: Store) -> None:
         self.store = store
@@ -237,6 +265,17 @@ class WeatherService:
             )
             for i in (data or {}).get("results") or []
         ]
+
+    def locate(self) -> Place | None:
+        """Cidade aproximada pelo IP, para o clima funcionar sem configurar nada."""
+        for url in IP_LOOKUPS:
+            try:
+                place = parse_ip_location(net.get_json(url, timeout=8))
+            except net.NetError:
+                continue
+            if place:
+                return place
+        return None
 
     def forecast(self, place: Place, *, force: bool = False) -> Forecast:
         key = f"wx2:{place.lat:.3f},{place.lon:.3f}"  # wx2: com hora a hora

@@ -193,30 +193,28 @@ class WeatherCard(Card):
         self.body.addLayout(self.days)
         self.clicked.connect(lambda: ctx.navigate_requested.emit("weather"))
         self.icon.setPixmap(icons.pixmap("cloud-sun", theme.SUN, 38))
-        self._key = ""
-        self._loading = False
+        ctx.weather_changed.connect(self._changed)
+        ctx.weather_failed.connect(self._fail)
 
     def refresh(self, force: bool = False) -> None:
+        """Mostra o clima que o app já tem; só pede outra leitura se ainda não houver."""
+        if self.ctx.forecast is not None and not force:
+            self._show(self.ctx.forecast)
+            return
+        self._changed(None)
+        if Place.from_json(self.ctx.settings.weather_city_json):
+            self.ctx.refresh_weather(force=force)
+
+    def _changed(self, forecast: Forecast | None) -> None:
+        if forecast is not None:
+            self._show(forecast)
+            return
         place = Place.from_json(self.ctx.settings.weather_city_json)
-        if not place:
-            self._key = ""
-            self.city.setText("Clima")
-            self.temp.setText("—")
-            self.desc.setText("Toque para escolher sua cidade")
-            self.range.setText("")
-            self._clear_days()
-            return
-        key = place.to_json()
-        if (key == self._key and not force) or self._loading:
-            return
-        self._key, self._loading = key, True
-        self.city.setText(place.name)
-        self.ctx.run(
-            lambda: self.ctx.weather.forecast(place, force=force),
-            done=self._show,
-            fail=self._fail,
-            owner=self,
-        )
+        self.city.setText(place.name if place else "Clima")
+        self.temp.setText("—")
+        self.desc.setText("Atualizando…" if place else "Toque para escolher sua cidade")
+        self.range.setText("")
+        self._clear_days()
 
     def _clear_days(self) -> None:
         while self.days.count():
@@ -225,7 +223,7 @@ class WeatherCard(Card):
                 item.widget().deleteLater()
 
     def _show(self, forecast: Forecast) -> None:
-        self._loading = False
+        self.city.setText(forecast.place.split(",")[0])
         self.temp.setText(f"{forecast.temp:.0f}°")
         self.desc.setText(forecast.description)
         self.icon.setPixmap(icons.pixmap(forecast.icon, tint(forecast.icon), 38))
@@ -244,10 +242,9 @@ class WeatherCard(Card):
         self.ctx.weather_focus = iso
         self.ctx.navigate_requested.emit("weather")
 
-    def _fail(self, _error: BaseException) -> None:
-        self._loading = False
-        self._key = ""
-        self.desc.setText("Clima indisponível agora")
+    def _fail(self, _error: str) -> None:
+        if self.ctx.forecast is None:
+            self.desc.setText("Clima indisponível agora")
 
 
 def tint(icon_name: str) -> str:
@@ -554,10 +551,7 @@ class HomePage(Page):
         self.root.addLayout(bottom, 10)
         self.timer = QTimer(self, interval=1000, timeout=self._tick)
         self.timer.start()
-        ctx.settings_changed.connect(lambda _s: (self.weather.refresh(), self._tick()))
-        self.weather_timer = QTimer(self, interval=20 * 60_000)
-        self.weather_timer.timeout.connect(lambda: self.weather.refresh(force=True))
-        self.weather_timer.start()
+        ctx.settings_changed.connect(lambda _s: self._tick())
         self._tick()
         self.clock.refresh_event()
 

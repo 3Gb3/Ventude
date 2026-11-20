@@ -473,7 +473,8 @@ class WeatherPage(Page):
         self.day: str = ""  # dia aberto nos detalhes (ISO) ou vazio
         self._pending_day = ""
         self._loaded_at = 0.0
-        self._busy = False
+        ctx.weather_changed.connect(self._changed)
+        ctx.weather_failed.connect(self._failed)
         self._show_empty(True)
 
     def _show_empty(self, empty: bool) -> None:
@@ -507,8 +508,9 @@ class WeatherPage(Page):
         self.results.hide()
         self.search.clear()
         self.day = ""
-        self.ctx.update_settings(weather_city_json=place.to_json())
-        self.load(force=True)
+        self.forecast = None
+        self.ctx.update_settings(weather_city_json=place.to_json())  # o app busca a nova cidade
+        self.status.setText("Atualizando…")
 
     # ---------- previsão ----------
     def load(self, force: bool = False) -> None:
@@ -518,23 +520,23 @@ class WeatherPage(Page):
             self._show_empty(True)
             self.status.setText("Dados: Open-Meteo, sem cadastro nem chave.")
             return
-        if self._busy:
+        if self.ctx.forecast is not None and not force:
+            self._show(self.ctx.forecast)
             return
-        self._busy = True
         self.status.setText("Atualizando…")
-        self.ctx.run(
-            lambda: self.ctx.weather.forecast(place, force=force),
-            done=self._show,
-            fail=self._failed,
-            owner=self,
-        )
+        self.ctx.refresh_weather(force=force)
 
-    def _failed(self, error: BaseException) -> None:
-        self._busy = False
+    def _changed(self, forecast: Forecast | None) -> None:
+        if forecast is not None:
+            self._show(forecast)
+        elif not Place.from_json(self.ctx.settings.weather_city_json):
+            self.forecast, self.day = None, ""
+            self._show_empty(True)
+
+    def _failed(self, error: object) -> None:
         self.status.setText(f"Sem conexão com o Open-Meteo agora ({error}).")
 
     def _show(self, forecast: Forecast) -> None:
-        self._busy = False
         self._loaded_at = time.time()
         self.forecast = forecast
         self.icon.setPixmap(icons.pixmap(forecast.icon, _tint(forecast.icon), 60))
@@ -608,5 +610,4 @@ class WeatherPage(Page):
         if focus:
             self.ctx.weather_focus = ""
             self.open_day(focus)
-        if time.time() - self._loaded_at > 15 * 60:
-            self.load()
+        self.load()
