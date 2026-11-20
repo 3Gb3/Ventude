@@ -13,6 +13,9 @@ dependencies = [
     "winrt-windows-media>=3.0 ; sys_platform == 'win32'",
     "winrt-windows-media-control>=3.0 ; sys_platform == 'win32'",
     "winrt-windows-storage-streams>=3.0 ; sys_platform == 'win32'",
+    "winrt-windows-graphics-imaging>=3.0 ; sys_platform == 'win32'",
+    "winrt-windows-media-ocr>=3.0 ; sys_platform == 'win32'",
+    "winrt-windows-globalization>=3.0 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]

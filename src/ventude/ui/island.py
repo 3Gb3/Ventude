@@ -21,6 +21,7 @@ from PySide6.QtCore import (
     Qt,
     QTimer,
     QVariantAnimation,
+    Signal,
 )
 from PySide6.QtGui import (
     QColor,
@@ -59,6 +60,7 @@ from ventude.services.media import MediaState
 from ventude.services.timer import TimerState, countdown, finished_text
 from ventude.services.weather import Forecast
 from ventude.ui import icons, theme
+from ventude.ui.capture import CaptureSession, color_hex, png_bytes, prepare_for_ocr
 from ventude.ui.command import CommandBar
 from ventude.ui.context import AppContext
 from ventude.ui.pages.agenda import AgendaPage
@@ -455,6 +457,8 @@ class DropHint(QWidget):
 class Panel(QWidget):
     """Conteúdo da ilha aberta: abas + páginas criadas sob demanda."""
 
+    tool_requested = Signal(str)  # "color" | "ocr"
+
     def __init__(self, ctx: AppContext, parent: QWidget) -> None:
         super().__init__(parent)
         self.ctx = ctx
@@ -467,6 +471,13 @@ class Panel(QWidget):
         self.tab_row.setSpacing(2)
         header.addLayout(self.tab_row)
         header.addStretch(1)
+        self.color_btn = IconButton("pipette", "Conta-gotas: copia a cor de qualquer ponto da tela", 30, 15)
+        self.ocr_btn = IconButton("scan", "Capturar texto (OCR): copia o texto de uma região da tela", 30, 15)
+        self.color_btn.clicked.connect(lambda: self.tool_requested.emit("color"))
+        self.ocr_btn.clicked.connect(lambda: self.tool_requested.emit("ocr"))
+        header.addWidget(self.color_btn)
+        header.addWidget(self.ocr_btn)
+        header.addSpacing(4)
         self.clock = label("", "Muted")
         self.clock.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         header.addWidget(self.clock)
@@ -492,6 +503,7 @@ class Panel(QWidget):
         self.drop_hint = DropHint(self)
         self.command = CommandBar(ctx, self)
         self.command.navigate.connect(self.select)
+        self.command.tool.connect(self.tool_requested.emit)
         self.rebuild_tabs()
 
     def _pin_changed(self, pinned: bool) -> None:
@@ -688,6 +700,8 @@ class Island(QWidget):
         ctx.limits.alert.connect(self._limit_alert)
         ctx.timer.changed.connect(self._timer_changed)
         ctx.shelf.changed.connect(self._shelf_changed)
+        self.panel.tool_requested.connect(self.run_tool)
+        self._capture: CaptureSession | None = None
         ctx.timer.finished.connect(self._timer_finished)
         self.pulse = QVariantAnimation(self)
         self.pulse.setDuration(1800)
@@ -1229,6 +1243,66 @@ class Island(QWidget):
         if self._toast is not None and self._toast.kind == "music" and data:
             self._toast.art = data
             self.toast_view.show_toast(self._toast)
+
+    # ---------- conta-gotas e OCR ----------
+    def run_tool(self, mode: str) -> None:
+        """Fecha o painel, tira a ilha da frente e congela a tela para escolher."""
+        if self._capture is not None:
+            return
+        self.collapse()
+        QTimer.singleShot(self.ctx.settings.animation_ms + 60, lambda: self._start_capture(mode))
+
+    def _start_capture(self, mode: str) -> None:
+        self.hide()
+        QApplication.processEvents()
+
+        def go() -> None:
+            session = CaptureSession(mode)
+            session.finished.connect(self._capture_done)
+            self._capture = session
+            if not session.start():
+                self._capture_done(mode, None)
+
+        QTimer.singleShot(90, go)  # um quadro para a ilha sumir da captura
+
+    def _capture_done(self, mode: str, value: object) -> None:
+        self._capture = None
+        self.show()
+        if value is None:
+            return
+        if mode == "color":
+            hexa = color_hex(value)  # type: ignore[arg-type]
+            QGuiApplication.clipboard().setText(hexa)
+            self.show_toast(
+                Toast(f"Cor {hexa} copiada", "Cole onde quiser", icon="droplet", color=hexa, kind="tool")
+            )
+            return
+        self.show_toast(Toast("Lendo o texto…", "OCR do Windows", icon="scan", seconds=8, kind="tool"))
+        data = png_bytes(prepare_for_ocr(value))  # type: ignore[arg-type]
+        from ventude.services import ocr
+
+        self.ctx.run(ocr.recognize, data, done=self._ocr_done, fail=self._ocr_failed, owner=self)
+
+    def _ocr_done(self, text: str) -> None:
+        self._end_toast()
+        if not text:
+            self.show_toast(
+                Toast("Nenhum texto encontrado", "Tente uma região maior", icon="scan", kind="tool")
+            )
+            return
+        QGuiApplication.clipboard().setText(text)
+        preview = " ".join(text.split())[:80]
+        self.show_toast(
+            Toast(f"Texto copiado ({len(text)} caracteres)", preview, icon="scan", seconds=5, kind="tool")
+        )
+
+    def _ocr_failed(self, error: BaseException) -> None:
+        self._end_toast()
+        self.show_toast(
+            Toast(
+                "Não deu para ler o texto", str(error), icon="alert", color=theme.WARN, seconds=6, kind="tool"
+            )
+        )
 
     def _shelf_changed(self) -> None:
         self.pill.set_shelf(len(self.ctx.shelf.items))

@@ -565,3 +565,46 @@ def test_command_bar_actions(qapp, island, app_ctx, store):
     assert bar.isVisible() and bar.input.text() == "g" and island._keep_open()
     island.collapse()
     assert not bar.isVisible()
+
+
+def test_color_picker_and_ocr_flow(qapp, island, app_ctx, monkeypatch):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QColor, QGuiApplication, QImage, QMouseEvent, QPixmap
+
+    from ventude.services import ocr
+    from ventude.ui.capture import ScreenOverlay, color_hex, prepare_for_ocr
+
+    image = QImage(100, 60, QImage.Format.Format_RGB32)
+    image.fill(QColor("#336699"))
+    overlay = ScreenOverlay(QGuiApplication.primaryScreen(), QPixmap.fromImage(image), "color")
+    picked = []
+    overlay.picked.connect(picked.append)
+    click = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(10, 10),
+        QPointF(10, 10),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    overlay.mousePressEvent(click)
+    assert color_hex(picked[0]) == "#336699"
+    ocr_overlay = ScreenOverlay(QGuiApplication.primaryScreen(), QPixmap.fromImage(image), "ocr")
+    ocr_overlay.start, ocr_overlay.end = QPoint(5, 5), QPoint(45, 35)
+    assert ocr_overlay.crop().size().width() == 41
+    assert prepare_for_ocr(ocr_overlay.crop()).width() == 82  # região pequena fica maior para o OCR
+    overlay.deleteLater()
+    ocr_overlay.deleteLater()
+
+    settle(qapp, 300)
+    island._capture_done("color", QColor("#ABCDEF"))
+    assert QGuiApplication.clipboard().text() == "#ABCDEF" and island._toast.title == "Cor #ABCDEF copiada"
+    island._cancel_toasts()
+    monkeypatch.setattr(ocr, "recognize", lambda data: "Olá mundo")
+    island._capture_done("ocr", image)
+    end = time.monotonic() + 2
+    while QGuiApplication.clipboard().text() != "Olá mundo" and time.monotonic() < end:
+        qapp.processEvents()
+    assert QGuiApplication.clipboard().text() == "Olá mundo"
+    assert island._toast.title.startswith("Texto copiado")
+    assert not ocr.available() or ocr.available()  # só existe no Windows
