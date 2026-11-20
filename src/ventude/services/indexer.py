@@ -103,14 +103,51 @@ class Entry:
     path: str  # caminho; nos apps da Loja, o AppID
     kind: str  # app | uwp | folder | file
     key: str = ""  # nome em minúsculas (busca)
+    is_project: bool = False
+    branch: str = ""
 
     @property
     def is_folder(self) -> bool:
         return self.kind == "folder"
 
 
-def entry(name: str, path: str, kind: str) -> Entry:
-    return Entry(name, path, kind, name.lower())
+def entry(
+    name: str,
+    path: str,
+    kind: str,
+    *,
+    is_project: bool = False,
+    branch: str = "",
+) -> Entry:
+    return Entry(name, path, kind, name.lower(), is_project=is_project, branch=branch)
+
+
+def read_git_branch(folder: str | Path) -> str:
+    """Lê a branch atual (ou hash curto em detached HEAD) a partir de .git/HEAD."""
+    git_entry = Path(folder) / ".git"
+    try:
+        if git_entry.is_file():
+            raw_gitdir = git_entry.read_text(encoding="utf-8", errors="ignore").strip()
+            if raw_gitdir.lower().startswith("gitdir:"):
+                target = raw_gitdir.split(":", 1)[1].strip()
+                git_dir = Path(target)
+                if not git_dir.is_absolute():
+                    git_dir = Path(folder) / git_dir
+            else:
+                return ""
+        elif git_entry.is_dir():
+            git_dir = git_entry
+        else:
+            return ""
+        head = (git_dir / "HEAD").read_text(encoding="utf-8", errors="ignore").strip()
+    except OSError:
+        return ""
+    if head.startswith("ref:"):
+        ref = head.split(":", 1)[1].strip()
+        if ref.startswith("refs/heads/"):
+            return ref[len("refs/heads/") :]
+        return ref.rsplit("/", 1)[-1]
+    return head[:7] if len(head) >= 7 else head
 
 
 # ---------- varredura ----------
@@ -219,6 +256,7 @@ def scan_files(
     started = time.monotonic()
     out: list[Entry] = []
     seen: set[str] = set()
+    by_path: dict[str, int] = {}
     scanned: set[str] = set()
     for root, depth in roots:
         queue: deque[tuple[str, int]] = deque([(str(root), depth)])
@@ -234,6 +272,18 @@ def scan_files(
                     children = list(it)
             except OSError:
                 continue
+            has_git = any(c.name.lower() == ".git" for c in children)
+            if has_git and folder.lower() in by_path:
+                idx = by_path[folder.lower()]
+                cur = out[idx]
+                out[idx] = Entry(
+                    cur.name,
+                    cur.path,
+                    cur.kind,
+                    cur.key,
+                    is_project=True,
+                    branch=read_git_branch(cur.path),
+                )
             for child in children:
                 try:
                     is_dir = child.is_dir(follow_symlinks=False)
@@ -245,7 +295,25 @@ def scan_files(
                 if key in seen:
                     continue
                 seen.add(key)
-                out.append(entry(child.name, child.path, "folder" if is_dir else "file"))
+                proj = False
+                br = ""
+                if is_dir and level == 1:
+                    try:
+                        if os.path.exists(os.path.join(child.path, ".git")):
+                            proj = True
+                            br = read_git_branch(child.path)
+                    except OSError:
+                        pass
+                by_path[key] = len(out)
+                out.append(
+                    entry(
+                        child.name,
+                        child.path,
+                        "folder" if is_dir else "file",
+                        is_project=proj,
+                        branch=br,
+                    )
+                )
                 if is_dir and level > 1:
                     queue.append((child.path, level - 1))
     return out
@@ -330,10 +398,13 @@ def open_terminal(folder: str) -> tuple[bool, str]:
 
 
 def find_editor() -> tuple[str, str] | None:
-    """(nome, executável) do Cursor ou do VS Code instalados."""
+    """(nome, executável) do Antigravity, Cursor ou VS Code instalados."""
     local = Path(os.environ.get("LOCALAPPDATA", ""))
     program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
     candidates = [
+        ("Antigravity", local / "Programs" / "Antigravity" / "Antigravity.exe"),
+        ("Antigravity", shutil.which("antigravity") or ""),
+        ("Antigravity", shutil.which("agy") or ""),
         ("Cursor", local / "Programs" / "cursor" / "Cursor.exe"),
         ("Cursor", shutil.which("cursor") or ""),
         ("VS Code", local / "Programs" / "Microsoft VS Code" / "Code.exe"),
@@ -344,6 +415,21 @@ def find_editor() -> tuple[str, str] | None:
         if path and Path(path).exists():
             return name, str(path)
     return None
+
+
+def open_agent(folder: str, command: str = "claude") -> tuple[bool, str]:
+    """Abre um agente de IA em terminal diretamente dentro da pasta."""
+    cmd = (command or "claude").strip() or "claude"
+    wt = shutil.which("wt") or shutil.which("wt.exe")
+    try:
+        if wt:
+            subprocess.Popen([wt, "-d", folder, "--", "cmd", "/k", cmd], cwd=folder)
+        else:
+            flags = CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+            subprocess.Popen(["cmd.exe", "/k", cmd], cwd=folder, creationflags=flags)
+    except OSError as exc:
+        return False, str(exc)
+    return True, cmd.split()[0]
 
 
 def open_in_editor(folder: str) -> tuple[bool, str]:
@@ -401,6 +487,10 @@ class Indexer(QObject):
     def _failed(self, error: BaseException) -> None:
         self._busy = False
         log.warning("Índice da busca falhou: %r", error)
+
+    @property
+    def projects(self) -> list[Entry]:
+        return [item for item in self.files if item.is_project]
 
     def search(self, text: str, limit: int = 6) -> list[Entry]:
         query, folders_only = parse_query(text)

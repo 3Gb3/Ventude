@@ -21,10 +21,11 @@ MODULES: list[tuple[str, str, str]] = [
 ]
 ALWAYS_ON = {"home", "settings"}
 DEFAULT_MODULES = "limits,hardware,audio,shortcuts,shelf,agenda,tasks,weather,market,news"
-LAYOUT_VERSION = 6  # 5: abas Sistema e Áudio (1.2) · 6: Ventude Shell ligado (2.0)
+LAYOUT_VERSION = 7  # 5: abas Sistema e Áudio · 6: Shell 2.0 · 7: Shell 3.0 (Doca, Lançador, Controles)
 DEFAULT_SYMBOLS = "^BVSP:Ibovespa,BRL=X:Dólar,BTC-USD:Bitcoin,PETR4.SA:Petrobras,VALE3.SA:Vale,AAPL:Apple"
 DEFAULT_NEWS = "G1,BBC Brasil,Tecnoblog"
-ANIMATION_SPEEDS = {"rapida": 170, "normal": 260, "suave": 380}
+ANIMATION_SPEEDS = {"nenhuma": 0, "rapida": 170, "normal": 260, "suave": 380}
+DOCK_MODES = ("esquivar", "sempre", "oculta")
 METRIC_KEYS = ("cpu", "gpu", "gpu_temp", "ram", "net_down", "net_up", "ping", "battery")
 
 
@@ -70,16 +71,22 @@ class Settings:
     lyrics_enabled: bool = True  # letra sincronizada (lrclib.net) no player do Início
     replace_taskbar: bool = False  # esconde a barra do Windows e mostra a barra de tarefas do Ventude
     replace_start_menu: bool = False  # tecla Windows e Win + S abrem a busca do Ventude
-    # ---------- Ventude Shell (2.0) ----------
-    taskbar_autohide: bool = False  # a barra some e volta ao encostar o mouse embaixo
-    taskbar_align: str = "center"  # center | left
-    taskbar_weather: bool = True  # clima no canto esquerdo da barra
-    taskbar_all_monitors: bool = True  # uma barra em cada monitor
-    shell_glass: bool = True  # efeito de vidro (acrylic) na barra, no Iniciar e na busca
+    # ---------- Ventude Shell (2.0 e 3.0) ----------
+    dock_mode: str = "esquivar"  # esquivar | sempre | oculta
+    island_echo: bool = True  # hora nos outros monitores (Eco)
+    hotkey_controls: bool = True  # Win + A abre Controles na ilha
+    hotkey_dock_numbers: bool = True  # Win + 1..9 e Win + Shift + 1..9 acionam a Doca
+    quiet_mode: bool = False  # Silêncio: só deixa passar timer, agenda e limite >= 95%
+    agent_command: str = "claude"  # comando executado por "Agente aqui"
+    taskbar_autohide: bool = False  # legado (usado na migração v6->v7)
+    taskbar_align: str = "center"  # legado
+    taskbar_weather: bool = True  # legado
+    taskbar_all_monitors: bool = True  # uma Doca em cada monitor
+    shell_glass: bool = True  # legado
     power_animation: bool = True  # "Até logo!": escurece as telas antes de desligar, reiniciar...
     shell_greeting: bool = True  # "Bom dia!" ao ligar o PC
-    start_view: str = "category"  # Iniciar > Todos: category | grid | list
-    pill_date: bool = True  # data na ilha fechada (no Shell, ela fica no relógio da barra)
+    start_view: str = "category"  # legado
+    pill_date: bool = True  # data na ilha fechada (única data no Shell 3.0)
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3
@@ -183,6 +190,10 @@ class Settings:
         for name in ("codex_mode", "cursor_mode", "copilot_mode"):
             if getattr(s, name) not in ("auto", "off"):
                 setattr(s, name, "off")
+        if s.dock_mode not in DOCK_MODES:
+            s.dock_mode = "esquivar"
+        if not s.agent_command.strip():
+            s.agent_command = "claude"
         if s.taskbar_align not in ("center", "left"):
             s.taskbar_align = "center"
         if s.start_view not in ("category", "grid", "list"):

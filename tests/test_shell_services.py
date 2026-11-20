@@ -479,7 +479,7 @@ def test_app_window_rules_and_dock_grouping():
     assert not is_app_window(True, "Ventude", 0, 0, False, "X", 1, 1)  # o próprio Ventude
     assert not is_app_window(True, "Doc", 99, 0, False, "X", 10, 1)  # tem dono (diálogo)
     from ventude.core.store import Pin
-    from ventude.ui.shell.taskbar import build_items, store_families
+    from ventude.ui.shell.items import build_items, store_families
 
     claude_exe = r"C:\Program Files\WindowsApps\Claude_6.6395.0.0_x64__pzs8sxrjxfjjc\app\claude.exe"
     pins = [
@@ -785,3 +785,161 @@ def test_lnk_target_and_app_name(tmp_path):
     (tmp_path / "ruim.lnk").write_bytes(b"lixo")
     assert lnk_target(tmp_path / "ruim.lnk") == ""
     assert app_name(r"C:\nao\existe\spotify.exe") == "Spotify"
+
+
+# ---------- Ventude Shell 3.0 (serviços e modelos puros) ----------
+def test_win_key_logic_v3_controls_and_dock_digits():
+    from ventude.services.system import VK_A, VK_LWIN, VK_S
+
+    # Tudo ligado
+    logic = WinKeyLogic({"launcher", "controls", "slots"})
+    logic.feed(VK_LWIN, True)
+    assert logic.feed(VK_A, True) == (BLOCK, "controls")
+    assert logic.feed(VK_A, False) == (BLOCK, "")
+    assert logic.feed(VK_LWIN, False) == (BLOCK, "mask")
+
+    # Multi-press Win + 1 -> Win + 2 -> Win + Shift + 3 sem soltar Win
+    logic.feed(VK_LWIN, True)
+    assert logic.feed(0x31, True) == (BLOCK, "slot:1")
+    assert logic.feed(0x31, False) == (BLOCK, "")
+    assert logic.feed(0x32, True) == (BLOCK, "slot:2")
+    logic.feed(0xA0, True)  # Shift
+    assert logic.feed(0x33, True) == (BLOCK, "slot_new:3")
+    logic.feed(0xA0, False)
+    assert logic.feed(0x32, False) == (BLOCK, "")
+    assert logic.feed(0x33, False) == (BLOCK, "")
+    assert logic.feed(VK_LWIN, False) == (BLOCK, "mask")
+
+    # Ctrl + Win + 1 passa para o Windows
+    logic.feed(VK_LWIN, True)
+    logic.feed(0xA2, True)
+    assert logic.feed(0x31, True) == (PASS, "")
+    logic.feed(0x31, False)
+    logic.feed(0xA2, False)
+    logic.feed(VK_LWIN, False)
+
+    # Features desligadas: só Win+S e controls
+    partial = WinKeyLogic({"controls"})
+    partial.feed(VK_LWIN, True)
+    assert partial.feed(VK_S, True) == (PASS, "")
+    assert partial.feed(VK_LWIN, False) == (PASS, "")
+    partial.feed(VK_LWIN, True)
+    assert partial.feed(VK_A, True) == (BLOCK, "controls")
+    assert partial.feed(VK_LWIN, False) == (BLOCK, "mask")
+
+
+def test_shell_events_classify_debounce_and_flash_limit(qapp):
+    from ventude.services.shellhook import (
+        HSHELL_FLASH,
+        HSHELL_RUDEAPPACTIVATED,
+        HSHELL_WINDOWACTIVATED,
+        HSHELL_WINDOWCREATED,
+        HSHELL_WINDOWDESTROYED,
+        ShellEvents,
+        classify_shell_event,
+    )
+
+    assert classify_shell_event(HSHELL_WINDOWCREATED, 10) == ("windows", 10)
+    assert classify_shell_event(HSHELL_WINDOWDESTROYED, 11) == ("windows", 11)
+    assert classify_shell_event(HSHELL_WINDOWACTIVATED, 12) == ("activated", 12)
+    assert classify_shell_event(HSHELL_RUDEAPPACTIVATED, 13) == ("activated", 13)
+    assert classify_shell_event(HSHELL_FLASH, 14) == ("flashed", 14)
+    assert classify_shell_event(999, 14) is None
+
+    now = [100.0]
+    events = ShellEvents(debounce_ms=20, flash_cooldown_ms=1000, clock=lambda: now[0])
+    got: list[tuple[str, int]] = []
+    events.windows_changed.connect(lambda: got.append(("win", 0)))
+    events.activated.connect(lambda h: got.append(("act", h)))
+    events.flashed.connect(lambda h: got.append(("flash", h)))
+
+    events.handle(HSHELL_WINDOWCREATED, 1)
+    events.handle(HSHELL_WINDOWCREATED, 2)  # debounced em um único sinal
+    events.handle(HSHELL_WINDOWACTIVATED, 99)
+    events.handle(HSHELL_FLASH, 55)
+    events.handle(HSHELL_FLASH, 55)  # rate-limited (dentro de 1s)
+    now[0] = 101.2
+    events.handle(HSHELL_FLASH, 55)  # agora passou 1s -> emite de novo
+    assert wait(qapp, lambda: ("win", 0) in got)
+    assert got.count(("win", 0)) == 1
+    assert ("act", 99) in got
+    assert got.count(("flash", 55)) == 2
+
+
+def test_dock_model_layout_overflow_dodge_and_split_by_monitor():
+    from ventude.core.store import Pin
+    from ventude.ui.shell.dock_model import SlotModel, edge_reveal, should_dodge
+    from ventude.ui.shell.items import TaskItem, provider_for_app, split_by_monitor
+
+    assert provider_for_app("Claude Desktop", "claude.exe") == "claude"
+    assert provider_for_app("Antigravity", "gemini") == "gemini"
+    assert provider_for_app("Bloco de Notas", "notepad.exe") == ""
+
+    model = SlotModel()
+    items = [
+        TaskItem(f"pin:{i}", f"App {i}", "app", f"app{i}.exe", "app", f"app{i}.exe", pin_id=i + 1)
+        for i in range(18)
+    ]
+    lay_wide = model.layout(items[:4], window_w=1000, max_w=900)
+    assert lay_wide.slot_size == 44 and lay_wide.overflow_count == 0 and len(lay_wide.slots) == 4
+    lay_narrow = model.layout(items, window_w=460, max_w=440)
+    assert lay_narrow.slot_size == 36 and lay_narrow.overflow_count > 0
+
+    # Dodge math
+    dock_rect = (700, 1018, 1220, 1070)
+    above = (100, 100, 900, 1000)
+    overlapping = (0, 0, 1920, 1080)
+    assert not should_dodge(dock_rect, above, "esquivar")
+    assert should_dodge(dock_rect, overlapping, "esquivar")
+    assert not should_dodge(dock_rect, overlapping, "esquivar", menu_open=True)
+    assert not should_dodge(dock_rect, overlapping, "sempre")
+    assert should_dodge(dock_rect, overlapping, "sempre", fullscreen=True)
+    assert should_dodge(dock_rect, None, "oculta")
+    assert not should_dodge(dock_rect, None, "oculta", hover_reveal=True)
+    assert edge_reveal(500, 1078, (0, 0, 1920, 1080))
+    assert not edge_reveal(500, 900, (0, 0, 1920, 1080))
+
+    mon1 = (0, 0, 1920, 1080)
+    mon2 = (1920, 0, 3840, 1080)
+    from ventude.ui.shell.items import build_items
+
+    built = build_items(
+        [Pin(1, "taskbar", "app", "Code", r"C:\Apps\Code.exe", 0)],
+        [
+            WindowInfo(1, "Repo", 10, r"C:\Apps\Code.exe", monitor=mon2),
+            WindowInfo(2, "Terminal", 11, r"C:\Apps\wt.exe", monitor=mon1),
+        ],
+    )
+    m1 = split_by_monitor(built, mon1)
+    m2 = split_by_monitor(built, mon2)
+    assert m1[0].other_monitor and [i.label for i in m1] == ["Code", "Wt"]
+    assert not m2[0].other_monitor and [i.label for i in m2] == ["Code"]
+
+
+def test_indexer_git_projects_antigravity_and_rename_pin(tmp_path, store, monkeypatch):
+    repo = tmp_path / "root" / "meu-repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/feat/calma\n", encoding="utf-8")
+    plain = tmp_path / "root" / "docs"
+    plain.mkdir()
+    entries = indexer.scan_files([(tmp_path / "root", 2)])
+    by_name = {e.name: e for e in entries}
+    assert by_name["meu-repo"].is_project and by_name["meu-repo"].branch == "feat/calma"
+    assert not by_name["docs"].is_project
+
+    fake_local = tmp_path / "local"
+    agy_exe = fake_local / "Programs" / "Antigravity" / "Antigravity.exe"
+    agy_exe.parent.mkdir(parents=True)
+    agy_exe.write_bytes(b"")
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+    assert indexer.find_editor() == ("Antigravity", str(agy_exe))
+
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(indexer.shutil, "which", lambda n: "wt.exe" if n == "wt" else None)
+    monkeypatch.setattr(indexer.subprocess, "Popen", lambda args, **kw: spawned.append(args))
+    assert indexer.open_agent(str(repo), "claude") == (True, "claude")
+    assert spawned[0] == ["wt.exe", "-d", str(repo), "--", "cmd", "/k", "claude"]
+
+    pin = store.add_pin("start", "app", "Velho Nome", r"C:\Apps\x.exe")
+    store.rename_pin(pin.id, "Novo Nome")
+    assert store.pins("start")[0].label == "Novo Nome"

@@ -30,6 +30,18 @@ from ventude.services.weather import Forecast, Place, WeatherService
 WEATHER_EVERY = 15 * 60_000
 
 
+def migrate_shortcuts_to_start_pins(store: Store) -> int:
+    """Copia atalhos do painel antigo para os fixados do Lançador ('start'), sem duplicar."""
+    moved = 0
+    valid_kinds = ("app", "uwp", "folder", "file", "system", "url")
+    for shortcut in store.shortcuts():
+        if not store.pinned("start", shortcut.target):
+            kind = shortcut.kind if shortcut.kind in valid_kinds else "url"
+            store.add_pin("start", kind, shortcut.label, shortcut.target, first=False)
+            moved += 1
+    return moved
+
+
 class AppContext(QObject):
     settings_changed = Signal(object)
     data_changed = Signal(str)  # "tasks" | "events" | "shortcuts"
@@ -106,11 +118,15 @@ class AppContext(QObject):
                 "layout_version": LAYOUT_VERSION,
             }
             if version < 6:
-                # 2.0: o Ventude vira o shell. Barra, Iniciar e tecla Windows ligados; data e clima saem da
-                # ilha porque agora ficam na barra de tarefas (dá para voltar em Ajustes).
+                changes.update(replace_taskbar=True, replace_start_menu=True)
+            if version < 7:
+                # 3.0 (Calma): hora/data/clima vivem só na Ilha; Doca centrada com Esquivar (ou Oculta).
                 changes.update(
-                    replace_taskbar=True, replace_start_menu=True, pill_weather=False, pill_date=False
+                    pill_date=True,
+                    pill_weather=True,
+                    dock_mode="oculta" if self.settings.taskbar_autohide else "esquivar",
                 )
+                migrate_shortcuts_to_start_pins(self.store)
             self.update_settings(**changes)
             if version < 4:
                 self.detect_providers()

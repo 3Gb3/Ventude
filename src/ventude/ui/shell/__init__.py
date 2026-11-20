@@ -1,1 +1,5 @@
-"""Ventude Shell (2.0): barra de tarefas, Menu Iniciar, Pesquisa, painéis rápidos e animações de energia."""
+"""Ventude Shell 3.0."""
+
+from ventude.ui.shell.controller import ShellController
+
+__all__ = ["ShellController"]

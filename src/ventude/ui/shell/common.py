@@ -1,14 +1,11 @@
-"""Peças comuns do Ventude Shell: janela de vidro com animação, botões com hover, ícones reais e avatar."""
+"""Peças comuns do Ventude Shell: janela no material Tinta, botões com halo, ícones reais e avatar."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
 from PySide6.QtCore import (
-    QEasingCurve,
-    QParallelAnimationGroup,
     QPoint,
-    QPropertyAnimation,
     QRect,
     QRectF,
     QSize,
@@ -16,24 +13,25 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from ventude.services import dwm, shellicons
-from ventude.ui import icons, theme
+from ventude.ui import brand, icons, motion, theme
 
-PANEL_RADIUS = 10
-GLASS_TINT = 0x9E101216  # 0xAARRGGBB do acrylic (Windows)
-PANEL_BG = "#17191E"
-TASKBAR_BG = "#0F1114"
-HOVER = QColor(255, 255, 255, 16)
-PRESSED = QColor(255, 255, 255, 10)
+HOVER = theme.HALO
+PRESSED = theme.HALO_PRESS
 ACTIVE = QColor(255, 255, 255, 24)
-BORDER = QColor(255, 255, 255, 22)
+BORDER = theme.HAIRLINE
 
 
-def shell_font(size: int, weight: QFont.Weight = QFont.Weight.Normal, display: bool = False) -> QFont:
-    return theme.font(size, weight, display)
+def shell_font(
+    size: int,
+    weight: QFont.Weight = QFont.Weight.Normal,
+    display: bool = False,
+    tabular: bool = False,
+) -> QFont:
+    return theme.font(size, weight, display, tabular=tabular)
 
 
 def app_pixmap(ctx: object, kind: str, target: str, size: int, fallback: str = "apps") -> QPixmap:
@@ -62,7 +60,7 @@ def draw_pixmap(p: QPainter, pixmap: QPixmap, rect: QRectF) -> None:
 
 
 class ShellWindow(QWidget):
-    """Janela sem moldura e translúcida, com vidro (acrylic) quando o Windows deixa e animação de abrir."""
+    """Janela sem moldura no material Tinta, com animação suave de abrir e fechar."""
 
     shown = Signal()
     hidden_ = Signal()
@@ -71,12 +69,17 @@ class ShellWindow(QWidget):
         self,
         ctx: object,
         *,
-        radius: int = PANEL_RADIUS,
+        radius: int = theme.R_CARD,
         tool: bool = True,
         focus: bool = True,
-        bg: str = PANEL_BG,
+        bg: str = theme.INK_RAISED,
+        alpha: float = 0.98,
     ) -> None:
-        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+        flags = (
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
         flags |= Qt.WindowType.Tool if tool else Qt.WindowType.Window
         if not focus:
             flags |= Qt.WindowType.WindowDoesNotAcceptFocus
@@ -84,44 +87,26 @@ class ShellWindow(QWidget):
         self.ctx = ctx
         self.radius = radius
         self.bg = bg
-        self.glass_on = False
-        self.force_glass_look = False  # prévias: desenha como se o vidro estivesse ligado
+        self.alpha = alpha
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         if not focus:
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self._anim: QParallelAnimationGroup | None = None
+        self._tween = motion.Tween(self)
+        self._tween.progressed.connect(self._on_anim)
+        self._tween.done.connect(self._on_done)
+        self._offset = QPoint()
+        self._target_pos = QPoint()
         self._closing = False
 
-    # ---------- vidro ----------
-    def wants_glass(self) -> bool:
-        settings = getattr(self.ctx, "settings", None)
-        return bool(getattr(settings, "shell_glass", True))
-
-    def apply_glass(self) -> None:
+    def apply_ink(self) -> None:
         hwnd = int(self.winId())
-        if self.wants_glass():
-            self.glass_on = dwm.enable_glass(hwnd, GLASS_TINT)
-        else:
-            dwm.disable_glass(hwnd)
-            self.glass_on = False
-        if self.radius:
-            dwm.round_corners(hwnd)
-            dwm.border_color(hwnd, 0x2E3138)
-        else:
-            dwm.square_corners(hwnd)
+        dwm.disable_glass(hwnd)
+        dwm.square_corners(hwnd)
+        dwm.border_color(hwnd, 0xFFFFFFFE)
         self.update()
 
-    def background_alpha(self) -> float:
-        return 0.84 if (self.glass_on or self.force_glass_look) else 0.975
-
     def paint_background(self, p: QPainter) -> None:
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        path = QPainterPath()
-        path.addRoundedRect(rect, self.radius, self.radius)
-        p.fillPath(path, theme.color(self.bg, self.background_alpha()))
-        p.setPen(QPen(BORDER, 1))
-        p.drawPath(path)
+        brand.paint_ink(p, QRectF(self.rect()), self.radius, bg=self.bg, alpha=self.alpha)
 
     def paintEvent(self, _event: object) -> None:
         p = QPainter(self)
@@ -129,21 +114,21 @@ class ShellWindow(QWidget):
 
     def showEvent(self, event: object) -> None:
         super().showEvent(event)
-        self.apply_glass()
+        self.apply_ink()
 
     # ---------- abrir e fechar com animação ----------
     def animation_ms(self) -> int:
         settings = getattr(self.ctx, "settings", None)
-        base = getattr(settings, "animation_ms", 260) if settings else 260
-        return max(0, int(base * 0.8))
+        return motion.ms("desdobrar", settings)
 
-    def open_at(self, rect: QRect, offset: QPoint = QPoint(0, 26)) -> None:
+    def open_at(self, rect: QRect, offset: QPoint = QPoint(0, 18)) -> None:
         """Mostra deslizando de `offset` até `rect`, com fade."""
         self._closing = False
-        if self._anim:
-            self._anim.stop()
+        self._tween.stop()
         duration = self.animation_ms()
         self.setGeometry(rect)
+        self._target_pos = rect.topLeft()
+        self._offset = offset
         if duration <= 0:
             self.setWindowOpacity(1.0)
             self.show()
@@ -154,44 +139,36 @@ class ShellWindow(QWidget):
         self.move(rect.topLeft() + offset)
         self.show()
         self.raise_()
-        group = QParallelAnimationGroup(self)
-        slide = QPropertyAnimation(self, b"pos", group)
-        slide.setDuration(duration)
-        slide.setStartValue(rect.topLeft() + offset)
-        slide.setEndValue(rect.topLeft())
-        slide.setEasingCurve(QEasingCurve.Type.OutCubic)
-        fade = QPropertyAnimation(self, b"windowOpacity", group)
-        fade.setDuration(int(duration * 0.8))
-        fade.setStartValue(0.0)
-        fade.setEndValue(1.0)
-        fade.setEasingCurve(QEasingCurve.Type.OutQuad)
-        group.finished.connect(self.shown.emit)
-        self._anim = group
-        group.start()
+        self._tween.play(duration, 0.0, 1.0, motion.out_cubic)
 
-    def close_animated(self, offset: QPoint = QPoint(0, 18)) -> None:
+    def close_animated(self, offset: QPoint = QPoint(0, 12)) -> None:
         if not self.isVisible() or self._closing:
             return
         self._closing = True
-        if self._anim:
-            self._anim.stop()
-        duration = int(self.animation_ms() * 0.6)
+        self._tween.stop()
+        settings = getattr(self.ctx, "settings", None)
+        duration = motion.ms("desdobrar_close", settings)
         if duration <= 0:
             self._finish_close()
             return
-        group = QParallelAnimationGroup(self)
-        slide = QPropertyAnimation(self, b"pos", group)
-        slide.setDuration(duration)
-        slide.setStartValue(self.pos())
-        slide.setEndValue(self.pos() + offset)
-        slide.setEasingCurve(QEasingCurve.Type.InCubic)
-        fade = QPropertyAnimation(self, b"windowOpacity", group)
-        fade.setDuration(duration)
-        fade.setStartValue(self.windowOpacity())
-        fade.setEndValue(0.0)
-        group.finished.connect(self._finish_close)
-        self._anim = group
-        group.start()
+        self._target_pos = self.pos()
+        self._offset = offset
+        self._tween.play(duration, 1.0, 0.0, motion.in_cubic)
+
+    def _on_anim(self, value: float) -> None:
+        self.setWindowOpacity(max(0.0, min(1.0, value)))
+        if self._closing:
+            self.move(self._target_pos + self._offset * (1.0 - value))
+        else:
+            self.move(self._target_pos + self._offset * (1.0 - value))
+
+    def _on_done(self) -> None:
+        if self._closing:
+            self._finish_close()
+        else:
+            self.setWindowOpacity(1.0)
+            self.move(self._target_pos)
+            self.shown.emit()
 
     def _finish_close(self) -> None:
         self.hide()
@@ -205,7 +182,7 @@ class ShellWindow(QWidget):
 
 
 class HoverButton(QWidget):
-    """Botão desenhado à mão: fundo arredondado no hover/pressionado, ícone e texto opcional."""
+    """Botão desenhado à mão: halo em cápsula no hover/pressionado, ícone e texto opcional."""
 
     clicked = Signal()
     right_clicked = Signal(QPoint)
@@ -218,7 +195,7 @@ class HoverButton(QWidget):
         tip: str = "",
         size: QSize = QSize(40, 40),
         icon_size: int = 18,
-        radius: int = 6,
+        radius: int = theme.R_ITEM,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -229,6 +206,8 @@ class HoverButton(QWidget):
         self._pressed = False
         self.setFixedSize(size)
         self.setToolTip(tip)
+        if tip or text:
+            self.setAccessibleName(text or tip)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
 

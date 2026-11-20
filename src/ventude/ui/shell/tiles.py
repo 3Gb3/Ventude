@@ -3,16 +3,17 @@ duas linhas de texto) e cartões de categoria (quatro ícones). Entram em cascat
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QEasingCurve, QPoint, QRectF, QSize, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QMouseEvent, QPainter
+from PySide6.QtCore import QEasingCurve, QMimeData, QPoint, QRectF, QSize, Qt, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QMouseEvent, QPainter
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ventude.ui import theme
-from ventude.ui.shell.common import HOVER, PRESSED, app_pixmap, draw_pixmap, shell_font
+from ventude.ui.shell.common import app_pixmap, draw_pixmap, shell_font
 
 
 @dataclass
@@ -62,12 +63,17 @@ class TileGrid(QWidget):
         cell: QSize = QSize(96, 88),
         icon: int = 32,
         parent: QWidget | None = None,
+        *,
+        drag_enabled: bool = False,
     ) -> None:
         super().__init__(parent)
         self.ctx, self.mode, self.columns, self.cell, self.icon = ctx, mode, columns, cell, icon
+        self.drag_enabled = drag_enabled
         self.tiles: list[Tile] = []
         self.hover = -1
         self.pressed = -1
+        self._drag_start: QPoint | None = None
+        self._drag_tile: Tile | None = None
         self.limit = 0  # 0 = todos
         self.reveal = 1.0
         self.empty_text = ""
@@ -155,12 +161,12 @@ class TileGrid(QWidget):
             rect = rect.translated(0, offset)
             if index == self.pressed:
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(PRESSED)
-                p.drawRoundedRect(rect, 6, 6)
+                p.setBrush(QColor(theme.HALO_PRESS))
+                p.drawRoundedRect(rect, theme.R_ITEM, theme.R_ITEM)
             elif index == self.hover:
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(HOVER)
-                p.drawRoundedRect(rect, 6, 6)
+                p.setBrush(QColor(theme.HALO))
+                p.drawRoundedRect(rect, theme.R_ITEM, theme.R_ITEM)
             if self.mode == "category":
                 self._paint_category(p, rect, tile)
             elif self.mode == "row":
@@ -212,7 +218,7 @@ class TileGrid(QWidget):
         card = QRectF(rect.left() + 6, rect.top() + 4, rect.width() - 12, rect.height() - 34)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(255, 255, 255, 12))
-        p.drawRoundedRect(card, 8, 8)
+        p.drawRoundedRect(card, 12, 12)
         size = 30
         gap = 12
         block = size * 2 + gap
@@ -234,7 +240,29 @@ class TileGrid(QWidget):
 
     # ---------- mouse ----------
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        index = self.index_at(event.position().toPoint())
+        pos = event.position().toPoint()
+        if (
+            self.drag_enabled
+            and self._drag_start is not None
+            and self._drag_tile is not None
+            and (event.buttons() & Qt.MouseButton.LeftButton)
+            and (pos - self._drag_start).manhattanLength() >= 8
+        ):
+            tile = self._drag_tile
+            self._drag_start = None
+            self._drag_tile = None
+            self.pressed = -1
+            self.update()
+            if tile.kind in ("app", "uwp", "folder", "file", "system", "url", "project") and tile.target:
+                drag = QDrag(self)
+                mime = QMimeData()
+                payload = json.dumps({"kind": tile.kind, "label": tile.label, "target": tile.target})
+                mime.setData("application/x-ventude-item", payload.encode("utf-8"))
+                drag.setMimeData(mime)
+                drag.setPixmap(self._icon(tile, 32))
+                drag.exec(Qt.DropAction.CopyAction)
+                return
+        index = self.index_at(pos)
         if index != self.hover:
             self.hover = index
             tiles = self.visible_tiles()
@@ -243,14 +271,23 @@ class TileGrid(QWidget):
 
     def leaveEvent(self, _event: object) -> None:
         self.hover = self.pressed = -1
+        self._drag_start = None
+        self._drag_tile = None
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self.pressed = self.index_at(event.position().toPoint())
+            pos = event.position().toPoint()
+            self.pressed = self.index_at(pos)
+            tiles = self.visible_tiles()
+            if self.drag_enabled and 0 <= self.pressed < len(tiles):
+                self._drag_start = pos
+                self._drag_tile = tiles[self.pressed]
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._drag_start = None
+        self._drag_tile = None
         index = self.index_at(event.position().toPoint())
         tiles = self.visible_tiles()
         pressed, self.pressed = self.pressed, -1
@@ -325,8 +362,8 @@ class AppList(QWidget):
             tile: Tile = value  # type: ignore[assignment]
             if index == self.hover:
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(HOVER)
-                p.drawRoundedRect(rect.adjusted(2, 1, -2, -1), 6, 6)
+                p.setBrush(QColor(theme.HALO))
+                p.drawRoundedRect(rect.adjusted(2, 1, -2, -1), theme.R_ITEM, theme.R_ITEM)
             draw_pixmap(
                 p,
                 app_pixmap(self.ctx, tile.kind, tile.target, 24),
@@ -335,6 +372,16 @@ class AppList(QWidget):
             p.setPen(QColor(theme.TEXT))
             p.setFont(shell_font(13))
             p.drawText(rect.adjusted(48, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, tile.label)
+
+    def letters(self) -> list[str]:
+        return [str(val) for kind, val in self.rows if kind == "header"]
+
+    def y_for_letter(self, letter: str) -> int | None:
+        target = letter.upper()
+        for (kind, val), rect in zip(self.rows, self._geometry(), strict=False):
+            if kind == "header" and str(val).upper() == target:
+                return round(rect.top())
+        return None
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         index = self.index_at(event.position().toPoint())

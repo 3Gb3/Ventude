@@ -381,6 +381,10 @@ class Store:
     def remove_pin(self, pin_id: int) -> None:
         self._exec("DELETE FROM pins WHERE id=?", (pin_id,))
 
+    def rename_pin(self, pin_id: int, label: str) -> None:
+        if label.strip():
+            self._exec("UPDATE pins SET label=? WHERE id=?", (label.strip(), pin_id))
+
     def reorder_pins(self, ids: list[int]) -> None:
         with self._lock, self._db:
             self._db.executemany("UPDATE pins SET position=? WHERE id=?", list(enumerate(ids)))

@@ -27,7 +27,9 @@ SPIF_SENDCHANGE = 0x0002
 GW_OWNER = 4
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE = 0x00000080, 0x00040000, 0x08000000
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
 DWMWA_CLOAKED = 14
+MONITOR_DEFAULTTONEAREST = 2
 WM_CLOSE, WM_GETICON = 0x0010, 0x007F
 ICON_BIG, ICON_SMALL2 = 1, 2
 GCLP_HICON = -14
@@ -71,6 +73,9 @@ def _user32():  # noqa: ANN202
     u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     u.GetForegroundWindow.restype = wintypes.HWND
     u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    u.MonitorFromWindow.restype = wintypes.HMONITOR
+    u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    u.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MonitorInfo)]
     u.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT]
     u.SendMessageTimeoutW.argtypes = [
         wintypes.HWND,
@@ -291,6 +296,7 @@ class WindowInfo:
     maximized: bool = False
     foreground: bool = False
     app_id: str = ""  # AppUserModelID (quando o app define), para agrupar como o Windows
+    monitor: Rect = (0, 0, 0, 0)  # retângulo físico do monitor onde a janela está
 
 
 def _class_name(user32: object, hwnd: int) -> str:
@@ -348,6 +354,41 @@ def is_app_window(
     return not (exstyle & WS_EX_NOACTIVATE and not exstyle & WS_EX_APPWINDOW)
 
 
+def _window_monitor(user32: object, hwnd: int) -> Rect:
+    try:
+        hmon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)  # type: ignore[attr-defined]
+        if not hmon:
+            return (0, 0, 0, 0)
+        info = _MonitorInfo()
+        info.cbSize = ctypes.sizeof(_MonitorInfo)
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):  # type: ignore[attr-defined]
+            return _rect(info.rcMonitor)
+    except (OSError, AttributeError):
+        pass
+    return (0, 0, 0, 0)
+
+
+def _extended_rect(user32: object, hwnd: int) -> Rect:
+    rect = wintypes.RECT()
+    try:
+        dwm = ctypes.windll.dwmapi  # type: ignore[attr-defined]
+        dwm.DwmGetWindowAttribute.argtypes = [
+            wintypes.HWND,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        hr = dwm.DwmGetWindowAttribute(
+            hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect), ctypes.sizeof(rect)
+        )
+        if hr == 0 and rect.right > rect.left and rect.bottom > rect.top:
+            return _rect(rect)
+    except OSError:
+        pass
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))  # type: ignore[attr-defined]
+    return _rect(rect)
+
+
 def list_windows(own_pid: int | None = None) -> list[WindowInfo]:
     """Janelas reais abertas (como no Alt + Tab), da mais recente para a mais antiga."""
     if sys.platform != "win32":
@@ -400,6 +441,7 @@ def list_windows(own_pid: int | None = None) -> list[WindowInfo]:
                 bool(user32.IsZoomed(hwnd)),
                 hwnd == foreground,
                 window_app_id(hwnd),
+                _window_monitor(user32, hwnd),
             )
         )
     return out
@@ -436,6 +478,24 @@ def toggle_maximize(hwnd: int) -> None:
 
 def close(hwnd: int) -> None:
     _user32().PostMessageW(hwnd, WM_CLOSE, 0, 0)
+
+
+def foreground_rect(own_pid: int | None = None) -> tuple[Rect, Rect] | None:
+    """(retângulo visual da janela ativa, retângulo do monitor dela) em pixels físicos."""
+    if sys.platform != "win32":
+        return None
+    user32 = _user32()
+    hwnd = int(user32.GetForegroundWindow() or 0)
+    if not hwnd or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+        return None
+    if _pid(user32, hwnd) == (os.getpid() if own_pid is None else own_pid):
+        return None
+    if _class_name(user32, hwnd) in SKIP_CLASSES:
+        return None
+    mon = _window_monitor(user32, hwnd)
+    if mon == (0, 0, 0, 0):
+        return None
+    return _extended_rect(user32, hwnd), mon
 
 
 def covering_window(monitor: Rect, own_pid: int | None = None, fullscreen_only: bool = False) -> bool:

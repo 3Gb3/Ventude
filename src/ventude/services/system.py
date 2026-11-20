@@ -142,6 +142,25 @@ def is_hotkey_message(message: object) -> bool:
     return msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID
 
 
+SPI_GETCLIENTAREAANIMATION = 0x1042
+
+
+def client_area_animation() -> bool:
+    """True quando as animações do Windows estão ligadas (respeita Movimento Reduzido)."""
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+
+        enabled = ctypes.c_int(1)
+        ok = ctypes.windll.user32.SystemParametersInfoW(  # type: ignore[attr-defined]
+            SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(enabled), 0
+        )
+        return bool(enabled.value) if ok else True
+    except (AttributeError, OSError):
+        return True
+
+
 VK_VOLUME_DOWN, VK_VOLUME_UP = 0xAE, 0xAF
 KEYEVENTF_KEYUP = 0x0002
 
@@ -165,9 +184,12 @@ def volume_step(up: bool, steps: int = 1) -> bool:
 
 
 # ---------- tecla Windows abre o Ventude (hook de teclado de baixo nível) ----------
-VK_LWIN, VK_RWIN, VK_S = 0x5B, 0x5C, 0x53
+VK_LWIN, VK_RWIN, VK_A, VK_S = 0x5B, 0x5C, 0x41, 0x53
 WIN_KEYS = (VK_LWIN, VK_RWIN)
+DIGIT_VKS = range(0x31, 0x3A)  # 1..9
 MODIFIERS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}  # Shift, Ctrl e Alt (esq./dir.)
+SHIFT_KEYS = {0x10, 0xA0, 0xA1}
+NON_SHIFT_MODS = MODIFIERS - SHIFT_KEYS
 MASK_VK = 0xE8  # tecla sem uso: no meio do Win, faz o Windows achar que foi um atalho e não abrir o Iniciar
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_QUIT = 0x0100, 0x0101, 0x0104, 0x0105, 0x0012
@@ -178,22 +200,29 @@ PASS, BLOCK = "pass", "block"
 
 
 class WinKeyLogic:
-    """Decide o que fazer com cada tecla quando a tecla Windows abre o Ventude.
+    """Decide o que fazer com cada tecla quando o Ventude Shell está ligado.
 
-    - Win sozinha (apertou e soltou): abre o Ventude e não deixa o Iniciar abrir ("start").
-    - Win + S: abre a busca do Ventude ("search") e engole o S.
-    - Win + qualquer outra tecla (E, D, L, V, Tab, setas, Shift + S...): segue para o Windows.
+    - Win sozinha (apertou e soltou): abre o Lançador e não deixa o Iniciar abrir ("start").
+    - Win + S: abre o Lançador ("search") e engole o S.
+    - Win + A: abre Controles ("controls") e engole o A.
+    - Win + 1..9 (ou Win + Shift + 1..9): aciona o slot N da Doca ("slot:N" / "slot_new:N").
+    - Win + qualquer outra tecla (E, D, L, N, V, Tab, setas, Shift + S...): segue para o Windows.
     Teclas injetadas por programas (inclusive pelo próprio Ventude) passam direto.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, features: set[str] | None = None) -> None:
+        self.features: set[str] = {"launcher"} if features is None else set(features)
         self.wins: set[int] = set()
         self.mods: set[int] = set()
         self.combo = False  # outra tecla passou junto com o Win (atalho do Windows)
-        self.swallowed = False  # engolimos uma tecla (Win + S): o Windows precisa da máscara
+        self.swallowed = False  # engolimos uma tecla (Win + S/A/1..9): o Windows precisa da máscara
+        self._down_swallowed: set[int] = set()
+
+    def set_features(self, features: set[str]) -> None:
+        self.features = set(features)
 
     def feed(self, vk: int, down: bool, injected: bool = False) -> tuple[str, str]:
-        """(pass|block, evento) — evento: '' | 'start' | 'search' | 'mask'."""
+        """(pass|block, evento) -> '' | 'start' | 'search' | 'controls' | 'slot:N' | 'slot_new:N' | 'mask'."""
         if injected:
             return PASS, ""
         if vk in MODIFIERS:
@@ -205,21 +234,51 @@ class WinKeyLogic:
             if down:
                 if not self.wins:
                     self.combo, self.swallowed = bool(self.mods), False
+                    self._down_swallowed.clear()
                 self.wins.add(vk)
                 return PASS, ""
             self.wins.discard(vk)
             if self.wins:
                 return PASS, ""
-            if not self.combo:
+            self._down_swallowed.clear()
+            if self.swallowed:
+                return BLOCK, "mask"
+            if not self.combo and "launcher" in self.features:
                 return BLOCK, "start"
-            return (BLOCK, "mask") if self.swallowed else (PASS, "")
-        if not self.wins:
             return PASS, ""
-        if vk == VK_S and not self.mods:
-            first = down and not self.swallowed
+        if not self.wins:
+            if vk in self._down_swallowed and not down:
+                self._down_swallowed.discard(vk)
+                return BLOCK, ""
+            return PASS, ""
+        if vk == VK_S and not self.mods and "launcher" in self.features:
             if down:
+                first = vk not in self._down_swallowed
+                self._down_swallowed.add(vk)
                 self.swallowed = self.combo = True
-            return BLOCK, "search" if first else ""
+                return BLOCK, "search" if first else ""
+            self._down_swallowed.discard(vk)
+            return BLOCK, ""
+        if vk == VK_A and not self.mods and "controls" in self.features:
+            if down:
+                first = vk not in self._down_swallowed
+                self._down_swallowed.add(vk)
+                self.swallowed = self.combo = True
+                return BLOCK, "controls" if first else ""
+            self._down_swallowed.discard(vk)
+            return BLOCK, ""
+        if vk in DIGIT_VKS and not (self.mods & NON_SHIFT_MODS) and "slots" in self.features:
+            digit = vk - 0x30
+            if down:
+                first = vk not in self._down_swallowed
+                self._down_swallowed.add(vk)
+                self.swallowed = self.combo = True
+                if first:
+                    shifted = bool(self.mods & SHIFT_KEYS)
+                    return BLOCK, f"slot_new:{digit}" if shifted else f"slot:{digit}"
+                return BLOCK, ""
+            self._down_swallowed.discard(vk)
+            return BLOCK, ""
         self.combo = True
         return PASS, ""
 
@@ -229,14 +288,21 @@ class KeyboardHook(QObject):
 
     start_pressed = Signal()
     search_pressed = Signal()
+    controls_pressed = Signal()
+    slot_pressed = Signal(int, bool)  # (slot 1..9, nova janela?)
 
     def __init__(self) -> None:
         super().__init__()
-        self.logic = WinKeyLogic()
+        self._features: set[str] = {"launcher"}
+        self.logic = WinKeyLogic(self._features)
         self._thread: threading.Thread | None = None
         self._thread_id = 0
         self._hook = 0
         self._proc = None
+
+    def set_features(self, features: set[str]) -> None:
+        self._features = set(features)
+        self.logic.set_features(self._features)
 
     @property
     def active(self) -> bool:
@@ -247,7 +313,7 @@ class KeyboardHook(QObject):
             return False
         if self.active:
             return True
-        self.logic = WinKeyLogic()
+        self.logic = WinKeyLogic(self._features)
         ready = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(ready,), name="ventude-keys", daemon=True)
         self._thread.start()
@@ -312,6 +378,12 @@ class KeyboardHook(QObject):
                     self.start_pressed.emit()
                 elif event == "search":
                     self.search_pressed.emit()
+                elif event == "controls":
+                    self.controls_pressed.emit()
+                elif event.startswith("slot_new:"):
+                    self.slot_pressed.emit(int(event.split(":", 1)[1]), True)
+                elif event.startswith("slot:"):
+                    self.slot_pressed.emit(int(event.split(":", 1)[1]), False)
                 if action == BLOCK:
                     return 1
             return user32.CallNextHookEx(None, code, wparam, lparam)

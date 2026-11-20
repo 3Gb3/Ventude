@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -24,15 +27,14 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
-    QColor,
     QCursor,
     QDragEnterEvent,
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
+    QFont,
     QGuiApplication,
     QKeyEvent,
-    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -55,13 +57,13 @@ from PySide6.QtWidgets import (
 
 from ventude.core.config import MODULES, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
-from ventude.services import hardware, system
+from ventude.services import apps, hardware, system
 from ventude.services.hardware import Snapshot
 from ventude.services.media import MediaState
 from ventude.services.privacy import PrivacyState
 from ventude.services.timer import TimerState, countdown, finished_text
 from ventude.services.weather import Forecast
-from ventude.ui import icons, theme
+from ventude.ui import brand, icons, motion, theme
 from ventude.ui.capture import CaptureSession, color_hex, png_bytes, prepare_for_ocr
 from ventude.ui.command import CommandBar
 from ventude.ui.context import AppContext
@@ -78,8 +80,10 @@ from ventude.ui.pages.shelf import ShelfPage
 from ventude.ui.pages.shortcuts import ShortcutsPage
 from ventude.ui.pages.tasks import TasksPage
 from ventude.ui.pages.weather import WeatherPage
+from ventude.ui.pill_overlay import VolumeOverlay
 from ventude.ui.power_menu import PowerMenu
 from ventude.ui.qr import QrCard
+from ventude.ui.shell.controls import CONTROLS_WIDTH, ControlsBody
 from ventude.ui.toast import TOAST_HEIGHT, TOAST_WIDTH, Toast, ToastView, event_toast
 from ventude.ui.widgets import BadgeButton, ElidedLabel, Equalizer, IconButton, Ring, label, rounded_pixmap
 
@@ -99,8 +103,8 @@ PAGES: dict[str, Callable[[AppContext], Page]] = {
     "news": NewsPage,
     "settings": SettingsPage,
 }
-MIC_COLOR = "#FF9F43"  # laranja: microfone em uso
-CAM_COLOR = "#34D399"  # verde: câmera em uso
+MIC_COLOR = theme.LIVE_MIC
+CAM_COLOR = theme.LIVE_CAM
 METRIC_GAP = "   "
 COMPACT_HEIGHT = 38
 EXPANDED = QSize(860, 568)
@@ -109,6 +113,22 @@ TOP_MARGIN = 6
 BACK_HOME_AFTER = 5 * 60
 COLLAPSE_COOLDOWN = 0.6
 MEDIA_HOVER_DELAY = 650  # ms: sobre a música, espera um pouco para dar tempo da roda/clique
+
+
+class IslandMode(Enum):
+    PILL = "pill"
+    TOAST = "toast"
+    CONTROLS = "controls"
+    PANEL = "panel"
+
+
+@dataclass(frozen=True)
+class StatusState:
+    network: str = "ethernet"
+    wifi: str = ""
+    speaker_muted: bool = False
+    battery_low: bool = False
+    battery_pct: int | None = None
 
 
 def anchored_rect(area: QRect, width: int, height: int, anchor: QPoint) -> QRect:
@@ -124,31 +144,81 @@ def screen_for(index: int):  # noqa: ANN201
     return screens[index] if 0 <= index < len(screens) else QGuiApplication.primaryScreen()
 
 
-def privacy_dot(color: str) -> QLabel:
-    dot = QLabel()
-    dot.setFixedSize(8, 8)
-    dot.setStyleSheet(f"background: {color}; border-radius: 4px;")
-    dot.hide()
-    return dot
+class PrivacyDot(QWidget):
+    """Ponto de privacidade (8×8). Quando mic está mutado, mostra um risco diagonal."""
+
+    def __init__(self, color: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._color = color
+        self.muted = False
+        self.setFixedSize(8, 8)
+        self.hide()
+
+    def set_muted(self, muted: bool) -> None:
+        if self.muted != muted:
+            self.muted = muted
+            self.update()
+
+    def paintEvent(self, _event: object) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.color(self._color, 0.55 if self.muted else 1.0))
+        p.drawEllipse(QRectF(0, 0, 8, 8))
+        if self.muted:
+            pen = QPen(theme.color(theme.BG), 1.4)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.drawLine(QPointF(1.5, 6.5), QPointF(6.5, 1.5))
+
+
+class StatusDot(QWidget):
+    """Ponto permanente do fim da pílula (6 px): menta normal, âmbar em exceção. Clique → Controles."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.alert = False
+        self.setFixedSize(10, 10)
+        self.setAccessibleName("Controles")
+        self.setToolTip("Controles (Win + A)")
+        self.hide()
+
+    def set_alert(self, alert: bool) -> None:
+        if self.alert != alert:
+            self.alert = alert
+            self.update()
+
+    def paintEvent(self, _event: object) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.color(theme.WARN if self.alert else theme.ACCENT))
+        p.drawEllipse(QPointF(self.width() / 2.0, self.height() / 2.0), 3.0, 3.0)
+
+
+def privacy_dot(color: str) -> PrivacyDot:
+    return PrivacyDot(color)
 
 
 class Pill(QWidget):
-    """Conteúdo da ilha fechada: data, hora, música e anéis das IAs."""
+    """Conteúdo da ilha fechada: data, hora, música, atividades vivas, anéis e Ponto."""
 
     def __init__(self, ctx: AppContext, parent: QWidget) -> None:
         super().__init__(parent)
         self.ctx = ctx
+        self.shell_mode = False
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setMouseTracking(True)  # a ilha acompanha em qual parte da pílula o mouse está
         self.art = QLabel()
         self.art.setFixedSize(22, 22)
         self.date = label("", "")
-        self.date.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 12px; font-weight: 600;")
+        self.date.setFont(theme.font(12, theme.SEMI))
+        self.date.setStyleSheet(f"color: {theme.TEXT_2};")
         self.title = ElidedLabel("")
-        self.title.setStyleSheet("font-size: 12px; font-weight: 600;")
+        self.title.setFont(theme.font(12, theme.SEMI))
         self.eq = Equalizer(theme.ACCENT)
         self.time = label("", "")
-        self.time.setStyleSheet("font-size: 13px; font-weight: 600;")
+        self.time.setFont(theme.font(13, theme.SEMI, display=True, tabular=True))
         self.rings: dict[str, Ring] = {p: Ring(16, 2.6) for p in ctx.limits.providers()}
         row = QHBoxLayout(self)
         row.setContentsMargins(15, 0, 13, 0)
@@ -157,9 +227,11 @@ class Pill(QWidget):
         self.weather_icon = QLabel()
         self.weather_icon.setFixedSize(16, 16)
         self.weather_temp = label("", "")
-        self.weather_temp.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 12px; font-weight: 600;")
+        self.weather_temp.setFont(theme.font(12, theme.SEMI, tabular=True))
+        self.weather_temp.setStyleSheet(f"color: {theme.TEXT_2};")
         self.weather_rain = label("", "")
-        self.weather_rain.setStyleSheet(f"color: {theme.SKY}; font-size: 11px; font-weight: 700;")
+        self.weather_rain.setFont(theme.font(11, QFont.Weight.Bold, tabular=True))
+        self.weather_rain.setStyleSheet(f"color: {theme.SKY};")
         self.weather_rain.hide()
         weather_row = QHBoxLayout(self.weather)
         weather_row.setContentsMargins(0, 0, 0, 0)
@@ -171,18 +243,29 @@ class Pill(QWidget):
         self.timer_chip = QWidget()
         self.timer_ring = Ring(15, 2.4)
         self.timer_text = label("", "")
-        self.timer_text.setStyleSheet("font-size: 12px; font-weight: 700;")
+        self.timer_text.setFont(theme.font(12, QFont.Weight.Bold, tabular=True))
         timer_row = QHBoxLayout(self.timer_chip)
         timer_row.setContentsMargins(0, 0, 0, 0)
         timer_row.setSpacing(5)
         timer_row.addWidget(self.timer_ring)
         timer_row.addWidget(self.timer_text)
         self.timer_chip.hide()
+
+        self.event_chip = label("", "")
+        self.event_chip.setFont(theme.font(11, theme.SEMI, tabular=True))
+        self.event_chip.setStyleSheet(
+            f"background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border-radius: 10px; padding: 2px 8px;"
+        )
+        self.event_chip.hide()
+        self._upcoming_event: object | None = None
+        self._event_zero_pulsed = False
+
         self.shelf_chip = QWidget()
         shelf_icon = QLabel()
         shelf_icon.setPixmap(icons.pixmap("inbox", theme.TEXT_2, 14))
         self.shelf_count = label("", "")
-        self.shelf_count.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 11px; font-weight: 700;")
+        self.shelf_count.setFont(theme.font(11, QFont.Weight.Bold, tabular=True))
+        self.shelf_count.setStyleSheet(f"color: {theme.TEXT_2};")
         shelf_row = QHBoxLayout(self.shelf_chip)
         shelf_row.setContentsMargins(0, 0, 0, 0)
         shelf_row.setSpacing(3)
@@ -190,7 +273,8 @@ class Pill(QWidget):
         shelf_row.addWidget(self.shelf_count)
         self.shelf_chip.setToolTip("Itens na estante")
         self.shelf_chip.hide()
-        # Privacidade: laranja = microfone em uso, verde = câmera em uso (como no iPhone).
+
+        # Privacidade: laranja = microfone em uso, verde = câmera em uso.
         self.mic_dot, self.cam_dot = privacy_dot(MIC_COLOR), privacy_dot(CAM_COLOR)
         self.privacy_box = QWidget()
         privacy_row = QHBoxLayout(self.privacy_box)
@@ -199,15 +283,47 @@ class Pill(QWidget):
         privacy_row.addWidget(self.mic_dot)
         privacy_row.addWidget(self.cam_dot)
         self.privacy_box.hide()
+
         self.caffeine_icon = QLabel()
         self.caffeine_icon.setFixedSize(15, 15)
         self.caffeine_icon.setPixmap(icons.pixmap("coffee", theme.SUN, 15))
         self.caffeine_icon.hide()
+        self.net_off_icon = QLabel()
+        self.net_off_icon.setFixedSize(14, 14)
+        self.net_off_icon.setPixmap(icons.pixmap("wifi-off", theme.WARN, 14))
+        self.net_off_icon.hide()
+        self.mute_icon = QLabel()
+        self.mute_icon.setFixedSize(14, 14)
+        self.mute_icon.setPixmap(icons.pixmap("volume-x", theme.TEXT_2, 14))
+        self.mute_icon.hide()
+        self.bat_low_icon = QLabel()
+        self.bat_low_icon.setFixedSize(14, 14)
+        self.bat_low_icon.setPixmap(icons.pixmap("battery-low", theme.WARN, 14))
+        self.bat_low_icon.hide()
+
+        self.status_box = QWidget()
+        status_row = QHBoxLayout(self.status_box)
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(5)
+        for icon_w in (self.caffeine_icon, self.net_off_icon, self.mute_icon, self.bat_low_icon):
+            status_row.addWidget(icon_w)
+        self.status_box.hide()
+        self.dot = StatusDot(self)
+
         self.metrics_chip = label("", "")
-        self.metrics_chip.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 12px; font-weight: 600;")
+        self.metrics_chip.setFont(theme.font(12, theme.SEMI, tabular=True))
+        self.metrics_chip.setStyleSheet(f"color: {theme.TEXT_2};")
         self.metrics_chip.setToolTip("Sistema ao vivo (clique para abrir)")
         self.metrics_chip.hide()
         self.metrics: list[str] = []
+
+        self._has_shelf = False
+        self._has_metrics = False
+        self._has_weather = False
+        self._caffeine_on = False
+        self._status = StatusState()
+        self._overflow_hidden: set[str] = set()
+
         row.addWidget(self.privacy_box)
         row.addWidget(self.art)
         row.addWidget(self.date)
@@ -215,9 +331,9 @@ class Pill(QWidget):
         first_gap = row.count() - 1
         row.addWidget(self.title, 1)
         row.addWidget(self.eq)
-        row.addWidget(self.shelf_chip)
+        row.addWidget(self.event_chip)
         row.addWidget(self.timer_chip)
-        row.addWidget(self.caffeine_icon)
+        row.addWidget(self.shelf_chip)
         row.addWidget(self.metrics_chip)
         row.addWidget(self.weather)
         row.addWidget(self.time)
@@ -231,6 +347,8 @@ class Pill(QWidget):
         for ring in self.rings.values():
             ring_row.addWidget(ring)
         row.addWidget(self.ring_box)
+        row.addWidget(self.status_box)
+        row.addWidget(self.dot)
         for widget in (
             self.art,
             self.date,
@@ -239,13 +357,46 @@ class Pill(QWidget):
             self.time,
             self.weather,
             self.timer_chip,
+            self.event_chip,
             self.shelf_chip,
-            self.caffeine_icon,
+            self.status_box,
+            self.dot,
             self.metrics_chip,
         ):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.media: MediaState | None = None
         self.set_media(None)
+
+    def set_shell_mode(self, on: bool) -> None:
+        self.shell_mode = on
+        self.dot.setVisible(on)
+        self.caffeine_icon.setPixmap(icons.pixmap("coffee", theme.TEXT_2 if on else theme.SUN, 15))
+        self._sync_status_box()
+
+    def set_status(self, status: StatusState) -> None:
+        self._status = status
+        self._sync_status_box()
+
+    def _sync_status_box(self) -> None:
+        net_off = self.shell_mode and self._status.network not in ("wifi", "ethernet")
+        muted = self.shell_mode and self._status.speaker_muted
+        bat_low = self.shell_mode and self._status.battery_low
+        self.caffeine_icon.setVisible(self._caffeine_on)
+        self.net_off_icon.setVisible(net_off)
+        self.mute_icon.setVisible(muted)
+        self.bat_low_icon.setVisible(bat_low)
+        self.dot.set_alert(net_off or bat_low)
+        self.status_box.setVisible(self._caffeine_on or net_off or muted or bat_low)
+        if self.shell_mode:
+            parts = []
+            if net_off:
+                parts.append("Sem rede")
+            if muted:
+                parts.append("Áudio mudo")
+            if bat_low and self._status.battery_pct is not None:
+                parts.append(f"Bateria {self._status.battery_pct}%")
+            tip = " · ".join(parts) + "\nControles (Win + A)" if parts else "Controles (Win + A)"
+            self.dot.setToolTip(tip)
 
     # ---------- privacidade, cafeína e métricas ----------
     def set_privacy(self, state: PrivacyState, enabled: bool = True) -> None:
@@ -256,21 +407,60 @@ class Pill(QWidget):
         self.cam_dot.setToolTip(state.text("cam"))
         self.privacy_box.setVisible(mic or cam)
 
+    def set_mic_muted(self, muted: bool) -> None:
+        self.mic_dot.set_muted(muted)
+
     def set_caffeine(self, active: bool, tip: str = "") -> None:
-        self.caffeine_icon.setVisible(active)
+        self._caffeine_on = bool(active)
         self.caffeine_icon.setToolTip(tip)
+        self._sync_status_box()
 
     def set_metrics(self, metrics: list[str], snap: Snapshot | None) -> None:
         """Chip ao vivo das métricas fixadas (ex.: 'CPU 22%   GPU 75% · 64°   ↓ 12,4 MB/s')."""
         self.metrics = list(metrics)
         parts = hardware.pill_parts(metrics, snap)
+        self._has_metrics = bool(parts)
         self.metrics_chip.setText(METRIC_GAP.join(parts))
-        self.metrics_chip.setVisible(bool(parts))
+        self.metrics_chip.setVisible(self._has_metrics and "metrics" not in self._overflow_hidden)
         if snap is not None:
             alert = (snap.gpu.temp or 0) >= hardware.TEMP_LIMIT or (snap.ram_pct or 0) >= hardware.RAM_LIMIT
-            style = f"color: {theme.WARN if alert else theme.TEXT_2}; font-size: 12px; font-weight: 600;"
-            if style != self.metrics_chip.styleSheet():
-                self.metrics_chip.setStyleSheet(style)
+            self.metrics_chip.setStyleSheet(f"color: {theme.WARN if alert else theme.TEXT_2};")
+
+    def set_upcoming_event(self, event: object | None) -> bool:
+        before = not self.event_chip.isHidden()
+        self._upcoming_event = event
+        self._event_zero_pulsed = False
+        self._update_event_chip()
+        return before != (not self.event_chip.isHidden())
+
+    def _update_event_chip(self) -> bool:
+        """Atualiza contagem do compromisso ativo (10 min antes a 2 min depois). True se zerou."""
+        event = self._upcoming_event
+        if event is None or getattr(event, "start", None) is None:
+            self.event_chip.hide()
+            return False
+        starts = datetime.combine(event.day, event.start)  # type: ignore[attr-defined]
+        delta_min = (starts - datetime.now()).total_seconds() / 60.0
+        if delta_min < -2.0:
+            self._upcoming_event = None
+            self.event_chip.hide()
+            return False
+        if delta_min > 10.5:
+            self.event_chip.hide()
+            return False
+        if delta_min > 0.5:
+            txt = f"{event.start:%H:%M} · em {max(1, round(delta_min))} min"  # type: ignore[attr-defined]
+        elif delta_min >= -0.5:
+            txt = f"{event.start:%H:%M} · agora"  # type: ignore[attr-defined]
+        else:
+            txt = f"{event.start:%H:%M} · começou"  # type: ignore[attr-defined]
+        self.event_chip.setText(txt)
+        self.event_chip.setToolTip(f"{event.title} ({event.when})")  # type: ignore[attr-defined]
+        self.event_chip.show()
+        if delta_min <= 0.0 and not self._event_zero_pulsed:
+            self._event_zero_pulsed = True
+            return True
+        return False
 
     @property
     def playing(self) -> bool:
@@ -281,12 +471,14 @@ class Pill(QWidget):
         """Tem música (tocando ou pausada): a ilha mostra capa e título."""
         return self.media is not None
 
-    def refresh_clock(self) -> None:
+    def refresh_clock(self) -> bool:
         now = datetime.now()
         self.time.setText(clock(now, self.ctx.settings.clock_24h))
         self.date.setText(f"{WEEKDAYS_SHORT[now.weekday()]} {now.day}")
+        zero_pulse = self._update_event_chip()
         if self.playing:
             self.update()  # linha de andamento da música
+        return zero_pulse
 
     def set_media(self, state: MediaState | None) -> None:
         self.media = state
@@ -296,12 +488,15 @@ class Pill(QWidget):
         self.eq.setVisible(shown)
         self.eq.set_playing(playing)
         self.eq.set_dim(not playing)
-        self.date.setVisible(not shown and self.ctx.settings.pill_date)
+        show_date = (
+            not shown and self.ctx.settings.pill_date and "date" not in self._overflow_hidden
+        )
+        self.date.setVisible(show_date)
         for index in self._gaps:  # com música, o título ocupa o espaço livre
             self.row.setStretch(index, 0 if shown else 1)
         if state:
             color = theme.TEXT if playing else theme.TEXT_2
-            self.title.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {color};")
+            self.title.setStyleSheet(f"color: {color};")
             self.title.setText(f"{state.title}  ·  {state.artist}" if state.artist else state.title)
             self.art.setGraphicsEffect(None if playing else self._dim_effect())
             self.setToolTip("" if playing else "Pausado")
@@ -335,8 +530,9 @@ class Pill(QWidget):
         self.ring_box.setVisible(self.visible_rings() > 0)
 
     def set_shelf(self, count: int) -> None:
+        self._has_shelf = count > 0
         self.shelf_count.setText(str(count))
-        self.shelf_chip.setVisible(count > 0)
+        self.shelf_chip.setVisible(self._has_shelf and "shelf" not in self._overflow_hidden)
 
     def set_timer(self, state: TimerState | None) -> None:
         """Contagem do timer/Pomodoro ao lado da hora, com anel de progresso."""
@@ -346,17 +542,17 @@ class Pill(QWidget):
         color = theme.SKY if state.kind == "break" else theme.ACCENT
         self.timer_ring.set_value(state.progress(), color, dim=not state.running, animate=False)
         self.timer_text.setText(countdown(state.left()))
-        self.timer_text.setStyleSheet(
-            f"font-size: 12px; font-weight: 700; color: {color if state.running else theme.TEXT_2};"
-        )
+        self.timer_text.setStyleSheet(f"color: {color if state.running else theme.TEXT_2};")
         self.timer_chip.setToolTip(f"{state.label}" + ("" if state.running else " (pausado)"))
         self.timer_chip.show()
 
     def set_weather(self, forecast: Forecast | None) -> None:
         """Clima de agora ao lado da hora (some sem cidade ou com o ajuste desligado)."""
         if forecast is None or not self.ctx.settings.pill_weather:
+            self._has_weather = False
             self.weather.hide()
             return
+        self._has_weather = True
         rain = forecast.rain_soon()
         glyph = "rain" if rain else forecast.icon
         color = theme.SUN if glyph in ("sun", "cloud-sun") else theme.SKY
@@ -368,36 +564,33 @@ class Pill(QWidget):
         if rain:
             tip += f"\nChuva provável na próxima hora ({rain}%)"
         self.weather.setToolTip(tip)
-        self.weather.show()
+        self.weather.setVisible("weather" not in self._overflow_hidden)
 
     @staticmethod
     def _text_width(widget: QLabel, text: str | None = None) -> int:
         widget.ensurePolished()
         return widget.fontMetrics().horizontalAdvance(widget.text() if text is None else text) + 2
 
-    def preferred_width(self) -> int:
-        """Largura pelo texto de verdade (data, clima, hora, música e anéis), com limites."""
-        spacing = self.row.spacing()
+    def _compute_parts(self, hidden: set[str], title_cap: int = 250) -> list[int]:
         parts: list[int] = []
-        if self.has_media:
-            title = self.title.full_text()
-            parts += [22, max(80, min(self._text_width(self.title, title), 250)), 14]
-        elif self.ctx.settings.pill_date:
-            parts.append(self._text_width(self.date))
-        if not self.shelf_chip.isHidden():
-            parts.append(14 + 3 + self._text_width(self.shelf_count))
-        if not self.timer_chip.isHidden():
-            parts.append(15 + 5 + self._text_width(self.timer_text, "00:00"))
         if not self.privacy_box.isHidden():
             dots = (not self.mic_dot.isHidden()) + (not self.cam_dot.isHidden())
-            parts.append(dots * 8 + (dots - 1) * 5)
-        if not self.caffeine_icon.isHidden():
-            parts.append(15)
-        if not self.metrics_chip.isHidden():
-            # Largura pelo texto mais largo possível de cada métrica: a ilha não "pula" a cada leitura.
+            parts.append(dots * 8 + max(0, dots - 1) * 5)
+        if self.has_media:
+            title = self.title.full_text()
+            parts += [22, max(80, min(self._text_width(self.title, title), title_cap)), 14]
+        elif self.ctx.settings.pill_date and "date" not in hidden:
+            parts.append(self._text_width(self.date))
+        if self._upcoming_event is not None and not self.event_chip.isHidden():
+            parts.append(self._text_width(self.event_chip) + 16)
+        if not self.timer_chip.isHidden():
+            parts.append(15 + 5 + self._text_width(self.timer_text, "00:00"))
+        if self._has_shelf and "shelf" not in hidden:
+            parts.append(14 + 3 + self._text_width(self.shelf_count))
+        if self._has_metrics and "metrics" not in hidden:
             template = METRIC_GAP.join(hardware.pill_parts(self.metrics, None, template=True))
             parts.append(self._text_width(self.metrics_chip, template))
-        if not self.weather.isHidden():
+        if self._has_weather and "weather" not in hidden:
             width = 16 + 4 + self._text_width(self.weather_temp)
             if not self.weather_rain.isHidden():
                 width += 4 + self._text_width(self.weather_rain)
@@ -405,14 +598,47 @@ class Pill(QWidget):
         parts.append(self._text_width(self.time, self.time.text() or "00:00"))
         rings = self.visible_rings()
         if rings:
-            parts.append(4 + rings * 16 + (rings - 1) * 6)
+            parts.append(4 + rings * 16 + max(0, rings - 1) * 6)
+        if not self.status_box.isHidden():
+            icons_n = sum(
+                not w.isHidden()
+                for w in (self.caffeine_icon, self.net_off_icon, self.mute_icon, self.bat_low_icon)
+            )
+            parts.append(icons_n * 15 + max(0, icons_n - 1) * 5)
+        if self.shell_mode:
+            parts.append(10)  # Ponto
+        return parts
+
+    def _total_for(self, parts: list[int]) -> int:
         margins = self.row.contentsMargins()
-        breathing = 10 if self.has_media else 34  # sem música, a hora fica mais ao centro
-        total = margins.left() + margins.right() + sum(parts) + spacing * (len(parts) - 1) + breathing
-        return max(150, min(total, 720 if not self.metrics_chip.isHidden() else 560))
+        spacing = self.row.spacing()
+        breathing = 10 if self.has_media else 34
+        return margins.left() + margins.right() + sum(parts) + spacing * max(0, len(parts) - 1) + breathing
+
+    def preferred_width(self) -> int:
+        """Largura com ordem de corte: estante → clima → data → título → métricas."""
+        max_w = 720 if self._has_metrics else 560
+        hidden: set[str] = set()
+        total = self._total_for(self._compute_parts(hidden))
+        for item in ("shelf", "weather", "date"):
+            if total <= max_w:
+                break
+            hidden.add(item)
+            total = self._total_for(self._compute_parts(hidden))
+        if total > max_w and self.has_media:
+            total = self._total_for(self._compute_parts(hidden, title_cap=80))
+        if total > max_w and self._has_metrics:
+            hidden.add("metrics")
+            total = self._total_for(self._compute_parts(hidden, title_cap=80 if self.has_media else 250))
+        self._overflow_hidden = hidden
+        self.shelf_chip.setVisible(self._has_shelf and "shelf" not in hidden)
+        self.metrics_chip.setVisible(self._has_metrics and "metrics" not in hidden)
+        self.weather.setVisible(self._has_weather and "weather" not in hidden)
+        self.date.setVisible(not self.has_media and self.ctx.settings.pill_date and "date" not in hidden)
+        return max(150, min(total, max_w))
 
     def zone_at(self, pos: QPoint) -> str:
-        """Qual parte da pílula está sob o ponto: rings, weather, metrics, mic, cam, media, date, time..."""
+        """Qual parte da pílula está sob o ponto: status, rings, weather, metrics, mic, cam, media..."""
 
         def hit(widget: QWidget, pad: int = 4) -> bool:
             if not widget.isVisibleTo(self):
@@ -420,6 +646,8 @@ class Pill(QWidget):
             rect = QRect(widget.mapTo(self, QPoint(0, 0)), widget.size())
             return rect.adjusted(-pad, -20, pad, 20).contains(pos)
 
+        if self.shell_mode and (hit(self.dot, 6) or hit(self.status_box, 4)):
+            return "status"
         if hit(self.mic_dot, 3):
             return "mic"
         if hit(self.cam_dot, 3):
@@ -428,12 +656,14 @@ class Pill(QWidget):
             return "rings"
         if hit(self.metrics_chip):
             return "metrics"
-        if hit(self.caffeine_icon):
+        if not self.shell_mode and hit(self.caffeine_icon):
             return "caffeine"
         if hit(self.weather):
             return "weather"
         if hit(self.shelf_chip):
             return "shelf"
+        if hit(self.event_chip):
+            return "event"
         if hit(self.timer_chip):
             return "timer"
         if self.has_media and (hit(self.art) or hit(self.eq)):
@@ -469,6 +699,7 @@ class Pill(QWidget):
 DROP_ZONES = {
     "shelf": ("inbox", "Guardar na estante", "Fica na ilha para arrastar para outro lugar"),
     "shortcuts": ("plus", "Adicionar aos atalhos", "Apps, pastas, arquivos e links fixos"),
+    "launcher": ("pin", "Fixar no Lançador", "Apps, pastas, arquivos e links fixos"),
 }
 
 
@@ -545,6 +776,7 @@ class Panel(QWidget):
     """Conteúdo da ilha aberta: abas + páginas criadas sob demanda."""
 
     tool_requested = Signal(str)  # "color" | "ocr"
+    controls_requested = Signal()
 
     def __init__(self, ctx: AppContext, parent: QWidget) -> None:
         super().__init__(parent)
@@ -572,8 +804,13 @@ class Panel(QWidget):
         self.power_btn.clicked.connect(self.show_power)
         ctx.power.changed.connect(self._power_changed)
         header.addWidget(self.power_btn)
+        self.controls_btn = IconButton("sliders", "Controles (Win + A)", 30, 15)
+        self.controls_btn.clicked.connect(self.controls_requested.emit)
+        self.controls_btn.hide()
+        header.addWidget(self.controls_btn)
         header.addSpacing(4)
         self.clock = label("", "Muted")
+        self.clock.setFont(theme.font(12, tabular=True))
         self.clock.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         header.addWidget(self.clock)
         header.addSpacing(6)
@@ -608,10 +845,13 @@ class Panel(QWidget):
 
     # ---------- Ventude Shell ----------
     def set_shell_mode(self, on: bool) -> None:
-        """Com o Shell ligado, energia, cafeína, conta-gotas e OCR moram no Iniciar e no painel rápido."""
+        """Com o Shell ligado, energia, cafeína, conta-gotas e OCR moram em Controles e no Lançador."""
         self.shell_mode = on
         for button in (self.color_btn, self.ocr_btn, self.coffee_btn, self.power_btn):
             button.setVisible(not on)
+        self.controls_btn.setVisible(on)
+        self.rebuild_tabs()
+        self.clock.setVisible(not (on and self.current == "home"))
 
     # ---------- cafeína e energia ----------
     def _coffee_changed(self) -> None:
@@ -650,7 +890,12 @@ class Panel(QWidget):
 
     def enabled_keys(self) -> list[str]:
         s = self.ctx.settings
-        return [key for key, _, _ in MODULES if s.module_enabled(key)]
+        hide_shortcuts = bool(getattr(s, "replace_start_menu", False))
+        return [
+            key
+            for key, _, _ in MODULES
+            if s.module_enabled(key) and not (hide_shortcuts and key == "shortcuts")
+        ]
 
     def rebuild_tabs(self) -> None:
         keys = self.enabled_keys()
@@ -705,6 +950,7 @@ class Panel(QWidget):
         changed = self.stack.currentWidget() is not page
         self.current = key
         self.stack.setCurrentWidget(page)
+        self.clock.setVisible(not (self.shell_mode and key == "home"))
         # Sem animação de aba enquanto o painel ainda está aparecendo (fade da abertura).
         if changed and previous in keys and self.isVisible() and self.graphicsEffect() is None:
             self._slide_in(page, 1 if keys.index(key) >= keys.index(previous) else -1)
@@ -724,7 +970,7 @@ class Panel(QWidget):
     def _slide_in(self, page: QWidget, direction: int) -> None:
         """A aba nova entra deslizando do lado da aba clicada, com um fade curto."""
         self._end_transition()
-        duration = int(self.ctx.settings.animation_ms * 0.85)
+        duration = motion.ms("tab", self.ctx.settings)
         if duration <= 0:
             return
         page.setGeometry(self.stack.contentsRect())
@@ -782,31 +1028,47 @@ class Island(QWidget):
             | Qt.WindowType.NoDropShadowWindowHint,
         )
         self.ctx = ctx
+        ctx.island = self
         self.setWindowTitle("Ventude")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
-        self.setAcceptDrops(True)  # arrastar apps, pastas e links para os Atalhos
-        self.expanded = False
+        self.setAcceptDrops(True)  # arrastar apps, pastas e links para os Atalhos/Lançador
+        self.mode = IslandMode.PILL
         self._drag_files = False
         self._media_hold = False  # usou a roda/clique na música: não abre por hover
+        self._hover_suspended = False
+        self._controls_by_key = False
+        self._suppress_caffeine_toast = False
+        self._suppress_mic_toast = False
         self._hover_zone = ""
         self._holds = 0
         self._press: QPoint | None = None
         self._origin = QPoint()
         self._dragging = False
         self._auto_hidden = False
+        self._user_hidden = False
         self._collapsed_at = time.time()
         self._hotkey = False
         self.pill = Pill(ctx, self)
         self.panel = Panel(ctx, self)
         self.panel.hide()
+        self.controls = ControlsBody(ctx, self)
+        self.controls.hide()
         self.toast_view = ToastView(self)
+        self.volume_overlay = VolumeOverlay(self)
         self._toast: Toast | None = None
         self._toasts: list[Toast] = []
+        self._deferred_toasts: list[Toast] = []
         self._last_track: tuple[str, str] | None = None
         self.toast_timer = QTimer(self, singleShot=True)
         self.toast_timer.timeout.connect(self._end_toast)
         self.panel.close_btn.clicked.connect(self.collapse)
+        self.panel.controls_requested.connect(lambda: self.open_controls(by_key=False))
+        self.controls.close_requested.connect(self.collapse)
+        self.controls.size_changed.connect(self._resize_controls)
+        self.controls.open_audio.connect(lambda: self.expand("audio"))
+        self.controls.caffeine_clicked.connect(lambda: setattr(self, "_suppress_caffeine_toast", True))
+        self.controls.mic_clicked.connect(lambda: setattr(self, "_suppress_mic_toast", True))
         self.anim = QPropertyAnimation(self, b"geometry", self)
         self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.anim.finished.connect(self._settled)
@@ -834,7 +1096,7 @@ class Island(QWidget):
         self.pill.set_art(b"")
         self._tick()
         self.pill.refresh_rings()
-        self.setGeometry(self.target_rect(False))
+        self.setGeometry(self.target_rect(IslandMode.PILL))
         ctx.weather_changed.connect(self._weather_done)
         self._weather_done(ctx.forecast)
         ctx.limits.alert.connect(self._limit_alert)
@@ -861,7 +1123,15 @@ class Island(QWidget):
         ctx.tool_requested.connect(self.run_tool)
         self._metrics_changed(ctx.hardware.last)
 
-    # ---------- Sistema (métricas fixadas), privacidade e cafeína na pílula ----------
+    @property
+    def expanded(self) -> bool:
+        return self.mode == IslandMode.PANEL
+
+    @property
+    def open_body(self) -> bool:
+        return self.mode in (IslandMode.PANEL, IslandMode.CONTROLS)
+
+    # ---------- Sistema (métricas fixadas), privacidade, estado e cafeína na pílula ----------
     def _metrics_changed(self, snap: Snapshot | None = None) -> None:
         metrics = self.ctx.settings.pinned_metrics()
         before = (self.pill.metrics_chip.isHidden(), list(self.pill.metrics))
@@ -885,6 +1155,9 @@ class Island(QWidget):
         self.pill.set_caffeine(caffeine.active, caffeine.describe())
         if before != self.pill.caffeine_icon.isHidden():
             self._resize_compact()
+        if self._suppress_caffeine_toast:
+            self._suppress_caffeine_toast = False
+            return
         self.show_toast(
             Toast(
                 "Cafeína ligada" if caffeine.active else "Cafeína desligada",
@@ -897,14 +1170,17 @@ class Island(QWidget):
         )
 
     def _volume_feedback(self, level: float, muted: bool) -> None:
-        """Depois da roda do mouse na pílula: chip rápido com o volume novo."""
-        icon = "volume-x" if muted or level <= 0 else ("volume-1" if level < 0.5 else "volume")
-        text = "Mudo" if muted else f"{round(level * 100)}%"
-        self.show_toast(
-            Toast(f"Volume {text}", "", icon=icon, color=theme.ACCENT, seconds=1.2, kind="volume")
-        )
+        """Depois da roda do mouse na pílula: barra dentro da pílula por 1,2 s."""
+        if self.mode == IslandMode.PILL:
+            self.volume_overlay.show_volume(level, muted, self.ctx.settings)
 
     def _mic_feedback(self, muted: bool) -> None:
+        self.pill.set_mic_muted(muted)
+        if self._suppress_mic_toast:
+            self._suppress_mic_toast = False
+            return
+        if self.panel.shell_mode:
+            return
         self.show_toast(
             Toast(
                 "Microfone mutado" if muted else "Microfone ativo",
@@ -922,8 +1198,9 @@ class Island(QWidget):
 
     # ---------- Busca Universal (na ilha) e Ventude Shell ----------
     def open_start(self, toggle: bool = False, text: str = "") -> None:
-        """Busca dentro da ilha (sem o Shell). Com o Shell, a busca é a tela de Pesquisa."""
-        if self.ctx.open_search(text):
+        """Busca dentro da ilha (sem o Shell). Com o Shell, abre o Lançador."""
+        s = self.ctx.settings
+        if (s.replace_start_menu or s.replace_taskbar) and self.ctx.open_search(text):
             return
         if toggle and self.expanded and self.panel.command.isVisible():
             self.collapse()
@@ -940,10 +1217,26 @@ class Island(QWidget):
 
     def set_shell_mode(self, on: bool) -> None:
         self.panel.set_shell_mode(on)
+        self.pill.set_shell_mode(on)
+        self._resize_compact()
+
+    def set_status(self, status: StatusState) -> None:
+        before = self.pill.status_box.isHidden()
+        self.pill.set_status(status)
+        self.controls.set_network(status.network, status.wifi)
+        if before != self.pill.status_box.isHidden():
+            self._resize_compact()
+
+    def suspend_hover(self, on: bool) -> None:
+        self._hover_suspended = bool(on)
+        if on:
+            self.hover_timer.stop()
+        elif self.mode == IslandMode.PILL and self._deferred_toasts:
+            QTimer.singleShot(250, self._drain_deferred_toasts)
 
     def _search_elsewhere(self, text: str = "") -> bool:
-        """No Shell, digitar na ilha (ou Ctrl + K) abre a Pesquisa do Ventude."""
-        if not self.panel.shell_mode or self.ctx.shell is None:
+        """No Shell, digitar na ilha (ou Ctrl + K) abre o Lançador."""
+        if not self.ctx.settings.replace_start_menu or self.ctx.shell is None:
             return False
         self.collapse()
         return self.ctx.open_search(text)
@@ -961,10 +1254,12 @@ class Island(QWidget):
             self._resize_compact()
 
     # ---------- geometria ----------
-    def _sizes(self, expanded: bool) -> tuple[int, int]:
-        if expanded:
+    def _sizes(self, mode: IslandMode | bool) -> tuple[int, int]:
+        if mode is True or mode == IslandMode.PANEL:
             return EXPANDED.width(), EXPANDED.height()
-        if self._toast is not None:
+        if mode == IslandMode.CONTROLS:
+            return CONTROLS_WIDTH, self.controls.preferred_height()
+        if self._toast is not None or mode == IslandMode.TOAST:
             return TOAST_WIDTH, TOAST_HEIGHT
         return self.pill.preferred_width(), COMPACT_HEIGHT
 
@@ -980,33 +1275,46 @@ class Island(QWidget):
         area = screen_for(self.ctx.settings.monitor_index).availableGeometry()
         return area, QPoint(area.center().x(), area.top() + TOP_MARGIN)
 
-    def target_rect(self, expanded: bool) -> QRect:
+    def target_rect(self, mode: IslandMode | bool) -> QRect:
         area, anchor = self._anchor()
-        return anchored_rect(area, *self._sizes(expanded), anchor)
+        return anchored_rect(area, *self._sizes(mode), anchor)
 
     def reposition(self) -> None:
         self.anim.stop()
-        self.setGeometry(self.target_rect(self.expanded))
+        self.setGeometry(self.target_rect(self.mode))
         self._settled()
 
     def reset_position(self) -> None:
         self.ctx.update_settings(island_position_json="")
         self.reposition()
 
-    def _animate(self, target: QRect) -> None:
+    def _animate(self, target: QRect, *, opening: bool = True) -> None:
         self.anim.stop()
         if self.geometry() == target:
             self._settled()
             return
-        self.anim.setDuration(self.ctx.settings.animation_ms)
+        dur = motion.ms("morfose_open" if opening else "morfose_close", self.ctx.settings)
+        if dur <= 0:
+            self.setGeometry(target)
+            self._settled()
+            return
+        self.anim.setDuration(dur)
         self.anim.setStartValue(self.geometry())
         self.anim.setEndValue(target)
         self.anim.start()
+
+    def _active_body(self) -> QWidget | None:
+        if self.mode == IslandMode.PANEL:
+            return self.panel
+        if self.mode == IslandMode.CONTROLS:
+            return self.controls
+        return None
 
     def resizeEvent(self, event: object) -> None:
         super().resizeEvent(event)
         self.pill.setGeometry(self.rect())
         self.toast_view.setGeometry(self.rect())
+        self.volume_overlay.place_in(self.rect())
         self._layout_panel()
 
     def moveEvent(self, event: object) -> None:
@@ -1015,25 +1323,73 @@ class Island(QWidget):
             self._layout_panel()
 
     def _revealing(self) -> bool:
-        return self.expanded and self.anim.state() == QPropertyAnimation.State.Running
+        return self.open_body and self.anim.state() == QPropertyAnimation.State.Running
 
     def _layout_panel(self) -> None:
-        """Abrindo: o painel já fica no tamanho final e a ilha crescendo o revela."""
-        if not self._revealing():
+        """Abrindo: o corpo (painel ou Controles) fica no tamanho final e a ilha crescendo o revela."""
+        body = self._active_body()
+        if body is None:
             self.panel.clearMask()
+            self.controls.clearMask()
             self.panel.setGeometry(self.rect())
+            self.controls.setGeometry(self.rect())
+            return
+        if not self._revealing():
+            body.clearMask()
+            body.setGeometry(self.rect())
             return
         target = self.anim.endValue()
         offset = target.topLeft() - self.pos()
-        self.panel.setGeometry(QRect(offset, target.size()))
+        body.setGeometry(QRect(offset, target.size()))
         radius = min(theme.ISLAND_RADIUS, self.height() / 2)
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), radius, radius)
         region = QRegion(path.toFillPolygon().toPolygon())
         region.translate(-offset)
-        self.panel.setMask(region)
+        body.setMask(region)
 
     # ---------- abrir e fechar ----------
+    def open_controls(self, by_key: bool = False) -> None:
+        if self._dragging:
+            return
+        if self.mode == IslandMode.CONTROLS:
+            if by_key:
+                self.collapse()
+            return
+        if not self.isVisible():
+            self.show()
+        self.hover_timer.stop()
+        self.collapse_timer.stop()
+        self._cancel_toasts()
+        self.volume_overlay.dismiss_now()
+        self.panel.command.close_bar()
+        self.panel.pin.setChecked(False)
+        self.panel.hide()
+        self.pill.hide()
+        self._controls_by_key = by_key
+        self.mode = IslandMode.CONTROLS
+        self.controls.refresh_clock()
+        self.controls.refresh()
+        self.ctx.run(apps.tray_apps, done=self.controls.set_tray_apps, owner=self.controls)
+        self._animate(self.target_rect(IslandMode.CONTROLS), opening=True)
+        if self._revealing():
+            self._layout_panel()
+            self._fade_in(self.controls, motion.ms("morfose_open", self.ctx.settings))
+        if by_key:
+            self.raise_()
+            self.activateWindow()
+            self.setFocus()
+            try:
+                from ventude.services.winutil import force_foreground
+
+                force_foreground(int(self.winId()))
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _resize_controls(self) -> None:
+        if self.mode == IslandMode.CONTROLS and not self._dragging:
+            self._animate(self.target_rect(IslandMode.CONTROLS), opening=True)
+
     def expand(self, page: str | None = None) -> None:
         if self._dragging:
             return
@@ -1048,32 +1404,38 @@ class Island(QWidget):
         if self.expanded:
             return
         self._cancel_toasts()
-        self.expanded = True
+        self.volume_overlay.dismiss_now()
+        self.controls.hide()
+        self._controls_by_key = False
+        self.mode = IslandMode.PANEL
         self.pill.hide()
         self.panel.refresh_clock()
-        self._animate(self.target_rect(True))
+        self._animate(self.target_rect(IslandMode.PANEL), opening=True)
         if self._revealing():  # o conteúdo aparece junto com a animação, sem esperar ela acabar
             self._layout_panel()
-            self._fade_in(self.panel, max(120, int(self.ctx.settings.animation_ms * 0.9)))
+            dur = motion.ms("morfose_open", self.ctx.settings)
+            self._fade_in(self.panel, dur)
 
     def collapse(self) -> None:
-        if not self.expanded:
+        if self.mode in (IslandMode.PILL, IslandMode.TOAST):
             return
-        self.expanded = False
+        self.mode = IslandMode.PILL
+        self._controls_by_key = False
         self._collapsed_at = time.time()
         self.panel.command.close_bar()
         self.panel.pin.setChecked(False)
         self.panel.hide()
+        self.controls.hide()
         self.pill.hide()
         focus = QApplication.focusWidget()
         if focus and self.isAncestorOf(focus):
             focus.clearFocus()
-        self._animate(self.target_rect(False))
+        self._animate(self.target_rect(IslandMode.PILL), opening=False)
 
     def toggle(self) -> None:
         if not self.isVisible():
             self.show()
-        if self.expanded:
+        if self.open_body:
             self.collapse()
         else:
             self.expand()
@@ -1084,20 +1446,31 @@ class Island(QWidget):
         if self.anim.state() == QPropertyAnimation.State.Running:
             return
         self._layout_panel()
-        if self.expanded:
+        if self.mode == IslandMode.PANEL:
             if not self.panel.isVisible():
-                self._fade_in(self.panel)
+                self._fade_in(self.panel, motion.ms("morfose_open", self.ctx.settings))
+        elif self.mode == IslandMode.CONTROLS:
+            if not self.controls.isVisible():
+                self._fade_in(self.controls, motion.ms("morfose_open", self.ctx.settings))
         elif self._toast is not None:
+            self.mode = IslandMode.TOAST
             self.pill.hide()
             if not self.toast_view.isVisible():
-                self._fade_in(self.toast_view, 160)
+                self._fade_in(self.toast_view, motion.ms("desdobrar_fade", self.ctx.settings))
         else:
+            self.mode = IslandMode.PILL
             self.toast_view.hide()
             self.pill.show()
+            if self._deferred_toasts and not self._hover_suspended:
+                QTimer.singleShot(250, self._drain_deferred_toasts)
         self.update()
 
     def _fade_in(self, widget: QWidget, duration: int = 140) -> None:
         self.fade.stop()
+        if duration <= 0 or motion.scale(self.ctx.settings) <= 0:
+            widget.setGraphicsEffect(None)
+            widget.show()
+            return
         effect = QGraphicsOpacityEffect(widget)
         effect.setOpacity(0.0)
         widget.setGraphicsEffect(effect)
@@ -1111,9 +1484,14 @@ class Island(QWidget):
         self.fade.start()
 
     def _keep_open(self) -> bool:
-        if self.panel.pin.isChecked() or self._holds > 0 or self._dragging or self._drag_files:
+        if self.mode == IslandMode.PANEL:
+            if self.panel.pin.isChecked():
+                return True
+            if self.panel.command.isVisible() or self.panel.qr.isVisible():
+                return True
+        if self.mode == IslandMode.CONTROLS and self._controls_by_key and self.isActiveWindow():
             return True
-        if self.panel.command.isVisible() or self.panel.qr.isVisible():
+        if self._holds > 0 or self._dragging or self._drag_files:
             return True
         if QApplication.activePopupWidget() or QApplication.activeModalWidget():
             return True
@@ -1128,7 +1506,7 @@ class Island(QWidget):
         return False
 
     def _try_collapse(self) -> None:
-        if not self.expanded:
+        if not self.open_body:
             return
         if self._keep_open():
             self.collapse_timer.start(max(400, self.ctx.settings.collapse_delay_ms))
@@ -1139,25 +1517,27 @@ class Island(QWidget):
         self._holds = max(0, self._holds + (1 if on else -1))
         if on:
             self.collapse_timer.stop()
-        elif self.expanded:
+        elif self.open_body:
             self.collapse_timer.start(max(600, self.ctx.settings.collapse_delay_ms))
 
-    # ---------- eventos ----------
     # ---------- zonas da pílula ----------
     def _zone(self) -> str:
-        if self.expanded:
+        if self.open_body:
             return ""
         return self.pill.zone_at(self.mapFromGlobal(QCursor.pos()))
 
     def _zone_page(self, zone: str, *, click: bool) -> str | None:
-        """Aba que cada parte da pílula abre. No hover, só anéis e clima (intenção clara)."""
+        """Aba que cada parte da pílula abre. No hover, só anéis, clima e métricas."""
+        if zone == "status":
+            return None
         if not click and not self.ctx.settings.zone_open:
             return None
         pages = {"rings": "limits", "weather": "weather", "shelf": "shelf", "metrics": "hardware"}
         if click:
             pages |= {
                 "date": "agenda",
-                "time": "home",
+                "time": "agenda" if self.pill.shell_mode else "home",
+                "event": "agenda",
                 "title": "home",
                 "timer": "home",
                 "cam": "audio",
@@ -1171,13 +1551,19 @@ class Island(QWidget):
         self.collapse_timer.stop()
         self._media_hold = False
         self._hover_zone = self._zone()
-        if self.expanded or self._dragging or not self.ctx.settings.hover_open:
+        if self.open_body or self._dragging or self._hover_suspended or not self.ctx.settings.hover_open:
+            return
+        if self._hover_zone == "status":
+            self.hover_timer.stop()
             return
         if time.time() - self._collapsed_at < COLLAPSE_COOLDOWN:
             return  # o mouse ainda estava sobre o painel que acabou de fechar
         self._schedule_hover(self._hover_zone)
 
     def _schedule_hover(self, zone: str) -> None:
+        if zone == "status" or self._hover_suspended:
+            self.hover_timer.stop()
+            return
         delay = self.ctx.settings.hover_delay_ms
         if zone in ("media", "title") and self.pill.has_media:
             delay = max(delay, MEDIA_HOVER_DELAY)  # dá tempo de usar a roda ou o clique na música
@@ -1187,21 +1573,30 @@ class Island(QWidget):
             self.hover_timer.start(delay)
 
     def _hover_expand(self) -> None:
-        if self.expanded or self._dragging or self._press is not None or self._media_hold:
+        if (
+            self.open_body
+            or self._dragging
+            or self._press is not None
+            or self._media_hold
+            or self._hover_suspended
+        ):
+            return
+        zone = self._zone()
+        if zone == "status":
             return
         if self.geometry().contains(QCursor.pos()):
-            self.expand(self._zone_page(self._zone(), click=False))
+            self.expand(self._zone_page(zone, click=False))
 
     def leaveEvent(self, _event: object) -> None:
         self.hover_timer.stop()
         self._media_hold = False
-        if self.expanded and not self._dragging:
+        self._controls_by_key = False
+        if self.open_body and not self._dragging:
             self.collapse_timer.start(self.ctx.settings.collapse_delay_ms)
 
     def wheelEvent(self, event: object) -> None:
-        """Roda sobre a pílula: volume do Windows (com o valor na ilha). Com música, Shift ou roda
-        lateral troca de faixa."""
-        if self.expanded:
+        """Roda sobre a pílula: volume (overlay). Com música, Shift ou roda lateral troca."""
+        if self.open_body:
             return
         self.hover_timer.stop()
         self._media_hold = True  # mexeu no volume/música: não abre o painel por cima
@@ -1213,19 +1608,22 @@ class Island(QWidget):
         elif delta.y() and not horizontal:
             up, steps = delta.y() > 0, max(1, abs(delta.y()) // 120)
             if self.ctx.audio.running:
-                self.ctx.audio.step_master(up, steps)  # muda direto e mostra o volume na ilha
+                self.ctx.audio.step_master(up, steps)  # muda direto e mostra barra na pílula
             else:
-                system.volume_step(up, steps)  # sem Core Audio: teclas de volume (aviso do Windows)
+                system.volume_step(up, steps)  # sem Core Audio: teclas de volume
         event.accept()  # type: ignore[attr-defined]
 
-    # ---------- arrastar e soltar (Estante e Atalhos) ----------
+    # ---------- arrastar e soltar (Estante e Atalhos/Lançador) ----------
     def _drop_zones(self, event: QDragEnterEvent | QDragMoveEvent | QDropEvent) -> list[str]:
         mime, settings = event.mimeData(), self.ctx.settings
         zones = []
         if settings.module_enabled("shelf") and (mime.hasUrls() or mime.hasImage() or mime.hasText()):
             zones.append("shelf")
-        if settings.module_enabled("shortcuts") and mime.hasUrls():
-            zones.append("shortcuts")
+        if mime.hasUrls():
+            if getattr(settings, "replace_start_menu", False):
+                zones.append("launcher")
+            elif settings.module_enabled("shortcuts"):
+                zones.append("shortcuts")
         return zones
 
     def _accepts_files(self, event: QDragEnterEvent | QDragMoveEvent | QDropEvent) -> bool:
@@ -1246,7 +1644,7 @@ class Island(QWidget):
         self.collapse_timer.stop()
         target = zones[0] if len(zones) == 1 else self.panel.current
         if not self.expanded:
-            self.expand(target if target in zones else zones[0])
+            self.expand(target if target in zones and target != "launcher" else zones[0])
         self.panel.drop_hint.set_zones(zones)
         self.panel.drop_hint.show()
         self.panel.drop_hint.raise_()
@@ -1261,10 +1659,14 @@ class Island(QWidget):
     def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
         self._drag_files = False
         self.panel.drop_hint.hide()
-        if self.expanded:
+        if self.open_body:
             self.collapse_timer.start(max(800, self.ctx.settings.collapse_delay_ms))
 
     def dropEvent(self, event: QDropEvent) -> None:
+        from pathlib import Path
+
+        from ventude.services import launcher
+
         self._drag_files = False
         zone = self._hint_zone(event) or self.panel.drop_hint.active
         self.panel.drop_hint.hide()
@@ -1285,6 +1687,21 @@ class Island(QWidget):
                 shelf.add_text(mime.text())
             self.panel.select("shelf")
             event.acceptProposedAction()
+        elif zone == "launcher" and paths:
+            added = 0
+            for raw in paths:
+                raw = (raw or "").strip()
+                if raw.startswith(("http://", "https://")):
+                    if self.ctx.store.add_pin("start", "url", launcher.default_label(raw, "url"), raw):
+                        added += 1
+                elif raw and Path(raw).exists():
+                    kind = launcher.kind_for(raw)
+                    p = str(Path(raw))
+                    if self.ctx.store.add_pin("start", kind, launcher.default_label(p, kind), p):
+                        added += 1
+            if added:
+                self.ctx.data_changed.emit("pins")
+            event.acceptProposedAction()
         else:
             page = self.panel.page("shortcuts")
             if page is not None and paths:
@@ -1296,16 +1713,21 @@ class Island(QWidget):
 
     def changeEvent(self, event: QEvent) -> None:
         super().changeEvent(event)
-        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow() and self.expanded:
-            self.panel.command.close_bar()  # clicou fora: a barra de comandos some
+        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow() and self.open_body:
+            if self.mode == IslandMode.PANEL:
+                self.panel.command.close_bar()  # clicou fora: a barra de comandos some
+            self._controls_by_key = False
             self.collapse_timer.start(250)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            if self.panel.qr.isVisible():
+            if self.mode == IslandMode.PANEL and self.panel.qr.isVisible():
                 self.panel.qr.close_card()  # Esc fecha o QR primeiro
             else:
                 self.collapse()
+            return
+        if self.mode == IslandMode.CONTROLS:
+            super().keyPressEvent(event)
             return
         if self.panel.qr.isVisible():
             return
@@ -1328,7 +1750,6 @@ class Island(QWidget):
             if not bar.isVisible():
                 bar.open_bar(typed)  # começou a digitar: vira busca
             else:
-                # O foco saiu do campo, mas a busca continua: devolve o foco sem apagar o que já foi digitado.
                 bar.input.setFocus()
                 bar.input.insert(typed)
             return
@@ -1336,7 +1757,7 @@ class Island(QWidget):
             self.panel.select_index(event.key() - Qt.Key.Key_1)
             return
         if ctrl and event.key() in (Qt.Key.Key_0, Qt.Key.Key_Comma):
-            self.panel.select("settings")  # Ctrl + 0 ou Ctrl + , : Ajustes (a aba que passa da 9ª)
+            self.panel.select("settings")  # Ctrl + 0 ou Ctrl + , : Ajustes
             return
         super().keyPressEvent(event)
 
@@ -1350,14 +1771,23 @@ class Island(QWidget):
         )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.MiddleButton and not self.expanded and self.pill.has_media:
+        if (
+            event.button() == Qt.MouseButton.RightButton
+            and self.mode == IslandMode.PILL
+            and self.pill.shell_mode
+        ):
+            self.hover_timer.stop()
+            self.open_controls(by_key=False)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.MiddleButton and not self.open_body and self.pill.has_media:
             self.hover_timer.stop()
             self._media_hold = True
             event.accept()
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        if self.expanded and event.position().y() > HEADER_HEIGHT:
+        if self.open_body and event.position().y() > HEADER_HEIGHT:
             return
         self._press = event.globalPosition().toPoint()
         self._origin = self.pos()
@@ -1366,12 +1796,14 @@ class Island(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._press is None:
-            if not self.expanded and self.hover_timer.isActive() and not self._media_hold:
+            if not self.open_body and not self._media_hold:
                 zone = self.pill.zone_at(event.position().toPoint())
-                if zone != self._hover_zone:  # saiu da música para outra parte: abre na hora
+                if zone != self._hover_zone:
                     self._hover_zone = zone
                     self.hover_timer.stop()
-                    self._schedule_hover(zone)
+                    if zone != "status" and not self._hover_suspended and self.ctx.settings.hover_open:
+                        if time.time() - self._collapsed_at >= COLLAPSE_COOLDOWN:
+                            self._schedule_hover(zone)
             return
         delta = event.globalPosition().toPoint() - self._press
         if not self._dragging and delta.manhattanLength() >= QApplication.startDragDistance():
@@ -1383,7 +1815,7 @@ class Island(QWidget):
             self.move(self._origin + delta)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.MiddleButton and not self.expanded and self.pill.has_media:
+        if event.button() == Qt.MouseButton.MiddleButton and not self.open_body and self.pill.has_media:
             self.ctx.media.play_pause()  # clique do meio: tocar/pausar sem abrir
             return
         if self._press is None or event.button() != Qt.MouseButton.LeftButton:
@@ -1394,13 +1826,16 @@ class Island(QWidget):
             self.unsetCursor()
             self._save_position()
             self.reposition()
-        elif not self.expanded and self._toast is not None:
+        elif not self.open_body and self._toast is not None:
             kind = self._toast.kind
             pages = {"limits": "limits", "agenda": "agenda", "volume": "audio", "hardware": "hardware"}
             page = pages.get(kind, "home")
             self.expand(page if page == "home" or self.ctx.settings.module_enabled(page) else "home")
-        elif not self.expanded:
+        elif not self.open_body:
             zone = self.pill.zone_at(event.position().toPoint())
+            if zone == "status":
+                self.open_controls(by_key=False)
+                return
             if zone == "media":  # capa ou equalizador: tocar/pausar
                 self._media_hold = True
                 self.ctx.media.play_pause()
@@ -1424,23 +1859,12 @@ class Island(QWidget):
 
     def paintEvent(self, _event: object) -> None:
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        rect = QRectF(self.rect())
         radius = min(theme.ISLAND_RADIUS, rect.height() / 2)
-        path = QPainterPath()
-        path.addRoundedRect(rect, radius, radius)
-        p.fillPath(path, QColor(theme.BG))
-        sheen = QLinearGradient(0, 0, 0, min(rect.height(), 140))
-        sheen.setColorAt(0, QColor(255, 255, 255, 9))
-        sheen.setColorAt(1, QColor(255, 255, 255, 0))
-        p.fillPath(path, sheen)
-        p.setPen(QPen(QColor(255, 255, 255, 20), 1))
-        p.drawPath(path)
+        path = brand.paint_ink(p, rect, radius, bg=theme.INK, alpha=1.0)
         if self.pulse.state() == QVariantAnimation.State.Running:
-            # três pulsos de brilho na borda quando o timer termina
-            import math
-
             glow = abs(math.sin(float(self.pulse.currentValue()) * math.pi * 3))
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setPen(QPen(theme.color(theme.ACCENT, 0.85 * glow), 2.2))
             p.drawPath(path)
 
@@ -1450,18 +1874,32 @@ class Island(QWidget):
 
     # ---------- reações ----------
     def _tick(self) -> None:
-        if self.expanded:
+        if self.mode == IslandMode.PANEL:
             self.panel.refresh_clock()
+        elif self.mode == IslandMode.CONTROLS:
+            self.controls.refresh_clock()
         else:
-            self.pill.refresh_clock()
+            had_event = not self.pill.event_chip.isHidden()
+            zero_pulse = self.pill.refresh_clock()
+            if zero_pulse:
+                self._pulse_once()
+            if had_event and self.pill.event_chip.isHidden():
+                self._resize_compact()
             if self.ctx.timer.state is not None:
                 self.pill.set_timer(self.ctx.timer.state)
 
+    def _pulse_once(self) -> None:
+        if motion.scale(self.ctx.settings) <= 0:
+            return
+        self.pulse.stop()
+        self.pulse.setDuration(600)
+        self.pulse.start()
+
     def _resize_compact(self) -> None:
-        if not self.expanded and not self._dragging:
-            target = self.target_rect(False)
+        if self.mode == IslandMode.PILL and not self._dragging:
+            target = self.target_rect(IslandMode.PILL)
             if target != self.geometry():
-                self._animate(target)
+                self._animate(target, opening=False)
 
     def _media_changed(self, state: MediaState | None) -> None:
         self.pill.set_media(state)
@@ -1478,20 +1916,45 @@ class Island(QWidget):
             self._last_track = track
 
     # ---------- avisos na ilha ----------
+    def _allows_in_quiet(self, toast: Toast) -> bool:
+        if not getattr(self.ctx.settings, "quiet_mode", False):
+            return True
+        if toast.kind in ("timer", "agenda", "hardware", "error", "alert"):
+            return True
+        return toast.kind == "limits" and bool(toast.extra.get("critical"))
+
     def show_toast(self, toast: Toast) -> None:
         """A ilha cresce um pouco com o aviso e volta a ser pílula sozinha."""
+        if not self._allows_in_quiet(toast):
+            return
+        blocked_by_ui = self.open_body or self._hover_suspended
+        if (
+            self.panel.shell_mode
+            and blocked_by_ui
+            and self.ctx.settings.island_toasts
+            and self.isVisible()
+            and not self._auto_hidden
+            and not self._dragging
+            and toast.kind != "timer"
+        ):
+            if toast.kind not in ("music", "volume"):
+                if not any(t.kind == toast.kind and t.title == toast.title for t in self._deferred_toasts):
+                    self._deferred_toasts.append(toast)
+                    self._deferred_toasts = self._deferred_toasts[-3:]
+            return
         can_show = (
             self.ctx.settings.island_toasts
             and self.isVisible()
             and not self._auto_hidden
-            and not self.expanded
+            and not self.open_body
+            and not self._hover_suspended
             and not self._dragging
         )
         if not can_show:
-            if toast.kind in ("limits", "agenda", "timer"):
+            if toast.kind in ("limits", "agenda", "timer", "error"):
                 self.ctx.tray_message.emit(toast.title, toast.text)
             return
-        if toast.kind in ("music", "volume"):  # só a música (ou o volume) mais recente importa
+        if toast.kind in ("music", "volume"):  # só a música mais recente importa
             self._toasts = [t for t in self._toasts if t.kind != toast.kind]
             if self._toast is not None and self._toast.kind == toast.kind:
                 self._toast = toast
@@ -1502,25 +1965,34 @@ class Island(QWidget):
         if self._toast is None:
             self._next_toast()
 
+    def _drain_deferred_toasts(self) -> None:
+        if self.mode == IslandMode.PILL and not self._hover_suspended and self._deferred_toasts:
+            queued = list(self._deferred_toasts)
+            self._deferred_toasts.clear()
+            for toast in queued:
+                self.show_toast(toast)
+
     def _next_toast(self) -> None:
-        if self._toast is not None or not self._toasts or self.expanded:
+        if self._toast is not None or not self._toasts or self.open_body or self._hover_suspended:
             return
         self._toast = self._toasts.pop(0)
+        self.mode = IslandMode.TOAST
+        self.volume_overlay.dismiss_now()
         self.toast_view.show_toast(self._toast)
         self.toast_timer.start(int(self._toast.seconds * 1000))
-        # A pílula some na hora e o aviso aparece junto com a ilha crescendo (sem "piscar" no meio).
         self.pill.hide()
-        self._animate(self.target_rect(False))
+        self._animate(self.target_rect(IslandMode.TOAST), opening=True)
         if not self.toast_view.isVisible():
-            self._fade_in(self.toast_view, max(120, int(self.ctx.settings.animation_ms * 0.8)))
+            self._fade_in(self.toast_view, motion.ms("desdobrar_fade", self.ctx.settings))
 
     def _end_toast(self) -> None:
         if self._toast is None:
             return
         self._toast = None
         self.toast_view.hide()
-        if not self.expanded:
-            self._animate(self.target_rect(False))
+        if not self.open_body:
+            self.mode = IslandMode.PILL
+            self._animate(self.target_rect(IslandMode.PILL), opening=False)
         if self._toasts:
             QTimer.singleShot(350, self._next_toast)
 
@@ -1530,8 +2002,9 @@ class Island(QWidget):
         had_toast = self._toast is not None
         self._toast = None
         self.toast_view.hide()
-        if had_toast and not self.expanded:
-            self._resize_compact()  # volta ao tamanho da pílula (o aviso tinha outro tamanho)
+        if had_toast and not self.open_body:
+            self.mode = IslandMode.PILL
+            self._resize_compact()
 
     def _toast_art(self, data: bytes) -> None:
         if self._toast is not None and self._toast.kind == "music" and data:
@@ -1544,7 +2017,8 @@ class Island(QWidget):
         if self._capture is not None:
             return
         self.collapse()
-        QTimer.singleShot(self.ctx.settings.animation_ms + 60, lambda: self._start_capture(mode))
+        delay = motion.ms("morfose_close", self.ctx.settings) + 60
+        QTimer.singleShot(delay, lambda: self._start_capture(mode))
 
     def _start_capture(self, mode: str) -> None:
         self.hide()
@@ -1612,17 +2086,37 @@ class Island(QWidget):
     def _timer_finished(self, state: TimerState) -> None:
         title, text = finished_text(state, self.ctx.timer.pomodoro)
         self.show_toast(Toast(title, text, icon="clock", color=theme.ACCENT, seconds=6, kind="timer"))
-        self.pulse.stop()
-        self.pulse.start()  # a ilha pulsa ao terminar
+        if motion.scale(self.ctx.settings) > 0:
+            self.pulse.stop()
+            self.pulse.setDuration(1800)
+            self.pulse.start()  # a ilha pulsa ao terminar
         QApplication.beep()
 
     def _limit_alert(self, provider: str, title: str, message: str) -> None:
         color = theme.provider_color(provider)
-        self.show_toast(Toast(title, message, icon="gauge", color=color, seconds=5, kind="limits"))
+        critical = "95%" in title or "100%" in title
+        self.show_toast(
+            Toast(
+                title,
+                message,
+                icon="gauge",
+                color=color,
+                seconds=5,
+                kind="limits",
+                extra={"critical": critical},
+            )
+        )
 
     def _reminder(self, event: object, minutes: int) -> None:
-        if self.ctx.settings.agenda_reminders:
-            self.show_toast(event_toast(event, minutes))  # type: ignore[arg-type]
+        if minutes >= 10:
+            changed = self.pill.set_upcoming_event(event)
+            if changed:
+                self._resize_compact()
+            if self.ctx.settings.agenda_reminders:
+                self.show_toast(event_toast(event, minutes))  # type: ignore[arg-type]
+        elif minutes <= 5:
+            self.pill.set_upcoming_event(event)
+            self._pulse_once()
 
     def _rings_changed(self) -> None:
         before = self.pill.visible_rings()
@@ -1640,12 +2134,12 @@ class Island(QWidget):
         self._metrics_changed()
         self._privacy_changed()
         if not self._dragging and self.anim.state() != QPropertyAnimation.State.Running:
-            target = self.target_rect(self.expanded)
-            if target.topLeft() != self.geometry().topLeft() or not self.expanded:
-                self._animate(target)
+            target = self.target_rect(self.mode)
+            if target.topLeft() != self.geometry().topLeft() or not self.open_body:
+                self._animate(target, opening=False)
 
     def _check_fullscreen(self) -> None:
-        if not self.ctx.settings.hide_fullscreen or self.expanded:
+        if not self.ctx.settings.hide_fullscreen or self.open_body:
             if self._auto_hidden:
                 self._auto_hidden = False
                 self.show()
@@ -1673,8 +2167,12 @@ class Island(QWidget):
 
     def nativeEvent(self, event_type: object, message: object) -> tuple[bool, int]:  # noqa: N802
         if self._hotkey and system.is_hotkey_message(message):
-            if self.panel.shell_mode and self.ctx.settings.hotkey_command and self.ctx.open_search():
-                return True, 0  # no Shell, o atalho abre a Pesquisa
+            if (
+                (self.ctx.settings.replace_start_menu or self.panel.shell_mode)
+                and self.ctx.settings.hotkey_command
+                and self.ctx.open_search()
+            ):
+                return True, 0  # no Shell, o atalho abre o Lançador
             opening = not self.expanded
             self.toggle()
             if opening and self.expanded and self.ctx.settings.hotkey_command:
@@ -1685,4 +2183,5 @@ class Island(QWidget):
     def user_hidden(self, hidden: bool) -> None:
         """Ocultar/mostrar pela bandeja (sem confundir com a tela cheia)."""
         self._auto_hidden = False
+        self._user_hidden = hidden
         self.setVisible(not hidden)

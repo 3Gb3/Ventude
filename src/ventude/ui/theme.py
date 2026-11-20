@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QApplication
 from ventude.core.paths import app_data_dir
 
 BG = "#0C0D10"
+INK = BG
+INK_RAISED = "#111317"
+INK_KEY = "#191C22"
 SURFACE = "#15171C"
 SURFACE_2 = "#1C1F25"
 SURFACE_3 = "#262A31"
@@ -27,6 +30,22 @@ UP = "#5FD99B"
 DOWN = "#F27A7A"
 SUN = "#F6C86B"
 SKY = "#8EB8F5"
+LIVE_MIC = "#FF9F43"
+LIVE_CAM = "#34D399"
+DOT_OPEN = TEXT_2
+DOT_FOCUS = ACCENT
+DOT_ATTENTION = WARN
+TOGGLE_ON_BG = ACCENT_SOFT
+TOGGLE_ON_FG = ACCENT
+HAIRLINE = QColor(255, 255, 255, 20)
+HALO = QColor(255, 255, 255, 15)
+HALO_PRESS = QColor(255, 255, 255, 26)
+ASLEEP_SATURATION = 0.45
+ASLEEP_OPACITY = 0.82
+R_SHEET = 26
+R_CARD = 18
+R_MENU = 14
+R_ITEM = 10
 PROVIDER_COLORS = {
     "claude": "#E38B67",
     "antigravity": "#78A6FF",
@@ -55,11 +74,24 @@ def ui_family() -> str:
     return _pick(_UI_FONTS)
 
 
-def font(size: int, weight: QFont.Weight = QFont.Weight.Normal, display: bool = False) -> QFont:
+def font(
+    size: int,
+    weight: QFont.Weight = QFont.Weight.Normal,
+    display: bool = False,
+    tabular: bool = False,
+) -> QFont:
     f = QFont(_pick(_DISPLAY_FONTS) if display else ui_family())
     f.setPixelSize(size)
     f.setWeight(weight)
     f.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+    if tabular and hasattr(f, "setFeature") and hasattr(QFont, "Tag"):
+        try:
+            f.setFeature(QFont.Tag(b"tnum"), 1)
+        except (TypeError, ValueError):
+            try:
+                f.setFeature(QFont.Tag("tnum"), 1)
+            except (TypeError, ValueError):
+                pass
     return f
 
 
@@ -101,7 +133,7 @@ def stylesheet() -> str:
     return f"""
 QWidget {{ color: {TEXT}; background: transparent; }}
 QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {STROKE_2};
-    border-radius: 6px; padding: 6px 8px; }}
+    border-radius: 10px; padding: 6px 10px; }}
 QLabel {{ background: transparent; }}
 QLabel#H1 {{ font-size: 19px; font-weight: 600; }}
 QLabel#H2 {{ font-size: 15px; font-weight: 600; }}
@@ -153,8 +185,8 @@ QListWidget {{ background: transparent; border: none; outline: none; }}
 QListWidget::item {{ border-radius: 10px; padding: 6px; color: {TEXT}; }}
 QListWidget::item:hover {{ background: {SURFACE_2}; }}
 QListWidget::item:selected {{ background: {SURFACE_3}; color: {TEXT}; }}
-QMenu {{ background: {SURFACE}; border: 1px solid {STROKE_2}; border-radius: 10px; padding: 5px; }}
-QMenu::item {{ padding: 7px 22px 7px 12px; border-radius: 6px; }}
+QMenu {{ background: {INK_RAISED}; border: 1px solid {STROKE_2}; border-radius: {R_MENU}px; padding: 6px; }}
+QMenu::item {{ padding: 7px 22px 7px 12px; border-radius: {R_ITEM}px; }}
 QMenu::item:selected {{ background: {SURFACE_3}; }}
 QMenu::separator {{ height: 1px; background: {STROKE_2}; margin: 4px 6px; }}
 QScrollArea {{ border: none; background: transparent; }}

@@ -35,7 +35,17 @@ DELAYS = [
     ("5 segundos", 5000),
 ]
 HOVER_DELAYS = [("Na hora", 0), ("Bem rápido (0,15 s)", 150), ("0,3 segundo", 300), ("0,6 segundo", 600)]
-ANIMATIONS = [("Rápida", "rapida"), ("Normal", "normal"), ("Suave", "suave")]
+ANIMATIONS = [
+    ("Rápida", "rapida"),
+    ("Normal", "normal"),
+    ("Suave", "suave"),
+    ("Nenhuma", "nenhuma"),
+]
+DOCK_MODE_OPTIONS = [
+    ("Esquivar janelas", "esquivar"),
+    ("Sempre visível", "sempre"),
+    ("Oculta", "oculta"),
+]
 MEDIA_SOURCES = [("Só o Spotify", "spotify"), ("Qualquer player", "any")]
 INTERVALS = [("2 min", 2), ("5 min", 5), ("10 min", 10), ("15 min", 15), ("30 min", 30)]
 CLAUDE_MODES = [
@@ -423,13 +433,13 @@ class SettingsPage(Page):
         )
         column.addWidget(card)
 
-        # ---------- Ventude Shell (2.0) ----------
+        # ---------- Ventude Shell (3.0) ----------
         card, body = section("Ventude Shell", theme.ACCENT)
         self.shell_card = card
         body.addWidget(
             label(
-                "Barra de tarefas, Menu Iniciar e Pesquisa do Ventude no lugar dos do Windows. A barra do "
-                "Windows sempre volta ao desligar aqui ou fechar o Ventude.",
+                "Doca flutuante, Lançador unificado e Pesquisa na tecla Windows no lugar da barra "
+                "padrão. A barra do Windows sempre volta ao desligar aqui ou fechar o Ventude.",
                 "Faint",
                 wrap=True,
             )
@@ -439,9 +449,9 @@ class SettingsPage(Page):
         self.replace_taskbar.setEnabled(windows_only)
         body.addWidget(
             setting_row(
-                "Barra de tarefas do Ventude",
-                "Clima, Iniciar, Pesquisa, apps fixados e abertos (com prévia ao vivo), painel rápido de "
-                "rede e volume, relógio com calendário. Botão direito na barra: alinhar, ocultar, voltar.",
+                "Doca do Ventude",
+                "Substitui a barra do Windows pela cápsula flutuante centrada; hora, data, clima e "
+                "Controles ficam só na ilha.",
                 self.replace_taskbar,
             )
         )
@@ -449,47 +459,65 @@ class SettingsPage(Page):
         self.replace_start.setEnabled(windows_only)
         body.addWidget(
             setting_row(
-                "Tecla Windows abre a Pesquisa do Ventude",
-                "Win sozinha e Win + S abrem a Pesquisa (apps, pastas, arquivos, Configurações, calculadora, "
-                "comandos). Win + E, D, L, V, Tab, setas e os outros atalhos continuam do Windows.",
+                "Tecla Windows abre o Lançador",
+                "Win sozinha e Win + S abrem o Lançador (apps, janelas @, arquivos /, comandos >). "
+                "Win + E, D, L, V, Tab e setas continuam do Windows.",
                 self.replace_start,
             )
         )
-        self.taskbar_align = combo([("Centralizados", "center"), ("À esquerda", "left")], s.taskbar_align)
-        self.taskbar_align.currentIndexChanged.connect(
-            lambda: self._set(taskbar_align=self.taskbar_align.currentData())
+        self.dock_mode = combo(DOCK_MODE_OPTIONS, s.dock_mode)
+        self.dock_mode.currentIndexChanged.connect(
+            lambda: self._set(dock_mode=self.dock_mode.currentData())
         )
-        body.addWidget(setting_row("Ícones da barra", "Onde ficam o Iniciar e os apps.", self.taskbar_align))
-        self.autohide = self._switch(s.taskbar_autohide, "taskbar_autohide")
         body.addWidget(
             setting_row(
-                "Ocultar a barra automaticamente",
-                "A barra desce e volta quando o mouse encosta embaixo. As janelas usam a tela toda.",
-                self.autohide,
+                "Modo da Doca",
+                "Esquivar recua só quando uma janela encosta na cápsula; Sempre reserva 64 px.",
+                self.dock_mode,
             )
         )
-        self.taskbar_weather = self._switch(s.taskbar_weather, "taskbar_weather")
+        self.island_echo = self._switch(s.island_echo, "island_echo")
         body.addWidget(
             setting_row(
-                "Clima na barra", "Temperatura e aviso de chuva no canto esquerdo.", self.taskbar_weather
+                "Eco nos monitores secundários",
+                "Pílula mínima só com o relógio no topo das outras telas.",
+                self.island_echo,
             )
         )
         self.all_monitors = self._switch(s.taskbar_all_monitors, "taskbar_all_monitors")
-        body.addWidget(setting_row("Barra em todos os monitores", "", self.all_monitors))
-        self.glass = self._switch(s.shell_glass, "shell_glass")
+        body.addWidget(setting_row("Doca em todos os monitores", "", self.all_monitors))
+        self.hotkey_controls = self._switch(s.hotkey_controls, "hotkey_controls")
+        self.hotkey_controls.setEnabled(windows_only)
         body.addWidget(
             setting_row(
-                "Efeito de vidro",
-                "Desfoque (acrylic) atrás da barra, do Iniciar e da Pesquisa.",
-                self.glass,
+                "Win + A abre Controles",
+                "Abre volume, microfone, ferramentas e bandeja direto na ilha.",
+                self.hotkey_controls,
+            )
+        )
+        self.hotkey_dock_numbers = self._switch(s.hotkey_dock_numbers, "hotkey_dock_numbers")
+        self.hotkey_dock_numbers.setEnabled(windows_only)
+        body.addWidget(
+            setting_row(
+                "Win + 1..9 alterna apps da Doca",
+                "Com Shift abre uma nova instância do app.",
+                self.hotkey_dock_numbers,
+            )
+        )
+        self.quiet_mode = self._switch(s.quiet_mode, "quiet_mode")
+        body.addWidget(
+            setting_row(
+                "Modo Silêncio",
+                "Suprime toasts informativos na ilha (alertas críticos continuam).",
+                self.quiet_mode,
             )
         )
         self.power_animation = self._switch(s.power_animation, "power_animation")
         body.addWidget(
             setting_row(
                 "Animação de energia",
-                "Antes de desligar, reiniciar, suspender, bloquear ou sair, as telas escurecem e aparece "
-                "“Até logo!” com alguns segundos para cancelar (Esc).",
+                "Antes de desligar, reiniciar, suspender, bloquear ou sair, as telas escurecem e "
+                "aparece o Interruptor com alguns segundos para cancelar (Esc).",
                 self.power_animation,
             )
         )
@@ -499,6 +527,19 @@ class SettingsPage(Page):
                 "Saudação ao ligar",
                 "“Bom dia, …!” com a data e o clima logo depois de ligar o PC.",
                 self.greeting,
+            )
+        )
+        self.agent_command = QLineEdit(s.agent_command)
+        self.agent_command.setPlaceholderText("claude")
+        self.agent_command.setFixedWidth(170)
+        self.agent_command.editingFinished.connect(
+            lambda: self._set(agent_command=self.agent_command.text().strip() or "claude")
+        )
+        body.addWidget(
+            setting_row(
+                "Comando do agente",
+                "CLI executada no verbo “Agente aqui” em pastas e repositórios Git.",
+                self.agent_command,
             )
         )
         column.addWidget(card)
@@ -813,11 +854,16 @@ class SettingsPage(Page):
 
     def sync(self, settings: Settings) -> None:
         self._fill_monitors()
-        # Mudanças feitas fora daqui (menu da barra, bandeja): os botões acompanham.
         for switch, value in (
             (self.replace_taskbar, settings.replace_taskbar),
             (self.replace_start, settings.replace_start_menu),
-            (self.autohide, settings.taskbar_autohide),
+            (self.island_echo, settings.island_echo),
+            (self.all_monitors, settings.taskbar_all_monitors),
+            (self.hotkey_controls, settings.hotkey_controls),
+            (self.hotkey_dock_numbers, settings.hotkey_dock_numbers),
+            (self.quiet_mode, settings.quiet_mode),
+            (self.power_animation, settings.power_animation),
+            (self.greeting, settings.shell_greeting),
             (self.pill_date, settings.pill_date),
             (self.weather_pill, settings.pill_weather),
         ):
@@ -825,11 +871,13 @@ class SettingsPage(Page):
                 switch.blockSignals(True)
                 switch.setChecked(value)
                 switch.blockSignals(False)
-        index = self.taskbar_align.findData(settings.taskbar_align)
-        if index >= 0 and index != self.taskbar_align.currentIndex():
-            self.taskbar_align.blockSignals(True)
-            self.taskbar_align.setCurrentIndex(index)
-            self.taskbar_align.blockSignals(False)
+        index = self.dock_mode.findData(settings.dock_mode)
+        if index >= 0 and index != self.dock_mode.currentIndex():
+            self.dock_mode.blockSignals(True)
+            self.dock_mode.setCurrentIndex(index)
+            self.dock_mode.blockSignals(False)
+        if not self.agent_command.hasFocus() and self.agent_command.text() != settings.agent_command:
+            self.agent_command.setText(settings.agent_command)
 
     def scroll_to_shell(self) -> None:
         """Abre os Ajustes já na seção do Ventude Shell (menu da barra, painel rápido)."""

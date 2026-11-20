@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import atexit
 import getpass
+import json
 import logging
 import sys
+import time
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
@@ -20,6 +22,113 @@ from ventude.services import system
 
 log = logging.getLogger(__name__)
 _windows: list[object] = []  # mantém janelas avulsas vivas (ex.: aviso de atualização)
+MAX_IPC_BYTES = 4096
+MAX_NOTIFY_PER_SEC = 5
+
+
+def handle_ipc_payload(
+    payload: bytes,
+    island: object,
+    timestamps: list[float],
+    now: float | None = None,
+) -> str:
+    """Processa mensagem recebida via QLocalServer: notify {json} (rate-limited) ou show."""
+    if len(payload) > MAX_IPC_BYTES:
+        return "too_large"
+    raw = payload.strip()
+    if raw.startswith(b"notify"):
+        rest = raw[6:].strip()
+        if not rest:
+            return "invalid"
+        cur = time.monotonic() if now is None else now
+        recent = [t for t in timestamps if (cur - t) < 1.0]
+        timestamps[:] = recent
+        if len(recent) >= MAX_NOTIFY_PER_SEC:
+            return "rate_limited"
+        timestamps.append(cur)
+        try:
+            data = json.loads(rest.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return "invalid"
+        if not isinstance(data, dict):
+            return "invalid"
+        title = str(data.get("title", "")).strip()
+        if not title:
+            return "invalid"
+        from ventude.ui import theme
+        from ventude.ui.toast import Toast
+
+        text = str(data.get("text", "")).strip()
+        icon = str(data.get("icon", "bell")).strip() or "bell"
+        try:
+            seconds = float(data.get("seconds", 3.5))
+        except (TypeError, ValueError):
+            seconds = 3.5
+        toast = Toast(
+            title=title[:120],
+            text=text[:240],
+            icon=icon[:32],
+            color=theme.ACCENT,
+            seconds=max(1.0, min(15.0, seconds)),
+            kind="info",
+        )
+        island.show_toast(toast)  # type: ignore[attr-defined]
+        return "toast"
+
+    island.user_hidden(False)  # type: ignore[attr-defined]
+    island.expand()  # type: ignore[attr-defined]
+    island.raise_()  # type: ignore[attr-defined]
+    island.activateWindow()  # type: ignore[attr-defined]
+    return "reveal"
+
+
+def _send_notify_cli(name: str, argv: list[str]) -> int:
+    """Envia comando 'notify {json}' para a instância em execução via CLI."""
+    title = ""
+    text = ""
+    icon = "bell"
+    seconds = 3.5
+    i = 0
+    positional: list[str] = []
+    while i < len(argv):
+        tok = argv[i]
+        if tok in ("--title", "-t") and i + 1 < len(argv):
+            title = argv[i + 1]
+            i += 2
+        elif tok in ("--text", "-m") and i + 1 < len(argv):
+            text = argv[i + 1]
+            i += 2
+        elif tok == "--icon" and i + 1 < len(argv):
+            icon = argv[i + 1]
+            i += 2
+        elif tok == "--seconds" and i + 1 < len(argv):
+            try:
+                seconds = float(argv[i + 1])
+            except ValueError:
+                pass
+            i += 2
+        else:
+            positional.append(tok)
+            i += 1
+    if not title and positional:
+        title = positional[0]
+    if not text and len(positional) > 1:
+        text = " ".join(positional[1:])
+    if not title:
+        return 1
+    payload = b"notify " + json.dumps(
+        {"title": title, "text": text, "icon": icon, "seconds": seconds}
+    ).encode("utf-8")
+    if len(payload) > MAX_IPC_BYTES:
+        return 1
+    socket = QLocalSocket()
+    socket.connectToServer(name)
+    if not socket.waitForConnected(300):
+        return 1
+    socket.write(payload)
+    socket.waitForBytesWritten(300)
+    socket.disconnectFromServer()
+    return 0
 
 
 def _server_name() -> str:
@@ -97,10 +206,13 @@ def run() -> int:
     app.setQuitOnLastWindowClosed(False)
 
     name = _server_name()
+    if len(sys.argv) >= 2 and sys.argv[1] == "notify":
+        return _send_notify_cli(name, sys.argv[2:])
     if _already_running(name):
         return 0
     QLocalServer.removeServer(name)
     server = QLocalServer()
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
     server.listen(name)
 
     from ventude.ui import theme
@@ -122,14 +234,18 @@ def run() -> int:
     tray = Tray(ctx, island)
     _install_failsafes(app, shell)
 
+    ipc_timestamps: list[float] = []
+
     def reveal() -> None:
         connection = server.nextPendingConnection()
+        payload = b""
         if connection:
+            if connection.bytesAvailable() == 0:
+                connection.waitForReadyRead(150)
+            payload = bytes(connection.read(MAX_IPC_BYTES + 64))
+            connection.close()
             connection.deleteLater()
-        island.user_hidden(False)
-        island.expand()
-        island.raise_()
-        island.activateWindow()
+        handle_ipc_payload(payload, island, ipc_timestamps)
 
     server.newConnection.connect(reveal)
 

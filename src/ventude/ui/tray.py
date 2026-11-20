@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from ventude.ui import icons, theme
+from ventude.ui import brand, icons, theme
 from ventude.ui.context import AppContext
 from ventude.ui.island import Island
 
@@ -16,15 +16,13 @@ def app_icon() -> QIcon:
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        s = size / 64
-        p.setPen(QPen(QColor("#4A505B"), max(1.0, 2.5 * s)))
-        p.setBrush(QColor(theme.BG))
-        p.drawRoundedRect(QRectF(3 * s, 16 * s, 58 * s, 32 * s), 16 * s, 16 * s)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(theme.ACCENT))
-        p.drawEllipse(QRectF(39 * s, 25 * s, 14 * s, 14 * s))
-        p.setBrush(QColor(theme.TEXT_2))
-        p.drawRoundedRect(QRectF(12 * s, 29 * s, 20 * s, 6 * s), 3 * s, 3 * s)
+        s = size / 64.0
+        brand.paint_switch(
+            p,
+            QRectF(3 * s, 16 * s, 58 * s, 32 * s),
+            on=1.0,
+            border_color="#4A505B",
+        )
         p.end()
         result.addPixmap(pm)
     return result
@@ -41,9 +39,7 @@ class Tray(QSystemTrayIcon):
             icons.icon("refresh", theme.TEXT_2, 15), "Atualizar limites das IAs", ctx.limits.refresh_all
         )
         menu.addSeparator()
-        self.shell_action = menu.addAction(
-            icons.icon("dock", theme.TEXT_2, 15), "Barra de tarefas do Ventude"
-        )
+        self.shell_action = menu.addAction(icons.icon("dock", theme.TEXT_2, 15), "Doca do Ventude")
         self.shell_action.setCheckable(True)
         self.shell_action.setChecked(ctx.settings.replace_taskbar)
         self.shell_action.toggled.connect(lambda on: ctx.update_settings(replace_taskbar=on))
@@ -85,6 +81,9 @@ class Tray(QSystemTrayIcon):
 
     def _toggle_visible(self) -> None:
         self.island.user_hidden(self.island.isVisible())
+        shell = getattr(self.ctx, "shell", None)
+        if shell is not None and hasattr(shell, "sync_echos"):
+            shell.sync_echos()  # type: ignore[attr-defined]
         self._sync_label()
 
     def _sync_label(self) -> None:
