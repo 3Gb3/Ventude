@@ -317,11 +317,11 @@ class UsageBar(QWidget):
             fill = QRectF(bar.x(), bar.y(), max(6.0, bar.width() * min(self._used, 100) / 100), 6)
             p.setBrush(theme.color(self._color, 0.55 if self._dim else 1.0))
             p.drawRoundedRect(fill, 3, 3)
-        if self._sub:
+        if self._sub or self._note:
             p.setFont(theme.font(11))
             p.setPen(theme.color(theme.MUTED))
             fm = p.fontMetrics()
-            note = f" · {self._note}" if self._note else ""
+            note = (f" · {self._note}" if self._sub else self._note) if self._note else ""
             note_w = min(fm.horizontalAdvance(note), int(w * 0.62)) if note else 0
             sub = fm.elidedText(self._sub, Qt.TextElideMode.ElideRight, w - note_w)
             p.drawText(QRectF(0, 34, w, 16), Qt.AlignmentFlag.AlignVCenter, sub)

@@ -112,8 +112,8 @@ class CommandBar(QFrame):
     def open_bar(self, text: str = "") -> None:
         self._close_timer.stop()
         parent = self.parentWidget()
-        width = min(560, parent.width() - 40)
-        self.setGeometry((parent.width() - width) // 2, 50, width, 0)
+        self._width = min(600, parent.width() - 40)
+        self.setGeometry((parent.width() - self._width) // 2, 50, self._width, 0)
         self.show()
         self.raise_()
         self.input.setText(text)
@@ -241,8 +241,7 @@ class CommandBar(QFrame):
         rows = min(self.results.count(), 7)
         self.results.setFixedHeight(rows * 34 + (4 if rows else 0))
         self.results.setVisible(bool(rows))
-        self.adjustSize()
-        self.resize(self.width(), self.sizeHint().height())
+        self.resize(getattr(self, "_width", self.width()), self.sizeHint().height())
 
     def _run(self, item: QListWidgetItem) -> None:
         command: Command = item.data(ACTION_ROLE)
@@ -251,7 +250,7 @@ class CommandBar(QFrame):
             self.results.clear()
             self.results.hide()
             self.status.setText(f"✓ {message}")
-            self.adjustSize()
+            self.resize(getattr(self, "_width", self.width()), self.sizeHint().height())
             self._close_timer.start()
         else:
             self.close_bar()

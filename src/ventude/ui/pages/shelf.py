@@ -15,7 +15,7 @@ from ventude.ui.pages.base import Page
 from ventude.ui.widgets import EmptyState, label
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
-TILE = QSize(116, 100)
+TILE = QSize(120, 114)
 
 
 def item_mime(items: list[ShelfItem]) -> QMimeData:
@@ -38,7 +38,7 @@ class ShelfGrid(QListWidget):
         self.setResizeMode(QListView.ResizeMode.Adjust)
         self.setMovement(QListView.Movement.Static)
         self.setGridSize(QSize(TILE.width() + 10, TILE.height() + 10))
-        self.setIconSize(QSize(44, 44))
+        self.setIconSize(QSize(40, 40))
         self.setWordWrap(True)
         self.setUniformItemSizes(True)
         self.setTextElideMode(Qt.TextElideMode.ElideMiddle)

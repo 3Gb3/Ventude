@@ -8,6 +8,10 @@ Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma píl
   <img src="docs/screens/ilha-pausada.png" alt="Ilha fechada com a música pausada" height="60">
 </p>
 <p align="center">
+  <img src="docs/screens/ilha-timer.png" alt="Ilha com música, estante, Pomodoro, clima e anéis" height="60">
+  <img src="docs/screens/aviso-na-ilha.png" alt="Aviso de limite na própria ilha" height="60">
+</p>
+<p align="center">
   <img src="docs/screens/inicio.png" alt="Painel Início" width="49%">
   <img src="docs/screens/ias.png" alt="Limites das IAs" width="49%">
 </p>
@@ -20,6 +24,11 @@ Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma píl
   <img src="docs/screens/clima-dia.png" alt="Detalhes do clima de um dia, hora a hora" width="49%">
   <img src="docs/screens/ajustes-ias.png" alt="Ajustes das IAs" width="49%">
 </p>
+<p align="center">
+  <img src="docs/screens/estante.png" alt="Estante temporária" width="32%">
+  <img src="docs/screens/soltar.png" alt="Soltar na estante ou nos atalhos" width="32%">
+  <img src="docs/screens/comandos.png" alt="Barra de comandos" width="32%">
+</p>
 
 ## O que tem
 
@@ -27,8 +36,9 @@ Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma píl
 |-----|-----------|
 | **Início** | Relógio, semana, próximo compromisso, clima, anéis das IAs, player e tarefas pendentes. |
 | **IAs** | Limites de cada IA, janela por janela (no Gemini, modelo por modelo, agrupados por família), com porcentagem usada e quando renova. O alfinete escolhe qual limite vai no anel da ilha. |
+| **Estante** | Guarda por um tempo arquivos, imagens, links e textos soltos na ilha, para arrastar depois para o navegador, o e-mail ou o Discord. Some ao fechar o Ventude. |
 | **Atalhos** | Apps, pastas, arquivos e sites a um clique. Arraste do Explorer para a ilha, mesmo fechada: ela abre nos Atalhos. |
-| **Agenda** | Calendário do mês e compromissos do dia (`14:00`, `14h`, `9-10`). |
+| **Agenda** | Calendário do mês e compromissos do dia (`14:00`, `14h`, `9-10`). Avisa na ilha 10 e 5 minutos antes. |
 | **Tarefas** | Listas rápidas: marque, edite com dois cliques e limpe as concluídas. |
 | **Clima** | Agora e próximos 7 dias, pelo Open-Meteo (sem chave). Clique num dia para ver umidade, chuva, vento, UV, nascer e pôr do sol e o gráfico hora a hora. |
 | **Mercado** | Sua lista de ações, índices, moedas e cripto, com gráfico do mês (Yahoo Finance). |
@@ -37,7 +47,12 @@ Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma píl
 
 Também tem:
 
-- Clima de agora (ícone e temperatura) na ilha fechada.
+- Clima de agora (ícone e temperatura) na ilha fechada, com aviso de chuva na próxima hora. Sem cidade escolhida, ele estima pelo IP.
+- **Na ilha fechada**: clique nos anéis abre a aba IAs, no clima abre o Clima, na data abre a Agenda. Clique do meio ou na capa toca/pausa, a roda do mouse muda o volume e Shift + roda troca de faixa. Uma linha fina mostra o andamento da música.
+- **Avisos na própria ilha**: limites das IAs, música nova e lembretes da Agenda aparecem por alguns segundos e somem.
+- **Timer e Pomodoro** pelo Início ou pela barra de comandos, com a contagem na ilha e um pulso ao terminar.
+- **Barra de comandos** (atalho global, Ctrl + K ou começar a digitar): abre atalhos, cria tarefas (`t: revisar PR`), compromissos (`a: call 15h`, `a: dentista amanhã 9h-10h`) e timers (`timer 15m`, `pomodoro`).
+- **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows) no topo do painel.
 - Player do Spotify com capa, avanço e controles; pausado, a música continua na ilha. Em **Ajustes > Música** dá para seguir qualquer player do Windows.
 - Abre na hora ao passar o mouse (o tempo é ajustável) e troca de aba com animação.
 - Avisos na bandeja quando uma IA chega a 80% e 95% e quando o limite renova.
@@ -58,6 +73,8 @@ O Ventude lê os limites direto das contas que você já usa. Nada passa por ser
 | **Cursor** | Lê o login que o **Cursor** instalado guarda no PC e mostra o uso incluído no plano por ciclo. Os modelos usados dentro do Cursor (Grok, Claude, GPT...) contam aqui. | Ligue em **Ajustes > Limites das IAs**. Sem o Cursor instalado, cole o cookie `WorkosCursorSessionToken` do cursor.com. |
 | **GitHub Copilot** | Lê o login da extensão do **Copilot** (VS Code, Visual Studio, JetBrains) e mostra as requisições premium, o chat e o autocompletar do mês. | Ligue em **Ajustes > Limites das IAs**. Sem a extensão, cole um token `ghu_…`/`gho_…`. |
 | **Grok** | Usa o login do **Grok CLI** (`%USERPROFILE%\.grok\auth.json`) para ler os créditos do ciclo, ou o cookie do **grok.com** para ler as consultas restantes de cada modo (Auto, Rápido, Expert). | Se usa o site, o app ou os bots, cole o "Copiar como cURL" (ou o cookie) do grok.com em **Ajustes > Grok**. O Grok usado dentro do Cursor conta no limite do Cursor, não no da conta Grok. |
+
+Na aba IAs, cada IA mostra um mini-gráfico do uso nas últimas horas e avisa quando, no ritmo atual, o limite vai acabar antes de renovar ("Acaba em ~1h 40min"). Codex, Cursor e Copilot já instalados são ligados sozinhos na primeira abertura da 1.2 (ou pelo botão **Detectar IAs instaladas**).
 
 Em **Ajustes > Limites das IAs**, uma tabela escolhe quais IAs ficam ligadas, quais ganham anel na ilha e no Início e **qual limite cada anel acompanha**: automático (o mais apertado), sessão de 5h, semana, um modelo específico... O alfinete na aba IAs faz o mesmo. Codex, Cursor e Copilot começam desligados.
 

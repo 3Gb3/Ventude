@@ -20,6 +20,7 @@ src/ventude/
     codex.py           Codex CLI (~/.codex/auth.json) ou cURL do chatgpt.com: janelas de 5h e semanal
     cursor.py          login do Cursor (state.vscdb, só leitura) ou cookie do cursor.com: uso do plano
     copilot.py         token da extensão do Copilot ou colado: cotas do mês
+    detect.py          quais IAs opcionais já têm login neste PC
     web.py             lê o que é colado do navegador: cookie, cabeçalhos, "Copiar como cURL"
     manager.py         agenda consultas, cache, estado "stale", avisos de 80/95% e renovação
   services/
@@ -28,13 +29,19 @@ src/ventude/
     market.py          Yahoo Finance (chart v8)
     news.py            RSS/Atom
     launcher.py        abrir apps, pastas, arquivos e sites
-    system.py          iniciar com o Windows, atalho global, detecção de tela cheia
+    system.py          iniciar com o Windows, atalho global, tela cheia, teclas de volume
+    timer.py           timer e Pomodoro (QTimer + time.monotonic)
+    shelf.py           estante temporária (itens em memória, imagens soltas em %APPDATA%\Ventude\estante)
+    ocr.py             OCR do Windows (Windows.Media.Ocr) numa thread de trabalho
   ui/
     theme.py           paleta, fonte do sistema e folha de estilo única
     icons.py           ícones SVG de traço (sem fontes de ícones)
     widgets.py         Card, Ring, UsageBar, Sparkline, Switch, CheckCircle, Equalizer...
-    context.py         AppContext: serviços + ajustes vivos + sinais compartilhados
-    island.py          janela da ilha: pílula, painel, animação, arraste, hover, atalho
+    context.py         AppContext: serviços + ajustes vivos + sinais compartilhados + clima central
+    island.py          janela da ilha: pílula (zonas), painel, avisos, animação, arraste, hover, atalho
+    toast.py           avisos na ilha e lembretes da Agenda
+    command.py         barra de comandos
+    capture.py         sobreposição de tela: conta-gotas e seleção para OCR
     tray.py            ícone e menu da bandeja, avisos
     pages/             uma classe por aba, criada só quando a aba é aberta
 ```

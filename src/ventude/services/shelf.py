@@ -63,7 +63,7 @@ class ShelfService(QObject):
         for raw in paths:
             raw = (raw or "").strip()
             if raw.startswith(("http://", "https://")):
-                added += self._add("link", raw, raw.split("//", 1)[-1][:60]) is not None
+                added += self._add("link", raw, link_name(raw)) is not None
                 continue
             path = Path(raw)
             if raw and path.exists():
@@ -114,6 +114,15 @@ class ShelfService(QObject):
                 Path(item.value).unlink(missing_ok=True)
         self.items.clear()
         self.changed.emit()
+
+
+def link_name(url: str) -> str:
+    """'https://github.com/a/b' -> 'github.com · b' (curto para caber no bloco)."""
+    rest = url.split("//", 1)[-1].rstrip("/")
+    host, _, path = rest.partition("/")
+    host = host.removeprefix("www.")
+    tail = path.rsplit("/", 1)[-1] if path else ""
+    return f"{host} · {tail[:30]}" if tail else host
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}

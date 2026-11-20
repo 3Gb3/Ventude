@@ -9,9 +9,23 @@ Ainda não está na `main`: outros ajustes entram nesta branch antes.
 - [x] **Escolher IAs e limites**: tabela em Ajustes com, para cada IA, "Ligada", "Na ilha" (anel na ilha e no Início) e "Anel mostra" (automático, sessão de 5h, semana, modelo...). As seções de cada IA só aparecem quando ela está ligada.
 - [x] Aba IAs em grade (até 3 por linha) e anéis do Início menores quando há mais de 3.
 
+- [x] **Clima central**: um só estado e um só relógio de 15 min para a ilha, o Início e a aba Clima (antes eram três buscas separadas). Cidade estimada pelo IP (ipinfo.io, ipwho.is de reserva) quando nenhuma foi escolhida. Aviso de chuva (≥ 60% na hora atual ou na próxima) na ilha.
+- [x] **Pílula interativa**: clique por área (anéis → IAs, clima → Clima, data → Agenda, hora/música → Início, estante → Estante); com o mouse em cima, anéis e clima abrem direto na aba deles. Sobre a música a abertura espera 0,65 s para dar tempo de: clique do meio ou na capa (tocar/pausar), roda (volume do Windows) e Shift + roda ou roda lateral (trocar de faixa).
+- [x] Anéis em alerta (amarelo/vermelho) mantêm o trilho e um ponto central na cor da IA.
+- [x] Largura da pílula pelo texto de verdade (data, clima, timer, estante, hora, música e anéis), entre 150 e 560 px. Linha fina com o andamento da música.
+- [x] **Avisos na ilha**: a ilha cresce para ~400×62 por alguns segundos com limites das IAs (80%/95% e renovação), música nova e lembretes da Agenda (10 e 5 min antes). Com o painel aberto, em tela cheia ou com o ajuste desligado, os importantes vão para a bandeja.
+- [x] **Limites**: detecção de Codex/Cursor/Copilot instalados (primeira abertura da 1.2 e botão em Ajustes); projeção "acaba em ~X" pelo ritmo desde o início da janela (ou pela última hora, quando a duração da janela não é conhecida); histórico em SQLite (amostra a cada 4 min, 8 dias) com mini-gráfico em cada IA.
+- [x] **Timer e Pomodoro** (25 + 5) no Início e na barra de comandos, com contagem e anel na ilha e pulso + aviso ao terminar.
+- [x] **Barra de comandos**: atalho global (ajustável), Ctrl + K ou começar a digitar; atalhos, abas, `t:` tarefa, `a:` compromisso (hoje/amanhã e horário), `timer 15m`, `pomodoro`, `parar`, `cor`, `ocr`.
+- [x] **Estante** (aba nova, já ligada): arrastar para a ilha mostra duas áreas, "Guardar na estante" e "Adicionar aos atalhos". Arquivos, pastas, imagens (inclusive do navegador), links e textos; arrastar para fora, colar da área de transferência, copiar, abrir. Some ao fechar o Ventude. Contador na ilha.
+- [x] **Conta-gotas** com lupa (HEX na área de transferência) e **captura de texto** por região com o OCR do Windows (Windows.Media.Ocr via WinRT), no topo do painel.
+
 ### A validar no seu PC
 
 - Codex, Cursor e Copilot com as suas contas: os endpoints de uso deles não são APIs públicas documentadas.
+- OCR do Windows (precisa de um idioma de OCR instalado: Configurações > Hora e idioma > Idioma) e conta-gotas com mais de um monitor e escalas diferentes.
+- Arrastar da Estante para o navegador, o e-mail e o Discord; imagens arrastadas do navegador.
+- Volume pela roda do mouse e lembretes da Agenda.
 
 ## Versão 1.1.0
 

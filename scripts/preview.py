@@ -38,9 +38,9 @@ def demo_fetchers() -> dict:
             "claude",
             "ok",
             [
-                Window("session", "Sessão · 5h", 62, now + 2 * H + 14 * 60),
-                Window("weekly", "Semana · todos os modelos", 38, now + 3 * 86400 + 5 * H),
-                Window("weekly_opus", "Semana · Opus", 21, now + 3 * 86400 + 5 * H),
+                Window("session", "Sessão · 5h", 62, now + 2 * H + 14 * 60, period=5 * H),
+                Window("weekly", "Semana · todos os modelos", 38, now + 3 * 86400 + 5 * H, period=7 * 86400),
+                Window("weekly_opus", "Semana · Opus", 21, now + 3 * 86400 + 5 * H, period=7 * 86400),
             ],
             plan="Max 5x",
             source="Claude Code",
@@ -147,6 +147,19 @@ def seed(store: Store) -> None:
     store.add_shortcut("url", "Claude", "https://claude.ai")
     store.add_shortcut("folder", "Downloads", "/tmp")
     store.add_shortcut("url", "Gmail", "https://mail.google.com")
+    import math as _math
+
+    now_ts = time.time()
+    for provider, key, peak in (
+        ("claude", "session", 62),
+        ("antigravity", "model:gemini-3-pro", 24),
+        ("cursor", "plan", 72),
+    ):
+        for step in range(0, 24 * 12):  # uma amostra a cada 5 min nas últimas 24 h
+            ts = now_ts - (24 * 12 - step) * 300
+            phase = (step % 60) / 60  # janela de 5h que renova
+            used = min(100.0, peak * (0.15 + 0.85 * phase) + 4 * _math.sin(step / 7))
+            store.add_sample(provider, key, ts, max(0.0, used))
     import math
 
     plan = [
@@ -432,6 +445,55 @@ def main() -> None:
     media.state_changed.emit(None)
     settle(island, 700)
     shot(island, out / "30-ilha-clima.png", 18)
+    from PySide6.QtCore import QMimeData, QPoint
+
+    from ventude.ui.toast import Toast
+
+    ctx.shelf.add_text("Endereço da reunião: Av. Paulista, 1000")
+    ctx.shelf.add_paths([str(Path.home()), sys.executable, "https://github.com/3Gb3/Ventude_Notch"])
+    ctx.timer.start_pomodoro()
+    media.state = state
+    media.state_changed.emit(state)
+    settle(island, 800)
+    shot(island, out / "32-ilha-timer-estante.png", 18)
+    island.show_toast(
+        Toast(
+            "Claude: 85% usado",
+            "Sessão · 5h chegou a 85%. Renova em 1h 10min.",
+            icon="gauge",
+            color="#E38B67",
+            seconds=30,
+            kind="limits",
+        )
+    )
+    settle(island, 700)
+    shot(island, out / "33-aviso-na-ilha.png", 18)
+    island._cancel_toasts()
+    island.expand("home")
+    settle(island, 700)
+    shot(island, out / "34-inicio-timer.png")
+    island.panel.select("limits")
+    settle(island, 600)
+    shot(island, out / "35-ias-ritmo.png")
+    island.panel.select("shelf")
+    settle(island, 600)
+    shot(island, out / "36-estante.png")
+    island.panel.command.open_bar("t: revisar PR do app")
+    settle(island, 300)
+    shot(island, out / "37-comandos-tarefa.png")
+    island.panel.command.open_bar("git")
+    settle(island, 300)
+    shot(island, out / "38-comandos-atalho.png")
+    island.panel.command.close_bar()
+    hint = island.panel.drop_hint
+    hint.set_zones(["shelf", "shortcuts"])
+    hint.set_active("shelf")
+    hint.show()
+    hint.raise_()
+    settle(island, 200)
+    shot(island, out / "39-soltar-duas-areas.png")
+    hint.hide()
+    _ = (QMimeData, QPoint)
     island.expand("settings")
     settle(island, 400)
     page = island.panel.pages["settings"]

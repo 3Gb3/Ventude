@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from ventude.core.timefmt import ago, duration, resets_text
+from ventude.core.timefmt import ago, duration, resets_text, short_reset
 from ventude.limits.model import Report, Window
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
@@ -179,15 +179,20 @@ class ProviderCard(Card):
         if report.state == "ok":
             history = self.ctx.limits.history(self.provider, window.key, 3600) if not window.period else None
             left = window.exhausts_in(history=history)
-            note = f"ritmo alto: acaba em ~{duration(left)}" if left else ""
+            if left:  # no ritmo atual acaba antes de renovar: o aviso ocupa a linha
+                renew = short_reset(window.resets_at)
+                note = f"Acaba em ~{duration(left)}" + (f" · renova em {renew}" if renew else "")
+                sub = ""
         if window.detail and window.key.startswith(("mode:", "credits")):
             sub = f"{sub} · {window.detail}" if sub else window.detail
         tip = window.detail if window.key.startswith("model:") else ""
+        if note:
+            tip = f"No ritmo atual: {note.lower()}" + (f"\n{tip}" if tip else "")
         row.bar.set_data(
             window.label,
             used,
             theme.usage_color(self.provider, used),
-            sub or "Sem data de renovação",
+            sub or ("" if note else "Sem data de renovação"),
             tip,
             dim=report.state != "ok",
             note=note,
