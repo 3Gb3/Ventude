@@ -68,6 +68,7 @@ from ventude.ui.pages.limits import LimitsPage
 from ventude.ui.pages.market import MarketPage
 from ventude.ui.pages.news import NewsPage
 from ventude.ui.pages.settings import SettingsPage
+from ventude.ui.pages.shelf import ShelfPage
 from ventude.ui.pages.shortcuts import ShortcutsPage
 from ventude.ui.pages.tasks import TasksPage
 from ventude.ui.pages.weather import WeatherPage
@@ -80,6 +81,7 @@ PAGES: dict[str, Callable[[AppContext], Page]] = {
     "home": HomePage,
     "limits": LimitsPage,
     "shortcuts": ShortcutsPage,
+    "shelf": ShelfPage,
     "agenda": AgendaPage,
     "tasks": TasksPage,
     "weather": WeatherPage,
@@ -155,12 +157,25 @@ class Pill(QWidget):
         timer_row.addWidget(self.timer_ring)
         timer_row.addWidget(self.timer_text)
         self.timer_chip.hide()
+        self.shelf_chip = QWidget()
+        shelf_icon = QLabel()
+        shelf_icon.setPixmap(icons.pixmap("inbox", theme.TEXT_2, 14))
+        self.shelf_count = label("", "")
+        self.shelf_count.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 11px; font-weight: 700;")
+        shelf_row = QHBoxLayout(self.shelf_chip)
+        shelf_row.setContentsMargins(0, 0, 0, 0)
+        shelf_row.setSpacing(3)
+        shelf_row.addWidget(shelf_icon)
+        shelf_row.addWidget(self.shelf_count)
+        self.shelf_chip.setToolTip("Itens na estante")
+        self.shelf_chip.hide()
         row.addWidget(self.art)
         row.addWidget(self.date)
         row.addStretch(1)
         first_gap = row.count() - 1
         row.addWidget(self.title, 1)
         row.addWidget(self.eq)
+        row.addWidget(self.shelf_chip)
         row.addWidget(self.timer_chip)
         row.addWidget(self.weather)
         row.addWidget(self.time)
@@ -174,7 +189,16 @@ class Pill(QWidget):
         for ring in self.rings.values():
             ring_row.addWidget(ring)
         row.addWidget(self.ring_box)
-        for widget in (self.art, self.date, self.title, self.eq, self.time, self.weather, self.timer_chip):
+        for widget in (
+            self.art,
+            self.date,
+            self.title,
+            self.eq,
+            self.time,
+            self.weather,
+            self.timer_chip,
+            self.shelf_chip,
+        ):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.media: MediaState | None = None
         self.set_media(None)
@@ -241,6 +265,10 @@ class Pill(QWidget):
                 fill_ring(ring, report, self.ctx.limits.headline(report), compact=True)
         self.ring_box.setVisible(self.visible_rings() > 0)
 
+    def set_shelf(self, count: int) -> None:
+        self.shelf_count.setText(str(count))
+        self.shelf_chip.setVisible(count > 0)
+
     def set_timer(self, state: TimerState | None) -> None:
         """Contagem do timer/Pomodoro ao lado da hora, com anel de progresso."""
         if state is None:
@@ -287,6 +315,8 @@ class Pill(QWidget):
             parts += [22, max(80, min(self._text_width(self.title, title), 250)), 14]
         else:
             parts.append(self._text_width(self.date))
+        if not self.shelf_chip.isHidden():
+            parts.append(14 + 3 + self._text_width(self.shelf_count))
         if not self.timer_chip.isHidden():
             parts.append(15 + 5 + self._text_width(self.timer_text, "00:00"))
         if not self.weather.isHidden():
@@ -313,6 +343,10 @@ class Pill(QWidget):
             return "rings"
         if hit(self.weather):
             return "weather"
+        if hit(self.shelf_chip):
+            return "shelf"
+        if hit(self.timer_chip):
+            return "timer"
         if self.has_media and (hit(self.art) or hit(self.eq)):
             return "media"
         if self.has_media and hit(self.title, 0):
@@ -343,39 +377,79 @@ class Pill(QWidget):
             p.drawLine(QPointF(left, y), QPointF(left + (right - left) * done, y))
 
 
+DROP_ZONES = {
+    "shelf": ("inbox", "Guardar na estante", "Fica na ilha para arrastar para outro lugar"),
+    "shortcuts": ("plus", "Adicionar aos atalhos", "Apps, pastas, arquivos e links fixos"),
+}
+
+
 class DropHint(QWidget):
-    """Moldura que aparece enquanto um arquivo é arrastado sobre a ilha."""
+    """Enquanto algo é arrastado sobre a ilha: uma ou duas áreas para soltar."""
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.zones: list[str] = []
+        self.active = ""
         self.hide()
+
+    def set_zones(self, zones: list[str]) -> None:
+        self.zones = zones
+        self.active = zones[0] if len(zones) == 1 else ""
+        self.update()
+
+    def _rects(self) -> list[QRectF]:
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        if len(self.zones) < 2:
+            return [rect]
+        half = (rect.width() - 10) / 2
+        return [
+            QRectF(rect.left(), rect.top(), half, rect.height()),
+            QRectF(rect.left() + half + 10, rect.top(), half, rect.height()),
+        ]
+
+    def zone_at(self, pos: QPoint) -> str:
+        for zone, rect in zip(self.zones, self._rects(), strict=False):
+            if rect.contains(QPointF(pos)):
+                return zone
+        return self.zones[0] if len(self.zones) == 1 else ""
+
+    def set_active(self, zone: str) -> None:
+        if zone != self.active:
+            self.active = zone
+            self.update()
 
     def paintEvent(self, _event: object) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        p.setBrush(theme.color(theme.BG, 0.72))
-        pen = QPen(theme.color(theme.ACCENT), 1.6, Qt.PenStyle.DashLine)
-        p.setPen(pen)
-        p.drawRoundedRect(rect, theme.ISLAND_RADIUS - 6, theme.ISLAND_RADIUS - 6)
-        icon = icons.pixmap("plus", theme.ACCENT, 34)
-        center = rect.center()
-        p.drawPixmap(int(center.x() - 17), int(center.y() - 46), icon)
-        p.setPen(theme.color(theme.TEXT))
-        p.setFont(theme.font(16, theme.SEMI))
-        p.drawText(
-            QRectF(rect.left(), center.y() - 4, rect.width(), 24),
-            Qt.AlignmentFlag.AlignCenter,
-            "Solte para adicionar aos atalhos",
-        )
-        p.setPen(theme.color(theme.TEXT_2))
-        p.setFont(theme.font(12))
-        p.drawText(
-            QRectF(rect.left(), center.y() + 22, rect.width(), 20),
-            Qt.AlignmentFlag.AlignCenter,
-            "Apps, pastas, arquivos e links",
-        )
+        radius = theme.ISLAND_RADIUS - 6
+        for zone, rect in zip(self.zones, self._rects(), strict=False):
+            active = zone == self.active
+            icon_name, title, text = DROP_ZONES[zone]
+            p.setBrush(theme.color(theme.ACCENT_SOFT if active else theme.BG, 0.92 if active else 0.78))
+            pen = QPen(
+                theme.color(theme.ACCENT, 1.0 if active else 0.55),
+                1.8 if active else 1.4,
+                Qt.PenStyle.DashLine,
+            )
+            p.setPen(pen)
+            p.drawRoundedRect(rect, radius, radius)
+            center = rect.center()
+            p.drawPixmap(
+                int(center.x() - 17), int(center.y() - 46), icons.pixmap(icon_name, theme.ACCENT, 34)
+            )
+            p.setPen(theme.color(theme.TEXT))
+            p.setFont(theme.font(16, theme.SEMI))
+            p.drawText(
+                QRectF(rect.left(), center.y() - 4, rect.width(), 24), Qt.AlignmentFlag.AlignCenter, title
+            )
+            p.setPen(theme.color(theme.TEXT_2))
+            p.setFont(theme.font(12))
+            p.drawText(
+                QRectF(rect.left() + 12, center.y() + 22, rect.width() - 24, 20),
+                Qt.AlignmentFlag.AlignCenter,
+                text,
+            )
 
 
 class Panel(QWidget):
@@ -613,6 +687,7 @@ class Island(QWidget):
         self._weather_done(ctx.forecast)
         ctx.limits.alert.connect(self._limit_alert)
         ctx.timer.changed.connect(self._timer_changed)
+        ctx.shelf.changed.connect(self._shelf_changed)
         ctx.timer.finished.connect(self._timer_finished)
         self.pulse = QVariantAnimation(self)
         self.pulse.setDuration(1800)
@@ -822,9 +897,9 @@ class Island(QWidget):
         """Aba que cada parte da pílula abre. No hover, só anéis e clima (intenção clara)."""
         if not click and not self.ctx.settings.zone_open:
             return None
-        pages = {"rings": "limits", "weather": "weather"}
+        pages = {"rings": "limits", "weather": "weather", "shelf": "shelf"}
         if click:
-            pages |= {"date": "agenda", "time": "home", "title": "home"}
+            pages |= {"date": "agenda", "time": "home", "title": "home", "timer": "home"}
         page = pages.get(zone)
         return page if page and (page == "home" or self.ctx.settings.module_enabled(page)) else None
 
@@ -874,28 +949,43 @@ class Island(QWidget):
             system.volume_step(delta.y() > 0, max(1, abs(delta.y()) // 120))
         event.accept()  # type: ignore[attr-defined]
 
-    # ---------- arrastar e soltar (Atalhos) ----------
+    # ---------- arrastar e soltar (Estante e Atalhos) ----------
+    def _drop_zones(self, event: QDragEnterEvent | QDragMoveEvent | QDropEvent) -> list[str]:
+        mime, settings = event.mimeData(), self.ctx.settings
+        zones = []
+        if settings.module_enabled("shelf") and (mime.hasUrls() or mime.hasImage() or mime.hasText()):
+            zones.append("shelf")
+        if settings.module_enabled("shortcuts") and mime.hasUrls():
+            zones.append("shortcuts")
+        return zones
+
     def _accepts_files(self, event: QDragEnterEvent | QDragMoveEvent | QDropEvent) -> bool:
-        return event.mimeData().hasUrls() and self.ctx.settings.module_enabled("shortcuts")
+        return bool(self._drop_zones(event))
+
+    def _hint_zone(self, event: QDragMoveEvent | QDropEvent) -> str:
+        hint = self.panel.drop_hint
+        return hint.zone_at(hint.mapFrom(self, event.position().toPoint()))
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if not self._accepts_files(event):
+        zones = self._drop_zones(event)
+        if not zones:
             event.ignore()
             return
         event.acceptProposedAction()
         self._drag_files = True
         self.hover_timer.stop()
         self.collapse_timer.stop()
+        target = zones[0] if len(zones) == 1 else self.panel.current
         if not self.expanded:
-            self.expand("shortcuts")
-        elif self.panel.current != "shortcuts":
-            self.panel.select("shortcuts")
+            self.expand(target if target in zones else zones[0])
+        self.panel.drop_hint.set_zones(zones)
         self.panel.drop_hint.show()
         self.panel.drop_hint.raise_()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if self._accepts_files(event):
             event.acceptProposedAction()
+            self.panel.drop_hint.set_active(self._hint_zone(event))
         else:
             event.ignore()
 
@@ -907,16 +997,31 @@ class Island(QWidget):
 
     def dropEvent(self, event: QDropEvent) -> None:
         self._drag_files = False
+        zone = self._hint_zone(event) or self.panel.drop_hint.active
         self.panel.drop_hint.hide()
-        if not self._accepts_files(event):
+        zones = self._drop_zones(event)
+        if not zones:
             event.ignore()
             return
-        paths = [u.toLocalFile() or u.toString() for u in event.mimeData().urls()]
-        page = self.panel.page("shortcuts")
-        if page is not None and paths:
-            self.panel.select("shortcuts")
-            page.add_paths(paths)  # type: ignore[attr-defined]
+        zone = zone if zone in zones else zones[0]
+        mime = event.mimeData()
+        paths = [u.toLocalFile() or u.toString() for u in mime.urls()]
+        if zone == "shelf":
+            shelf = self.ctx.shelf
+            if mime.hasImage() and not any(u.isLocalFile() for u in mime.urls()):
+                shelf.add_image(mime.imageData())
+            elif paths:
+                shelf.add_paths(paths)
+            elif mime.hasText():
+                shelf.add_text(mime.text())
+            self.panel.select("shelf")
             event.acceptProposedAction()
+        else:
+            page = self.panel.page("shortcuts")
+            if page is not None and paths:
+                self.panel.select("shortcuts")
+                page.add_paths(paths)  # type: ignore[attr-defined]
+                event.acceptProposedAction()
         # Depois de soltar, o Windows nem sempre avisa que o mouse saiu: confere sozinho.
         self.collapse_timer.start(max(1500, self.ctx.settings.collapse_delay_ms))
 
@@ -1124,6 +1229,10 @@ class Island(QWidget):
         if self._toast is not None and self._toast.kind == "music" and data:
             self._toast.art = data
             self.toast_view.show_toast(self._toast)
+
+    def _shelf_changed(self) -> None:
+        self.pill.set_shelf(len(self.ctx.shelf.items))
+        self._resize_compact()
 
     # ---------- timer / Pomodoro ----------
     def _timer_changed(self, state: TimerState | None) -> None:

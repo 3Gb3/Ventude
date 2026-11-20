@@ -15,6 +15,7 @@ from ventude.limits.manager import Fetcher, LimitsManager
 from ventude.services.market import MarketService
 from ventude.services.media import MediaService
 from ventude.services.news import NewsService
+from ventude.services.shelf import ShelfService
 from ventude.services.timer import TimerService
 from ventude.services.weather import Forecast, Place, WeatherService
 
@@ -52,6 +53,7 @@ class AppContext(QObject):
         self.limits = LimitsManager(store, tasks, lambda: self.settings, home=home, fetchers=fetchers)
         self.weather_focus = ""  # dia (ISO) que a aba Clima deve abrir nos detalhes
         self.timer = TimerService()
+        self.shelf = ShelfService()
         self.forecast: Forecast | None = None
         self.weather_busy = False
         self._weather_city = self.settings.weather_city_json
@@ -69,7 +71,9 @@ class AppContext(QObject):
         self.weather_timer.start()
         QTimer.singleShot(1200, self.refresh_weather)
         self.reminders.start()
-        if self.settings.layout_version < 4:  # primeira abertura da 1.2: liga as IAs já instaladas
+        if self.settings.layout_version < 4:  # primeira abertura da 1.2
+            modules = self.settings.enabled_modules() | {"shelf"}  # aba nova já ligada
+            self.update_settings(modules=",".join(sorted(modules)))
             self.detect_providers(lambda _found: self.update_settings(layout_version=4))
 
     # ---------- IAs instaladas ----------

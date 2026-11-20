@@ -146,17 +146,63 @@ def _drag_events(paths):
 
 
 def test_drop_on_closed_island_opens_shortcuts(qapp, island, app_ctx, store, tmp_path):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QDropEvent
+
     settle(qapp, 200)
     assert not island.expanded and island.acceptDrops()
-    _mime, enter, drop = _drag_events([str(tmp_path), "https://example.com/x"])
+    mime, enter, _drop = _drag_events([str(tmp_path), "https://example.com/x"])
     island.dragEnterEvent(enter)
-    assert enter.isAccepted() and island.expanded and island.panel.current == "shortcuts"
+    assert enter.isAccepted() and island.expanded
+    hint = island.panel.drop_hint
+    assert hint.zones == ["shelf", "shortcuts"]  # duas áreas: estante e atalhos
     assert island._keep_open()  # não fecha enquanto o arquivo está sendo arrastado
+    settle(qapp, 400)
+    right = hint.mapTo(island, hint._rects()[1].center().toPoint())
+    drop = QDropEvent(
+        QPointF(right),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
     island.dropEvent(drop)
     assert {s.kind for s in store.shortcuts()} == {"folder", "url"}
     page = island.panel.pages["shortcuts"]
-    assert "2 atalhos adicionados" in page.status.text()
+    assert island.panel.current == "shortcuts" and "2 atalhos adicionados" in page.status.text()
     assert not page.grid.acceptDrops()  # a grade não "engole" o arraste: a ilha cuida
+
+
+def test_drop_on_shelf_and_drag_out(qapp, island, app_ctx, tmp_path):
+    from PySide6.QtCore import QMimeData, QPointF, Qt
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    from ventude.ui.pages.shelf import item_mime
+
+    settle(qapp, 200)
+    file = tmp_path / "foto.png"
+    file.write_bytes(b"x")
+    mime, enter, _ = _drag_events([str(file)])
+    island.dragEnterEvent(enter)
+    settle(qapp, 400)
+    hint = island.panel.drop_hint
+    left = hint.mapTo(island, hint._rects()[0].center().toPoint())
+    args = (Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    island.dropEvent(QDropEvent(QPointF(left), *args))
+    assert island.panel.current == "shelf"
+    assert [(i.kind, i.name) for i in app_ctx.shelf.items] == [("image", "foto.png")]
+    text = QMimeData()
+    text.setText("um trecho copiado")
+    island.dragEnterEvent(QDragEnterEvent(QPointF(left), *args[:1], text, *args[2:]))
+    assert island.panel.drop_hint.zones == ["shelf"]  # texto só cabe na estante
+    island.dropEvent(QDropEvent(QPointF(left), args[0], text, *args[2:]))
+    assert app_ctx.shelf.items[0].kind == "text"
+    out = item_mime(app_ctx.shelf.items)
+    assert out.text() == "um trecho copiado" and out.urls()[0].toLocalFile() == str(file)
+    page = island.panel.pages["shelf"]
+    assert page.grid.count() == 2 and page.grid.dragEnabled()
+    app_ctx.shelf.clear()
+    assert page.grid.count() == 0 and page.empty.isVisibleTo(page)
 
 
 def test_drop_ignored_when_shortcuts_tab_is_off(qapp, island, app_ctx, tmp_path):

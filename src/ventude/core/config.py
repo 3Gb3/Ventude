@@ -9,6 +9,7 @@ MODULES: list[tuple[str, str, str]] = [
     ("home", "Início", "home"),
     ("limits", "IAs", "gauge"),
     ("shortcuts", "Atalhos", "apps"),
+    ("shelf", "Estante", "inbox"),
     ("agenda", "Agenda", "calendar"),
     ("tasks", "Tarefas", "check-square"),
     ("weather", "Clima", "sun"),
@@ -17,7 +18,7 @@ MODULES: list[tuple[str, str, str]] = [
     ("settings", "Ajustes", "settings"),
 ]
 ALWAYS_ON = {"home", "settings"}
-DEFAULT_MODULES = "limits,shortcuts,agenda,tasks,weather,market,news"
+DEFAULT_MODULES = "limits,shortcuts,shelf,agenda,tasks,weather,market,news"
 DEFAULT_SYMBOLS = "^BVSP:Ibovespa,BRL=X:Dólar,BTC-USD:Bitcoin,PETR4.SA:Petrobras,VALE3.SA:Vale,AAPL:Apple"
 DEFAULT_NEWS = "G1,BBC Brasil,Tecnoblog"
 ANIMATION_SPEEDS = {"rapida": 170, "normal": 260, "suave": 380}
