@@ -22,6 +22,8 @@ def tmp_home(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata-vazio"))
     # Nunca procura o Claude Code no WSL da máquina que roda os testes.
     monkeypatch.setattr("ventude.limits.claude._wsl_homes", lambda: [])
+    # Nunca depende das animações do Windows da máquina de CI (Windows Server vem com elas desligadas).
+    monkeypatch.setattr("ventude.services.system.client_area_animation", lambda: True)
     return tmp_path
 
 

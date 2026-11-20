@@ -847,6 +847,7 @@ class LauncherWindow(ShellWindow):
             self._content.clearMask()
             self.setWindowOpacity(1.0)
             self.show()
+            self.shown.emit()
             self.raise_()
             self.activateWindow()
             self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
@@ -854,6 +855,7 @@ class LauncherWindow(ShellWindow):
 
         self.setWindowOpacity(0.15)
         self.show()
+        self.shown.emit()
         self.raise_()
         self.activateWindow()
         # Foco no frame 0

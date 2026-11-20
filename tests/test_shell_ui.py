@@ -517,6 +517,9 @@ def test_launcher_home_scopes_all_apps_and_power(qapp, app_ctx, shell, monkeypat
     ln.input.setText("> volume 40")
     ln.eventFilter(ln.input, key(Qt.Key.Key_Return))
     assert ("vol", 0.4) in shell.test_log
+    assert wait_for(qapp, lambda: not ln.isVisible())
+    shell.open_search()
+    assert wait_for(qapp, ln.isVisible)
 
     ln.show_all_apps()
     assert "S" in ln.all_apps.app_list.letters()
@@ -571,8 +574,7 @@ def test_thumbs_echo_pill_quiet_mode_and_v7_migration(qapp, app_ctx, island, she
     app_ctx.update_settings(
         layout_version=6, taskbar_autohide=True, pill_date=False, pill_weather=False
     )
-    app_ctx.start()
-    app_ctx.stop()
+    app_ctx.apply_migrations()
     assert app_ctx.settings.layout_version == 7
     assert app_ctx.settings.dock_mode == "oculta"
     assert app_ctx.settings.pill_date and app_ctx.settings.pill_weather

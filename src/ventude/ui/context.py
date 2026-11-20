@@ -103,33 +103,38 @@ class AppContext(QObject):
         self.weather_timer.timeout.connect(lambda: self.refresh_weather(force=True))
         self.settings_changed.connect(self._weather_settings)
 
+    def apply_migrations(self) -> None:
+        """Aplica migrações de configuração e fixados para a versão atual do layout."""
+        version = self.settings.layout_version
+        if version >= LAYOUT_VERSION:
+            return
+        modules = self.settings.enabled_modules() | {"hardware", "audio"}
+        if version < 4:
+            modules |= {"shelf"}
+        changes: dict[str, object] = {
+            "modules": ",".join(sorted(modules)),
+            "layout_version": LAYOUT_VERSION,
+        }
+        if version < 6:
+            changes.update(replace_taskbar=True, replace_start_menu=True)
+        if version < 7:
+            # 3.0 (Calma): hora/data/clima vivem só na Ilha; Doca centrada com Esquivar (ou Oculta).
+            changes.update(
+                pill_date=True,
+                pill_weather=True,
+                dock_mode="oculta" if self.settings.taskbar_autohide else "esquivar",
+            )
+            migrate_shortcuts_to_start_pins(self.store)
+        self.update_settings(**changes)
+        if version < 4:
+            self.detect_providers()
+
     def start(self) -> None:
         """Serviços que rodam sozinhos (chamado pelo app; os testes não chamam)."""
         self.weather_timer.start()
         QTimer.singleShot(1200, self.refresh_weather)
         self.reminders.start()
-        version = self.settings.layout_version
-        if version < LAYOUT_VERSION:  # primeira abertura da 1.2/2.0: abas novas e Shell já ligados
-            modules = self.settings.enabled_modules() | {"hardware", "audio"}
-            if version < 4:
-                modules |= {"shelf"}
-            changes: dict[str, object] = {
-                "modules": ",".join(sorted(modules)),
-                "layout_version": LAYOUT_VERSION,
-            }
-            if version < 6:
-                changes.update(replace_taskbar=True, replace_start_menu=True)
-            if version < 7:
-                # 3.0 (Calma): hora/data/clima vivem só na Ilha; Doca centrada com Esquivar (ou Oculta).
-                changes.update(
-                    pill_date=True,
-                    pill_weather=True,
-                    dock_mode="oculta" if self.settings.taskbar_autohide else "esquivar",
-                )
-                migrate_shortcuts_to_start_pins(self.store)
-            self.update_settings(**changes)
-            if version < 4:
-                self.detect_providers()
+        self.apply_migrations()
         self.hardware.start()
         self.audio.start()
         self.privacy.start()
