@@ -142,7 +142,7 @@ def test_stamp_version_starts_line_at_pyproject_version():
     spec = importlib.util.spec_from_file_location("stamp_version", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.base_version() == (1, 1, 0)
+    assert module.base_version() == (1, 2, 0)
     assert module.next_version((1, 1, 0), ["v1.0.7", "v1.0.8"]) == "1.1.0"
     assert module.next_version((1, 1, 0), ["v1.0.8", "v1.1.0", "v1.1.1", "v1.1.x"]) == "1.1.2"
     assert module.next_version((1, 2, 0), ["v1.1.9"]) == "1.2.0"

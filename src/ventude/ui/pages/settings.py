@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
 from ventude import __version__
 from ventude.core.config import MODULES, Settings
 from ventude.core.paths import app_data_dir
-from ventude.limits import claude, grok
+from ventude.limits import claude, codex, copilot, cursor, grok
+from ventude.limits.model import PROVIDERS
 from ventude.services import system
 from ventude.services.news import FEEDS
 from ventude.ui import icons, theme
@@ -121,7 +122,7 @@ class SecretField(QWidget):
             text = "Guardado e protegido pelo Windows (DPAPI)."
             if self.ctx.limits.busy(self.provider):
                 text += " Testando a conexão…"
-            elif report.state == "ok" and report.source in ("claude.ai", "grok.com"):
+            elif report.state == "ok" and report.source:
                 text += f" Conectado via {report.source}."
             elif report.state in ("error", "stale") and report.message:
                 text, style = report.message, "Warn"
@@ -143,6 +144,99 @@ class SecretField(QWidget):
         self.ctx.store.set_secret(self.name, "")
         self._sync()
         self.ctx.limits.refresh(self.provider, force=True)
+
+
+AUTO_LABELS = {"antigravity": "Automático (Gemini mais usado)"}
+
+
+class ProviderTable(QWidget):
+    """Quais IAs ficam ligadas, quais têm anel na ilha e qual limite cada anel mostra."""
+
+    def __init__(self, ctx: AppContext) -> None:
+        super().__init__()
+        self.ctx = ctx
+        grid = QGridLayout(self)
+        grid.setContentsMargins(0, 4, 0, 4)
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(8)
+        for column, title in enumerate(("IA", "Ligada", "Na ilha", "Anel mostra")):
+            heading = label(title, "Caption")
+            grid.addWidget(heading, 0, column, Qt.AlignmentFlag.AlignLeft)
+        self.active: dict[str, Switch] = {}
+        self.ring: dict[str, Switch] = {}
+        self.limit: dict[str, QComboBox] = {}
+        for row, provider in enumerate(ctx.limits.providers(), start=1):
+            dot = label()
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet(f"background: {theme.provider_color(provider)}; border-radius: 5px;")
+            name = QWidget()
+            name.setLayout(hbox(dot, label(PROVIDERS.get(provider, provider), ""), None, spacing=8))
+            active, ring = Switch(), Switch()
+            active.setToolTip("Consultar o limite desta IA e mostrar na aba IAs")
+            ring.setToolTip("Mostrar o anel desta IA na ilha fechada e no Início")
+            limit = QComboBox()
+            limit.setCursor(Qt.CursorShape.PointingHandCursor)
+            limit.setMinimumWidth(210)
+            limit.setToolTip("Qual limite o anel acompanha: sessão de 5h, semana, um modelo...")
+            active.toggled.connect(lambda on, p=provider: self._set_active(p, on))
+            ring.toggled.connect(lambda on, p=provider: self._set_ring(p, on))
+            limit.activated.connect(lambda _i, p=provider: self._set_limit(p))
+            grid.addWidget(name, row, 0)
+            grid.addWidget(active, row, 1)
+            grid.addWidget(ring, row, 2)
+            grid.addWidget(limit, row, 3)
+            self.active[provider], self.ring[provider], self.limit[provider] = active, ring, limit
+        grid.setColumnStretch(0, 1)
+        ctx.settings_changed.connect(self.sync)
+        ctx.limits.changed.connect(lambda p: p in self.limit and self._fill_limit(p))
+        self.sync(ctx.settings)
+
+    def sync(self, settings: Settings) -> None:
+        for provider in self.active:
+            on = settings.provider_mode(provider) != "off"
+            for switch, value in (
+                (self.active[provider], on),
+                (self.ring[provider], settings.ring_enabled(provider)),
+            ):
+                switch.blockSignals(True)
+                switch.setChecked(value)
+                switch.blockSignals(False)
+            self.ring[provider].setEnabled(on)
+            self.limit[provider].setEnabled(on)
+            self._fill_limit(provider)
+
+    def _fill_limit(self, provider: str) -> None:
+        box = self.limit[provider]
+        pinned = self.ctx.settings.pinned_limit(provider)
+        report = self.ctx.limits.report(provider)
+        options = [(AUTO_LABELS.get(provider, "Automático (o mais usado)"), "")]
+        options += [(w.label, w.key) for w in report.windows]
+        if pinned and pinned not in {key for _, key in options}:
+            options.append(("Escolhido (sem leitura agora)", pinned))
+        current = [(box.itemText(i), box.itemData(i)) for i in range(box.count())]
+        box.blockSignals(True)
+        if current != options:
+            box.clear()
+            for text, key in options:
+                box.addItem(text, key)
+        box.setCurrentIndex(max(0, next((i for i, (_, k) in enumerate(options) if k == pinned), 0)))
+        box.blockSignals(False)
+
+    def _set_active(self, provider: str, on: bool) -> None:
+        settings = self.ctx.settings
+        changes: dict[str, object] = {f"{provider}_mode": "auto" if on else "off"}
+        rings = [p for p in self.active if settings.ring_enabled(p)]
+        if on and provider not in rings and len(rings) < 4:
+            changes["ring_providers"] = settings.with_ring(provider, True)
+        self.ctx.update_settings(**changes)
+        self.ctx.limits.refresh(provider, force=True)
+
+    def _set_ring(self, provider: str, on: bool) -> None:
+        self.ctx.update_settings(ring_providers=self.ctx.settings.with_ring(provider, on))
+
+    def _set_limit(self, provider: str) -> None:
+        key = self.limit[provider].currentData() or ""
+        self.ctx.update_settings(pinned_limits_json=self.ctx.settings.with_pinned(provider, key))
 
 
 class SettingsPage(Page):
@@ -221,6 +315,14 @@ class SettingsPage(Page):
                 self.media_source,
             )
         )
+        self.weather_pill = self._switch(s.pill_weather, "pill_weather")
+        body.addWidget(
+            setting_row(
+                "Clima na ilha",
+                "Ícone e temperatura de agora na ilha fechada (cidade da aba Clima).",
+                self.weather_pill,
+            )
+        )
         column.addWidget(card)
 
         # ---------- abas ----------
@@ -258,8 +360,21 @@ class SettingsPage(Page):
 
         # ---------- IAs ----------
         card, body = section("Limites das IAs")
+        body.addWidget(
+            label(
+                "Ligue as IAs que você usa, escolha quais ganham anel na ilha e no Início e qual limite "
+                "cada anel acompanha (sessão de 5h, semana, um modelo...). O alfinete na aba IAs faz o "
+                "mesmo.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        self.providers = ProviderTable(ctx)
+        body.addWidget(self.providers)
         self.rings = self._switch(s.pill_rings, "pill_rings")
-        body.addWidget(setting_row("Anéis na ilha", "Mostra o uso de cada IA na ilha fechada.", self.rings))
+        body.addWidget(
+            setting_row("Anéis na ilha", "Liga ou desliga todos os anéis da ilha fechada.", self.rings)
+        )
         self.notify = self._switch(s.limits_notify, "limits_notify")
         body.addWidget(
             setting_row("Avisos", "Notifica ao chegar em 80% e 95% e quando o limite renova.", self.notify)
@@ -269,13 +384,21 @@ class SettingsPage(Page):
             lambda: self._set(limits_interval_min=self.interval.currentData())
         )
         body.addWidget(
-            setting_row("Atualizar a cada", "Claude e Grok. O Gemini é lido a cada 2 min.", self.interval)
+            setting_row("Atualizar a cada", "Todas menos o Gemini, que é lido a cada 2 min.", self.interval)
         )
         column.addWidget(card)
 
-        column.addWidget(self._provider_claude())
-        column.addWidget(self._provider_antigravity())
-        column.addWidget(self._provider_grok())
+        self.mode_combos: dict[str, QComboBox] = {}
+        self.sections: dict[str, Card] = {
+            "claude": self._provider_claude(),
+            "antigravity": self._provider_antigravity(),
+            "grok": self._provider_grok(),
+            "codex": self._provider_codex(),
+            "cursor": self._provider_cursor(),
+            "copilot": self._provider_copilot(),
+        }
+        for card in self.sections.values():
+            column.addWidget(card)
 
         # ---------- sobre ----------
         card, body = section("Ventude")
@@ -296,6 +419,8 @@ class SettingsPage(Page):
         column.addWidget(card)
         column.addStretch(1)
         self._building = False
+        ctx.settings_changed.connect(self._sync_providers)
+        self._sync_providers(ctx.settings)
 
     # ---------- provedores ----------
     def _provider_claude(self) -> Card:
@@ -308,6 +433,7 @@ class SettingsPage(Page):
         )
         mode = combo(CLAUDE_MODES, self.ctx.settings.claude_mode)
         mode.currentIndexChanged.connect(lambda: self._provider_mode("claude", mode.currentData()))
+        self.mode_combos["claude"] = mode
         body.addWidget(setting_row("Fonte", status, mode))
         renew = self._switch(self.ctx.settings.claude_refresh_login, "claude_refresh_login")
         renew.toggled.connect(lambda _c: self.ctx.limits.refresh("claude", force=True))
@@ -340,6 +466,7 @@ class SettingsPage(Page):
         card, body = section("Gemini · Antigravity", theme.provider_color("antigravity"))
         mode = combo(ANTIGRAVITY_MODES, self.ctx.settings.antigravity_mode)
         mode.currentIndexChanged.connect(lambda: self._provider_mode("antigravity", mode.currentData()))
+        self.mode_combos["antigravity"] = mode
         body.addWidget(
             setting_row(
                 "Fonte",
@@ -356,6 +483,7 @@ class SettingsPage(Page):
         status = "Grok CLI encontrado neste PC." if found else "Grok CLI não encontrado neste PC."
         mode = combo(GROK_MODES, self.ctx.settings.grok_mode)
         mode.currentIndexChanged.connect(lambda: self._provider_mode("grok", mode.currentData()))
+        self.mode_combos["grok"] = mode
         body.addWidget(setting_row("Fonte", status, mode))
         body.addWidget(label("grok.com (site, app e bots do Grok)", "Caption"))
         body.addWidget(
@@ -372,6 +500,83 @@ class SettingsPage(Page):
             )
         )
         return card
+
+    def _provider_codex(self) -> Card:
+        card, body = section("Codex · ChatGPT", theme.provider_color("codex"))
+        found = codex.read_login(self.ctx.limits.home) is not None
+        body.addWidget(
+            label(
+                "Login do Codex encontrado neste PC." if found else "Codex não encontrado neste PC.",
+                "Muted",
+            )
+        )
+        body.addWidget(label("chatgpt.com (sem o Codex instalado)", "Caption"))
+        body.addWidget(SecretField(self.ctx, "codex_session", "cURL copiado do chatgpt.com", "codex"))
+        body.addWidget(
+            label(
+                "O Codex usa os limites do seu plano do ChatGPT: a janela de 5h e a semanal. Com o "
+                "Codex logado (comando codex), não precisa de nada. Sem ele: abra chatgpt.com logado, "
+                "tecle F12 > Rede, botão direito numa requisição para chatgpt.com > Copiar > Copiar "
+                "como cURL e cole aqui.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        return card
+
+    def _provider_cursor(self) -> Card:
+        card, body = section("Cursor", theme.provider_color("cursor"))
+        found = any(path.exists() for path in cursor.state_paths(self.ctx.limits.home))
+        body.addWidget(
+            label("Cursor encontrado neste PC." if found else "Cursor não encontrado neste PC.", "Muted")
+        )
+        body.addWidget(label("cursor.com (sem o Cursor instalado)", "Caption"))
+        body.addWidget(
+            SecretField(self.ctx, "cursor_cookie", "WorkosCursorSessionToken=… ou cURL copiado", "cursor")
+        )
+        body.addWidget(
+            label(
+                "O Ventude lê o login do Cursor instalado. Os modelos usados dentro do Cursor (Grok, Claude, "
+                "GPT...) contam neste limite. Sem o Cursor: abra cursor.com/dashboard logado, tecle F12 > "
+                "Aplicativo > Cookies > cursor.com e copie o valor de WorkosCursorSessionToken.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        return card
+
+    def _provider_copilot(self) -> Card:
+        card, body = section("GitHub Copilot", theme.provider_color("copilot"))
+        found = copilot.read_token(self.ctx.limits.home) is not None
+        body.addWidget(
+            label(
+                "Login do Copilot encontrado neste PC." if found else "Copilot não encontrado neste PC.",
+                "Muted",
+            )
+        )
+        body.addWidget(label("Token (sem o Copilot instalado)", "Caption"))
+        body.addWidget(SecretField(self.ctx, "copilot_token", "ghu_… ou gho_…", "copilot"))
+        body.addWidget(
+            label(
+                "O Ventude lê o login da extensão do Copilot (VS Code, Visual Studio, JetBrains) e mostra as "
+                "requisições premium, o chat e o autocompletar do mês.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        return card
+
+    def _sync_providers(self, settings: Settings) -> None:
+        """Seções só das IAs ligadas e combos de fonte iguais à tabela."""
+        for provider, card in self.sections.items():
+            card.setVisible(settings.provider_mode(provider) != "off")
+        for provider, box in self.mode_combos.items():
+            mode = settings.provider_mode(provider)
+            index = box.findData(mode)
+            if index >= 0 and index != box.currentIndex():
+                box.blockSignals(True)
+                box.setCurrentIndex(index)
+                box.blockSignals(False)
 
     # ---------- ações ----------
     def _switch(self, value: bool, field: str) -> Switch:

@@ -27,7 +27,14 @@ UP = "#5FD99B"
 DOWN = "#F27A7A"
 SUN = "#F6C86B"
 SKY = "#8EB8F5"
-PROVIDER_COLORS = {"claude": "#E38B67", "antigravity": "#78A6FF", "grok": "#B49BFF"}
+PROVIDER_COLORS = {
+    "claude": "#E38B67",
+    "antigravity": "#78A6FF",
+    "grok": "#B49BFF",
+    "codex": "#D7DCE3",
+    "cursor": "#F58FB8",
+    "copilot": "#5ED3E6",
+}
 ISLAND_RADIUS = 26
 SEMI = QFont.Weight.DemiBold
 

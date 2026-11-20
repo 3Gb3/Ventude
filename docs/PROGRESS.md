@@ -1,5 +1,18 @@
 # Progresso
 
+## Versão 1.2.0 (em andamento, branch `new_version_1.2`)
+
+Ainda não está na `main`: outros ajustes entram nesta branch antes.
+
+- [x] **Clima na ilha**: ícone e temperatura de agora ao lado da hora (cidade da aba Clima). Ajuste "Clima na ilha" para desligar. Atualiza sozinho a cada 15 min.
+- [x] **Novas IAs**: Codex/ChatGPT (janela de 5h e semanal, pelo login do Codex ou cURL do chatgpt.com), Cursor (uso do plano no ciclo, pelo login do Cursor instalado ou cookie do cursor.com) e GitHub Copilot (requisições premium, chat e autocompletar do mês, pelo login da extensão ou token). Começam desligadas.
+- [x] **Escolher IAs e limites**: tabela em Ajustes com, para cada IA, "Ligada", "Na ilha" (anel na ilha e no Início) e "Anel mostra" (automático, sessão de 5h, semana, modelo...). As seções de cada IA só aparecem quando ela está ligada.
+- [x] Aba IAs em grade (até 3 por linha) e anéis do Início menores quando há mais de 3.
+
+### A validar no seu PC
+
+- Codex, Cursor e Copilot com as suas contas: os endpoints de uso deles não são APIs públicas documentadas.
+
 ## Versão 1.1.0
 
 Ajustes pedidos depois da 1.0 (branch `new_version_1.1`). Ao entrar na `main`, o build publica a **1.1.0**.

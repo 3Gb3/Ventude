@@ -250,3 +250,52 @@ def test_weather_day_details(qapp, island, app_ctx, store):
     rows = [page.rows.itemAt(i).widget() for i in range(page.rows.count())]
     rows[0].clicked.emit(rows[0].iso)
     assert page.day == days[0]["date"]
+
+
+def test_provider_table_and_ring_choice(qapp, island, app_ctx):
+    app_ctx.limits.refresh_all()
+    end = time.monotonic() + 3
+    while any(app_ctx.limits.busy(p) for p in app_ctx.limits.providers()) and time.monotonic() < end:
+        qapp.processEvents()
+    island.expand("settings")
+    settle(qapp, 200)
+    table = island.panel.pages["settings"].providers
+    box = table.limit["claude"]
+    assert [box.itemData(i) for i in range(box.count())] == ["", "session"]
+    box.setCurrentIndex(1)
+    box.activated.emit(1)
+    assert app_ctx.settings.pinned_limit("claude") == "session"
+    assert island.pill.visible_rings() == 3
+    table.ring["grok"].setChecked(False)
+    assert not app_ctx.settings.ring_enabled("grok") and island.pill.visible_rings() == 2
+    home = island.panel.page("home")
+    assert not home.limits.columns["grok"][0].isVisibleTo(home)
+    table.active["antigravity"].setChecked(False)
+    assert app_ctx.settings.antigravity_mode == "off"
+    assert not island.panel.pages["settings"].sections["antigravity"].isVisibleTo(island.panel)
+    table.active["antigravity"].setChecked(True)
+    assert app_ctx.settings.antigravity_mode == "auto" and app_ctx.settings.ring_enabled("antigravity")
+
+
+def test_weather_on_the_pill(qapp, island, app_ctx, store):
+    from ventude.services.weather import Place
+
+    cached = {
+        "place": "Cidade",
+        "temp": 23.4,
+        "feels": 24,
+        "humidity": 60,
+        "wind": 5,
+        "code": 0,
+        "is_day": True,
+    }
+    store.cache_set("wx2:1.000,2.000", {**cached, "days": [], "hours": []}, 3600)
+    settle(qapp, 200)
+    narrow = island.target_rect(False).width()
+    app_ctx.update_settings(weather_city_json=Place("Cidade", "BR", 1.0, 2.0).to_json())
+    settle(qapp, 400)
+    assert not island.pill.weather.isHidden() and island.pill.weather_temp.text() == "23°"
+    assert island.target_rect(False).width() > narrow
+    app_ctx.update_settings(pill_weather=False)
+    settle(qapp, 100)
+    assert island.pill.weather.isHidden()

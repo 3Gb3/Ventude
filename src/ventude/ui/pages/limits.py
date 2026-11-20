@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from ventude.core.timefmt import ago, resets_text
 from ventude.limits.model import Report, Window
@@ -17,6 +17,9 @@ HOW_TO = {
     "(ou use o Claude Code logado).",
     "antigravity": "Deixe o Antigravity aberto e logado. O Ventude lê as cotas direto dele.",
     "grok": "Cole o cURL ou o cookie do grok.com em Ajustes (vale para o site, o app e os bots).",
+    "codex": "Use o Codex logado (comando codex) ou cole o cURL do chatgpt.com em Ajustes.",
+    "cursor": "Abra o Cursor logado neste PC ou cole o cookie do cursor.com em Ajustes.",
+    "copilot": "Entre no Copilot no seu editor ou cole o token em Ajustes.",
 }
 
 
@@ -195,10 +198,10 @@ class LimitsPage(Page):
         refresh.clicked.connect(ctx.limits.refresh_all)
         row.addWidget(refresh)
         self.cards = {p: ProviderCard(ctx, p) for p in ctx.limits.providers()}
-        grid = hbox(spacing=12)
-        for card in self.cards.values():
-            grid.addWidget(card, 1)
-        self.root.addLayout(grid, 1)
+        self.grid = QGridLayout()
+        self.grid.setSpacing(12)
+        self._placed: list[str] = []
+        self.root.addLayout(self.grid, 1)
         self.none = label(
             "Todas as IAs estão desligadas. Ligue as que você usa em Ajustes.", "Muted", wrap=True
         )
@@ -220,12 +223,23 @@ class LimitsPage(Page):
             self.cards[provider].refresh()
 
     def _apply_visibility(self) -> None:
-        shown = 0
-        for provider, card in self.cards.items():
-            visible = self.ctx.settings.provider_mode(provider) != "off"
-            card.setVisible(visible)
-            shown += visible
-        self.none.setVisible(shown == 0)
+        """Até 3 IAs lado a lado; com mais, em duas linhas."""
+        shown = [p for p in self.cards if self.ctx.settings.provider_mode(p) != "off"]
+        if shown != self._placed:
+            for card in self.cards.values():
+                self.grid.removeWidget(card)
+                card.hide()
+            columns = len(shown) if len(shown) <= 3 else (2 if len(shown) == 4 else 3)
+            for index, provider in enumerate(shown):
+                self.grid.addWidget(self.cards[provider], index // columns, index % columns)
+                self.cards[provider].show()
+            for column in range(3):
+                self.grid.setColumnStretch(column, 1 if column < max(1, columns) else 0)
+            rows = (len(shown) + max(1, columns) - 1) // max(1, columns)
+            for row in range(2):
+                self.grid.setRowStretch(row, 1 if row < rows else 0)
+            self._placed = shown
+        self.none.setVisible(not shown)
         minutes = self.ctx.settings.limits_interval_min
         self.subtitle.setText(f"Atualiza sozinho a cada {minutes} min · Gemini a cada 2 min")
 

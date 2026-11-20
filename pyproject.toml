@@ -1,6 +1,6 @@
 [project]
 name = "ventude"
-version = "1.1.0"
+version = "1.2.0"
 description = "Dynamic Island leve para Windows: limites das suas IAs, mídia, clima, agenda e atalhos"
 readme = "README.md"
 requires-python = ">=3.12"

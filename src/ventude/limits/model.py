@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Any
 
 # state: ok | stale (mostrando último valor) | setup (falta configurar) | error | off
-PROVIDERS: dict[str, str] = {"claude": "Claude", "antigravity": "Gemini", "grok": "Grok"}
+PROVIDERS: dict[str, str] = {
+    "claude": "Claude",
+    "antigravity": "Gemini",
+    "grok": "Grok",
+    "codex": "Codex",
+    "cursor": "Cursor",
+    "copilot": "Copilot",
+}
 
 
 @dataclass

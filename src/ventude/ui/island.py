@@ -54,6 +54,7 @@ from ventude.core.config import MODULES, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
 from ventude.services import system
 from ventude.services.media import MediaState
+from ventude.services.weather import Forecast, Place
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
 from ventude.ui.pages.agenda import AgendaPage
@@ -122,14 +123,27 @@ class Pill(QWidget):
         row = QHBoxLayout(self)
         row.setContentsMargins(15, 0, 13, 0)
         row.setSpacing(10)
+        self.weather = QWidget()
+        self.weather_icon = QLabel()
+        self.weather_icon.setFixedSize(16, 16)
+        self.weather_temp = label("", "")
+        self.weather_temp.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 12px; font-weight: 600;")
+        weather_row = QHBoxLayout(self.weather)
+        weather_row.setContentsMargins(0, 0, 0, 0)
+        weather_row.setSpacing(4)
+        weather_row.addWidget(self.weather_icon)
+        weather_row.addWidget(self.weather_temp)
+        self.weather.hide()
         row.addWidget(self.art)
         row.addWidget(self.date)
         row.addStretch(1)
-        self._gaps = (row.count() - 1, row.count() + 3)
+        first_gap = row.count() - 1
         row.addWidget(self.title, 1)
         row.addWidget(self.eq)
+        row.addWidget(self.weather)
         row.addWidget(self.time)
         row.addStretch(1)
+        self._gaps = (first_gap, row.count() - 1)
         self.row = row
         self.ring_box = QWidget()
         ring_row = QHBoxLayout(self.ring_box)
@@ -138,7 +152,7 @@ class Pill(QWidget):
         for ring in self.rings.values():
             ring_row.addWidget(ring)
         row.addWidget(self.ring_box)
-        for widget in (self.art, self.date, self.title, self.eq, self.time):
+        for widget in (self.art, self.date, self.title, self.eq, self.time, self.weather):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.media: MediaState | None = None
         self.set_media(None)
@@ -184,24 +198,42 @@ class Pill(QWidget):
         art = rounded_pixmap(data, 22, 6)
         self.art.setPixmap(art if art else icons.pixmap("music", theme.ACCENT, 16))
 
+    def _ring_shown(self, provider: str) -> bool:
+        settings = self.ctx.settings
+        return (
+            settings.pill_rings
+            and settings.ring_enabled(provider)
+            and self.ctx.limits.report(provider).state != "off"
+        )
+
     def visible_rings(self) -> int:
-        if not self.ctx.settings.pill_rings:
-            return 0
-        return sum(self.ctx.limits.report(p).state != "off" for p in self.rings)
+        return sum(self._ring_shown(p) for p in self.rings)
 
     def refresh_rings(self) -> None:
-        enabled = self.ctx.settings.pill_rings
         for provider, ring in self.rings.items():
-            report = self.ctx.limits.report(provider)
-            ring.setVisible(enabled and report.state != "off")
+            ring.setVisible(self._ring_shown(provider))
             if ring.isVisibleTo(self):
+                report = self.ctx.limits.report(provider)
                 fill_ring(ring, report, self.ctx.limits.headline(report), compact=True)
         self.ring_box.setVisible(self.visible_rings() > 0)
+
+    def set_weather(self, forecast: Forecast | None) -> None:
+        """Clima de agora ao lado da hora (some sem cidade ou com o ajuste desligado)."""
+        if forecast is None or not self.ctx.settings.pill_weather:
+            self.weather.hide()
+            return
+        glyph = forecast.icon
+        color = theme.SUN if glyph in ("sun", "cloud-sun") else theme.SKY
+        self.weather_icon.setPixmap(icons.pixmap(glyph, color, 16))
+        self.weather_temp.setText(f"{forecast.temp:.0f}°")
+        self.weather.setToolTip(f"{forecast.place}: {forecast.temp:.0f}°, {forecast.description}")
+        self.weather.show()
 
     def preferred_width(self) -> int:
         rings = self.visible_rings()
         rings_w = rings * 16 + max(0, rings - 1) * 6 + (14 if rings else 0)
-        return (360 if self.has_media else 170) + rings_w
+        weather_w = 50 if not self.weather.isHidden() else 0
+        return (360 if self.has_media else 170) + rings_w + weather_w
 
 
 class DropHint(QWidget):
@@ -443,6 +475,11 @@ class Island(QWidget):
         self.clock_timer = QTimer(self, interval=1000)
         self.clock_timer.timeout.connect(self._tick)
         self.clock_timer.start()
+        self.weather_timer = QTimer(self, interval=15 * 60_000)
+        self.weather_timer.timeout.connect(self.refresh_weather)
+        self.weather_timer.start()
+        self._weather_key = ""
+        self._weather_busy = False
         self.fullscreen_timer = QTimer(self, interval=1500)
         self.fullscreen_timer.timeout.connect(self._check_fullscreen)
         if system.autostart_supported():
@@ -460,6 +497,32 @@ class Island(QWidget):
         self._tick()
         self.pill.refresh_rings()
         self.setGeometry(self.target_rect(False))
+        QTimer.singleShot(1500, self.refresh_weather)
+
+    # ---------- clima na ilha ----------
+    def refresh_weather(self) -> None:
+        settings = self.ctx.settings
+        place = Place.from_json(settings.weather_city_json)
+        self._weather_key = f"{settings.weather_city_json}|{settings.pill_weather}"
+        if not place or not settings.pill_weather:
+            self._weather_done(None)
+            return
+        if self._weather_busy:
+            return
+        self._weather_busy = True
+        self.ctx.run(
+            lambda: self.ctx.weather.forecast(place),
+            done=self._weather_done,
+            fail=lambda _e: setattr(self, "_weather_busy", False),
+            owner=self,
+        )
+
+    def _weather_done(self, forecast: Forecast | None) -> None:
+        self._weather_busy = False
+        before = self.pill.weather.isHidden()
+        self.pill.set_weather(forecast)
+        if before != self.pill.weather.isHidden():
+            self._resize_compact()
 
     # ---------- geometria ----------
     def _sizes(self, expanded: bool) -> tuple[int, int]:
@@ -810,6 +873,8 @@ class Island(QWidget):
     def _settings_changed(self, settings: Settings) -> None:
         self.panel.rebuild_tabs()
         self.pill.refresh_rings()
+        if f"{settings.weather_city_json}|{settings.pill_weather}" != self._weather_key:
+            self.refresh_weather()
         self._tick()
         self._update_hotkey()
         if not self._dragging and self.anim.state() != QPropertyAnimation.State.Running:

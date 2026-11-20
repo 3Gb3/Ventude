@@ -1,9 +1,9 @@
 # Ventude
 
-Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma pílula discreta, mostra a hora, a música tocando e **quanto ainda resta dos seus limites no Claude, no Gemini (Antigravity) e no Grok**. Passe o mouse para abrir o painel completo.
+Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma pílula discreta, mostra a hora, o clima, a música tocando e **quanto ainda resta dos seus limites no Claude, no Gemini (Antigravity), no Grok, no Codex (ChatGPT), no Cursor e no GitHub Copilot**. Passe o mouse para abrir o painel completo.
 
 <p align="center">
-  <img src="docs/screens/ilha.png" alt="Ilha fechada com data, hora e anéis de uso das IAs" height="60">
+  <img src="docs/screens/ilha.png" alt="Ilha fechada com data, clima, hora e anéis de uso das IAs" height="60">
   <img src="docs/screens/ilha-musica.png" alt="Ilha fechada tocando música" height="60">
   <img src="docs/screens/ilha-pausada.png" alt="Ilha fechada com a música pausada" height="60">
 </p>
@@ -33,10 +33,11 @@ Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma píl
 | **Clima** | Agora e próximos 7 dias, pelo Open-Meteo (sem chave). Clique num dia para ver umidade, chuva, vento, UV, nascer e pôr do sol e o gráfico hora a hora. |
 | **Mercado** | Sua lista de ações, índices, moedas e cripto, com gráfico do mês (Yahoo Finance). |
 | **Notícias** | G1, BBC Brasil e Tecnoblog, com filtro por fonte. |
-| **Ajustes** | Tudo salvo na hora. Desligue as abas que não usa: elas somem e param de rodar. |
+| **Ajustes** | Tudo salvo na hora. Desligue as abas que não usa: elas somem e param de rodar. Escolha quais IAs ficam ligadas, quais têm anel na ilha e qual limite cada anel mostra. |
 
 Também tem:
 
+- Clima de agora (ícone e temperatura) na ilha fechada.
 - Player do Spotify com capa, avanço e controles; pausado, a música continua na ilha. Em **Ajustes > Música** dá para seguir qualquer player do Windows.
 - Abre na hora ao passar o mouse (o tempo é ajustável) e troca de aba com animação.
 - Avisos na bandeja quando uma IA chega a 80% e 95% e quando o limite renova.
@@ -53,7 +54,12 @@ O Ventude lê os limites direto das contas que você já usa. Nada passa por ser
 |----|---------|--------------------------|
 | **Claude** | Usa o login do **Claude Code** (`%USERPROFILE%\.claude\.credentials.json`, ou o do WSL com a distro aberta) para ler a sessão de 5h, a semana e os limites por modelo, os mesmos números do `/usage`. O token dura poucas horas: quando vence, o Ventude renova do mesmo jeito que o Claude Code faz e grava no mesmo arquivo (dá para desligar em Ajustes). | Nada, se você usa o Claude Code logado. Se usa o **Claude Desktop** ou o site, cole a `sessionKey` (ou o "Copiar como cURL") do claude.ai em **Ajustes > Claude**: o app usa a mesma conta, então pegue no navegador logado nela. |
 | **Gemini (Antigravity)** | Conversa com o servidor local do **Antigravity** (127.0.0.1) e lê a cota de cada modelo (Gemini, Claude, GPT e os outros que ele oferecer), agrupados por família. O anel da ilha segue os modelos Gemini. | Deixe o Antigravity aberto e logado. Com ele fechado, a ilha mostra o último valor e já considera as renovações. |
+| **Codex (ChatGPT)** | Usa o login do **Codex** (`%USERPROFILE%\.codex\auth.json`) para ler a janela de 5h e a semanal do seu plano do ChatGPT. | Ligue em **Ajustes > Limites das IAs**. Sem o Codex instalado, cole o "Copiar como cURL" do chatgpt.com. |
+| **Cursor** | Lê o login que o **Cursor** instalado guarda no PC e mostra o uso incluído no plano por ciclo. Os modelos usados dentro do Cursor (Grok, Claude, GPT...) contam aqui. | Ligue em **Ajustes > Limites das IAs**. Sem o Cursor instalado, cole o cookie `WorkosCursorSessionToken` do cursor.com. |
+| **GitHub Copilot** | Lê o login da extensão do **Copilot** (VS Code, Visual Studio, JetBrains) e mostra as requisições premium, o chat e o autocompletar do mês. | Ligue em **Ajustes > Limites das IAs**. Sem a extensão, cole um token `ghu_…`/`gho_…`. |
 | **Grok** | Usa o login do **Grok CLI** (`%USERPROFILE%\.grok\auth.json`) para ler os créditos do ciclo, ou o cookie do **grok.com** para ler as consultas restantes de cada modo (Auto, Rápido, Expert). | Se usa o site, o app ou os bots, cole o "Copiar como cURL" (ou o cookie) do grok.com em **Ajustes > Grok**. O Grok usado dentro do Cursor conta no limite do Cursor, não no da conta Grok. |
+
+Em **Ajustes > Limites das IAs**, uma tabela escolhe quais IAs ficam ligadas, quais ganham anel na ilha e no Início e **qual limite cada anel acompanha**: automático (o mais apertado), sessão de 5h, semana, um modelo específico... O alfinete na aba IAs faz o mesmo. Codex, Cursor e Copilot começam desligados.
 
 O claude.ai e o grok.com ficam atrás do Cloudflare, que barra programas em Python comuns. O Ventude conversa com eles com uma conexão igual à do Chrome (biblioteca `curl_cffi`), e o cartão de cada IA mostra o motivo quando algo é recusado.
 

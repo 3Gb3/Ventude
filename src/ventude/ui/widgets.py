@@ -202,6 +202,12 @@ class Ring(QWidget):
         self._shown = float(value)
         self.update()
 
+    def set_size(self, size: int, thickness: float) -> None:
+        if size != self.width() or thickness != self._thickness:
+            self.setFixedSize(size, size)
+            self._thickness = thickness
+            self.update()
+
     def set_value(
         self, value: float | None, color: str, text: str = "", *, dim: bool = False, animate: bool = True
     ) -> None:

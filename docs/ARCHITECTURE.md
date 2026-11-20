@@ -17,6 +17,9 @@ src/ventude/
     claude.py          Claude Code (OAuth, renova o token vencido, WSL) e claude.ai (sessionKey ou cURL)
     antigravity.py     descoberta do language server local + RPC de cotas
     grok.py            Grok CLI (créditos) e grok.com (consultas por modo, cookie ou cURL)
+    codex.py           Codex CLI (~/.codex/auth.json) ou cURL do chatgpt.com: janelas de 5h e semanal
+    cursor.py          login do Cursor (state.vscdb, só leitura) ou cookie do cursor.com: uso do plano
+    copilot.py         token da extensão do Copilot ou colado: cotas do mês
     web.py             lê o que é colado do navegador: cookie, cabeçalhos, "Copiar como cURL"
     manager.py         agenda consultas, cache, estado "stale", avisos de 80/95% e renovação
   services/
@@ -46,13 +49,13 @@ src/ventude/
 
 Cada provedor é uma função `fetch(FetchContext) -> Report`. O `LimitsManager`:
 
-1. Consulta Claude e Grok a cada N minutos (padrão 5) e o Antigravity a cada 2 min.
+1. Consulta as IAs ligadas a cada N minutos (padrão 5) e o Antigravity a cada 2 min. IAs desligadas não fazem rede.
 2. Em falha passageira, mantém as últimas janelas com `state="stale"` e mostra o motivo.
 3. Guarda o último relatório no cache, então a ilha abre já com os números.
 4. Calcula o uso "efetivo": quando o horário de renovação passa, a janela aparece zerada até a próxima leitura.
 5. Avisa ao cruzar 80% e 95% e quando uma janela que estava acima de 50% renova.
 
-O anel de cada IA mostra a janela fixada pelo alfinete (Ajustes guardam a chave da janela) ou, sem alfinete, a mais apertada. No Antigravity, o automático considera só os modelos Gemini; cada modelo é uma linha, agrupada por família.
+A tabela de Ajustes guarda quais IAs têm anel (`ring_providers`) e qual janela cada anel segue (`pinned_limits_json`, a mesma do alfinete). O anel de cada IA mostra a janela fixada pelo alfinete (Ajustes guardam a chave da janela) ou, sem alfinete, a mais apertada. No Antigravity, o automático considera só os modelos Gemini; cada modelo é uma linha, agrupada por família.
 
 ## Interface
 

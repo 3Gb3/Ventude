@@ -75,6 +75,30 @@ def demo_fetchers() -> dict:
             plan="SuperGrok",
             source="grok.com",
         ),
+        "codex": lambda ctx: Report(
+            "codex",
+            "ok",
+            [
+                Window("session", "Sessão · 5h", 35, now + 3 * H + 10 * 60),
+                Window("weekly", "Semana", 58, now + 4 * 86400),
+            ],
+            plan="Plus",
+            source="Codex CLI",
+        ),
+        "cursor": lambda ctx: Report(
+            "cursor",
+            "ok",
+            [Window("plan", "Plano · ciclo", 72, now + 12 * 86400, "US$ 14,40 de US$ 20,00")],
+            plan="Pro",
+            source="Cursor",
+        ),
+        "copilot": lambda ctx: Report(
+            "copilot",
+            "ok",
+            [Window("premium", "Requisições premium · mês", 41, now + 9 * 86400, "177 de 300 restantes")],
+            plan="Pro",
+            source="GitHub",
+        ),
     }
 
 
@@ -317,7 +341,16 @@ def main() -> None:
     store = Store(app_data_dir() / "ventude.db")
     seed(store)
     city = Place("São Paulo", "Brasil", -23.55, -46.633, "São Paulo")
-    store.save_settings(store.load_settings().copy(weather_city_json=city.to_json()))
+    store.save_settings(
+        store.load_settings().copy(
+            weather_city_json=city.to_json(),
+            codex_mode="auto",
+            cursor_mode="auto",
+            copilot_mode="auto",
+            ring_providers="claude,antigravity,grok,cursor",
+            pinned_limits_json='{"claude": "weekly"}',
+        )
+    )
     media = MediaService()
     ctx = AppContext(store, Tasks(), media=media, fetchers=demo_fetchers())
     island = Island(ctx)
@@ -393,6 +426,18 @@ def main() -> None:
     island.panel.select("limits")
     settle(island, 90)
     shot(island, out / "25-trocando-aba.png")
+    # ---------- telas da versão 1.2 ----------
+    island.collapse()
+    media.state = None
+    media.state_changed.emit(None)
+    settle(island, 700)
+    shot(island, out / "30-ilha-clima.png", 18)
+    island.expand("settings")
+    settle(island, 400)
+    page = island.panel.pages["settings"]
+    area.verticalScrollBar().setValue(page.providers.parentWidget().y() - 40)
+    settle(island, 300)
+    shot(island, out / "31-ajustes-ias.png")
     print(f"Capturas em {out.resolve()}")
 
 

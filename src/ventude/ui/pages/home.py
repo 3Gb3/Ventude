@@ -264,7 +264,7 @@ class LimitsCard(Card):
         self.grid.setVerticalSpacing(1)
         self.body.addStretch(1)
         self.body.addLayout(self.grid)
-        self.empty = label("Nenhuma IA ativa. Ligue em Ajustes.", "Muted", wrap=True)
+        self.empty = label("Nenhuma IA escolhida. Escolha em Ajustes > Limites das IAs.", "Muted", wrap=True)
         self.body.addWidget(self.empty)
         self.body.addStretch(1)
         self.columns: dict[str, tuple[Ring, QLabel, ElidedLabel, ElidedLabel]] = {}
@@ -289,15 +289,21 @@ class LimitsCard(Card):
         self.refresh()
 
     def refresh(self) -> None:
+        settings = self.ctx.settings
+        chosen = [
+            p for p in self.columns if settings.ring_enabled(p) and self.ctx.limits.report(p).state != "off"
+        ]
+        size, thickness = {1: (66, 6), 2: (66, 6), 3: (66, 6), 4: (56, 5.5)}.get(len(chosen), (46, 5))
         visible = 0
         for provider, (ring, name, window, when) in self.columns.items():
             report = self.ctx.limits.report(provider)
-            shown = report.state != "off"
+            shown = provider in chosen
             for widget in (ring, name, window, when):
                 widget.setVisible(shown)
             if not shown:
                 continue
             visible += 1
+            ring.set_size(size, thickness)
             name.setText(report.name)
             head = self.ctx.limits.headline(report)
             fill_ring(ring, report, head, compact=False)

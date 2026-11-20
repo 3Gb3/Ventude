@@ -119,3 +119,16 @@ def _models_in(body: str) -> list[str]:
         return []
     model = data.get("modelName") if isinstance(data, dict) else None
     return [model] if isinstance(model, str) and model else []
+
+
+def jwt_claims(token: str) -> dict:
+    """Lê o conteúdo (payload) de um JWT sem validar a assinatura: só para exp, sub etc."""
+    import base64
+
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload.encode()).decode("utf-8", "replace"))
+    except (IndexError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}

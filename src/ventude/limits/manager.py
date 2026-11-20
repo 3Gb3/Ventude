@@ -15,7 +15,7 @@ from ventude.core.paths import user_home
 from ventude.core.store import Store
 from ventude.core.tasks import Tasks
 from ventude.core.timefmt import resets_text
-from ventude.limits import antigravity, claude, grok
+from ventude.limits import antigravity, claude, codex, copilot, cursor, grok
 from ventude.limits.model import FetchContext, ProviderError, Report, Window
 
 log = logging.getLogger(__name__)
@@ -25,6 +25,9 @@ DEFAULT_FETCHERS: dict[str, Fetcher] = {
     "claude": claude.fetch,
     "antigravity": antigravity.fetch,
     "grok": grok.fetch,
+    "codex": codex.fetch,
+    "cursor": cursor.fetch,
+    "copilot": copilot.fetch,
 }
 LOCAL_INTERVAL = {"antigravity": 120}  # consulta local, barata
 IDLE_LOCAL_INTERVAL = 240  # app local fechado: procura com menos frequência

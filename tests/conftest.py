@@ -16,6 +16,10 @@ def tmp_home(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("GROK_HOME", raising=False)
     monkeypatch.delenv("GROK_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    # Cursor e Copilot procuram o login no AppData: nunca no da máquina que roda os testes.
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata-vazio"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata-vazio"))
     # Nunca procura o Claude Code no WSL da máquina que roda os testes.
     monkeypatch.setattr("ventude.limits.claude._wsl_homes", lambda: [])
     return tmp_path
