@@ -487,3 +487,35 @@ def test_limits_card_shows_pace_and_history(qapp, island, app_ctx, store):
     settle(qapp, 300)
     card = island.panel.pages["limits"].cards["claude"]
     assert card.spark.isVisibleTo(card)
+
+
+def test_command_bar_actions(qapp, island, app_ctx, store):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+
+    store.add_shortcut("url", "GitHub", "https://github.com")
+    island.expand()
+    settle(qapp, 300)
+    bar = island.panel.command
+    island.keyPressEvent(
+        QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_K, Qt.KeyboardModifier.ControlModifier)
+    )
+    assert bar.isVisible()
+    titles = [c.title for c in bar.commands("git")]
+    assert "GitHub" in titles
+    assert [c.title for c in bar.commands("clima")] == ["Abrir Clima"]
+    bar.commands("t: revisar PR")[0].run()
+    assert any(i.text == "revisar PR" for i in store.items(store.lists()[0].id))
+    bar.commands("a: call 15h")[0].run()
+    assert [(e.title, e.start.hour) for e in store.events_on(date.today())] == [("call", 15)]
+    bar.commands("timer 10m")[0].run()
+    assert app_ctx.timer.state is not None and app_ctx.timer.state.total == 600
+    assert not island.pill.timer_chip.isHidden()
+    app_ctx.timer.stop()
+    bar.close_bar()
+    island.keyPressEvent(
+        QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_G, Qt.KeyboardModifier.NoModifier, "g")
+    )
+    assert bar.isVisible() and bar.input.text() == "g" and island._keep_open()
+    island.collapse()
+    assert not bar.isVisible()

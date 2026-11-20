@@ -267,6 +267,15 @@ class SettingsPage(Page):
                 f"Atalho {system.HOTKEY_LABEL}", "Abre e fecha o painel de qualquer lugar.", self.hotkey
             )
         )
+        self.hotkey_command = self._switch(s.hotkey_command, "hotkey_command")
+        body.addWidget(
+            setting_row(
+                "Atalho abre a barra de comandos",
+                "Busque atalhos e crie tarefas (t: …), compromissos (a: … 15h) e timers (timer 15m). "
+                "Com o painel aberto: Ctrl + K ou comece a digitar.",
+                self.hotkey_command,
+            )
+        )
         self.hover = self._switch(s.hover_open, "hover_open")
         body.addWidget(
             setting_row("Abrir ao passar o mouse", "Desligado: abre só com clique ou atalho.", self.hover)

@@ -20,6 +20,7 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QVariantAnimation,
 )
 from PySide6.QtGui import (
     QColor,
@@ -55,8 +56,10 @@ from ventude.core.config import MODULES, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
 from ventude.services import system
 from ventude.services.media import MediaState
+from ventude.services.timer import TimerState, countdown, finished_text
 from ventude.services.weather import Forecast
 from ventude.ui import icons, theme
+from ventude.ui.command import CommandBar
 from ventude.ui.context import AppContext
 from ventude.ui.pages.agenda import AgendaPage
 from ventude.ui.pages.base import Page
@@ -142,12 +145,23 @@ class Pill(QWidget):
         weather_row.addWidget(self.weather_temp)
         weather_row.addWidget(self.weather_rain)
         self.weather.hide()
+        self.timer_chip = QWidget()
+        self.timer_ring = Ring(15, 2.4)
+        self.timer_text = label("", "")
+        self.timer_text.setStyleSheet("font-size: 12px; font-weight: 700;")
+        timer_row = QHBoxLayout(self.timer_chip)
+        timer_row.setContentsMargins(0, 0, 0, 0)
+        timer_row.setSpacing(5)
+        timer_row.addWidget(self.timer_ring)
+        timer_row.addWidget(self.timer_text)
+        self.timer_chip.hide()
         row.addWidget(self.art)
         row.addWidget(self.date)
         row.addStretch(1)
         first_gap = row.count() - 1
         row.addWidget(self.title, 1)
         row.addWidget(self.eq)
+        row.addWidget(self.timer_chip)
         row.addWidget(self.weather)
         row.addWidget(self.time)
         row.addStretch(1)
@@ -160,7 +174,7 @@ class Pill(QWidget):
         for ring in self.rings.values():
             ring_row.addWidget(ring)
         row.addWidget(self.ring_box)
-        for widget in (self.art, self.date, self.title, self.eq, self.time, self.weather):
+        for widget in (self.art, self.date, self.title, self.eq, self.time, self.weather, self.timer_chip):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.media: MediaState | None = None
         self.set_media(None)
@@ -227,6 +241,20 @@ class Pill(QWidget):
                 fill_ring(ring, report, self.ctx.limits.headline(report), compact=True)
         self.ring_box.setVisible(self.visible_rings() > 0)
 
+    def set_timer(self, state: TimerState | None) -> None:
+        """Contagem do timer/Pomodoro ao lado da hora, com anel de progresso."""
+        if state is None:
+            self.timer_chip.hide()
+            return
+        color = theme.SKY if state.kind == "break" else theme.ACCENT
+        self.timer_ring.set_value(state.progress(), color, dim=not state.running, animate=False)
+        self.timer_text.setText(countdown(state.left()))
+        self.timer_text.setStyleSheet(
+            f"font-size: 12px; font-weight: 700; color: {color if state.running else theme.TEXT_2};"
+        )
+        self.timer_chip.setToolTip(f"{state.label}" + ("" if state.running else " (pausado)"))
+        self.timer_chip.show()
+
     def set_weather(self, forecast: Forecast | None) -> None:
         """Clima de agora ao lado da hora (some sem cidade ou com o ajuste desligado)."""
         if forecast is None or not self.ctx.settings.pill_weather:
@@ -259,6 +287,8 @@ class Pill(QWidget):
             parts += [22, max(80, min(self._text_width(self.title, title), 250)), 14]
         else:
             parts.append(self._text_width(self.date))
+        if not self.timer_chip.isHidden():
+            parts.append(15 + 5 + self._text_width(self.timer_text, "00:00"))
         if not self.weather.isHidden():
             width = 16 + 4 + self._text_width(self.weather_temp)
             if not self.weather_rain.isHidden():
@@ -386,6 +416,8 @@ class Panel(QWidget):
         self.current = "home"
         self._transition: tuple[QParallelAnimationGroup, QWidget] | None = None
         self.drop_hint = DropHint(self)
+        self.command = CommandBar(ctx, self)
+        self.command.navigate.connect(self.select)
         self.rebuild_tabs()
 
     def _pin_changed(self, pinned: bool) -> None:
@@ -580,6 +612,13 @@ class Island(QWidget):
         ctx.weather_changed.connect(self._weather_done)
         self._weather_done(ctx.forecast)
         ctx.limits.alert.connect(self._limit_alert)
+        ctx.timer.changed.connect(self._timer_changed)
+        ctx.timer.finished.connect(self._timer_finished)
+        self.pulse = QVariantAnimation(self)
+        self.pulse.setDuration(1800)
+        self.pulse.setStartValue(0.0)
+        self.pulse.setEndValue(1.0)
+        self.pulse.valueChanged.connect(lambda _v: self.update())
         ctx.reminders.due.connect(self._reminder)
         ctx.media.thumbnail_changed.connect(self._toast_art)
 
@@ -691,6 +730,7 @@ class Island(QWidget):
             return
         self.expanded = False
         self._collapsed_at = time.time()
+        self.panel.command.close_bar()
         self.panel.pin.setChecked(False)
         self.panel.hide()
         self.pill.hide()
@@ -741,6 +781,8 @@ class Island(QWidget):
 
     def _keep_open(self) -> bool:
         if self.panel.pin.isChecked() or self._holds > 0 or self._dragging or self._drag_files:
+            return True
+        if self.panel.command.isVisible():
             return True
         if QApplication.activePopupWidget() or QApplication.activeModalWidget():
             return True
@@ -881,11 +923,23 @@ class Island(QWidget):
     def changeEvent(self, event: QEvent) -> None:
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow() and self.expanded:
+            self.panel.command.close_bar()  # clicou fora: a barra de comandos some
             self.collapse_timer.start(250)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.collapse()
+            return
+        ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if self.expanded and ctrl and event.key() == Qt.Key.Key_K:
+            self.panel.command.open_bar()
+            return
+        typed = event.text()
+        plain = not (
+            event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
+        )
+        if self.expanded and plain and typed and typed.isprintable() and not typed.isspace():
+            self.panel.command.open_bar(typed)  # começou a digitar: vira busca
             return
         if (
             event.modifiers() & Qt.KeyboardModifier.ControlModifier
@@ -976,6 +1030,13 @@ class Island(QWidget):
         p.fillPath(path, sheen)
         p.setPen(QPen(QColor(255, 255, 255, 20), 1))
         p.drawPath(path)
+        if self.pulse.state() == QVariantAnimation.State.Running:
+            # três pulsos de brilho na borda quando o timer termina
+            import math
+
+            glow = abs(math.sin(float(self.pulse.currentValue()) * math.pi * 3))
+            p.setPen(QPen(theme.color(theme.ACCENT, 0.85 * glow), 2.2))
+            p.drawPath(path)
 
     def closeEvent(self, event: QEvent) -> None:
         self.hide()
@@ -987,6 +1048,8 @@ class Island(QWidget):
             self.panel.refresh_clock()
         else:
             self.pill.refresh_clock()
+            if self.ctx.timer.state is not None:
+                self.pill.set_timer(self.ctx.timer.state)
 
     def _resize_compact(self) -> None:
         if not self.expanded and not self._dragging:
@@ -1062,6 +1125,20 @@ class Island(QWidget):
             self._toast.art = data
             self.toast_view.show_toast(self._toast)
 
+    # ---------- timer / Pomodoro ----------
+    def _timer_changed(self, state: TimerState | None) -> None:
+        before = self.pill.timer_chip.isHidden()
+        self.pill.set_timer(state)
+        if before != self.pill.timer_chip.isHidden():
+            self._resize_compact()
+
+    def _timer_finished(self, state: TimerState) -> None:
+        title, text = finished_text(state, self.ctx.timer.pomodoro)
+        self.show_toast(Toast(title, text, icon="clock", color=theme.ACCENT, seconds=6, kind="timer"))
+        self.pulse.stop()
+        self.pulse.start()  # a ilha pulsa ao terminar
+        QApplication.beep()
+
     def _limit_alert(self, provider: str, title: str, message: str) -> None:
         color = theme.provider_color(provider)
         self.show_toast(Toast(title, message, icon="gauge", color=color, seconds=5, kind="limits"))
@@ -1116,7 +1193,10 @@ class Island(QWidget):
 
     def nativeEvent(self, event_type: object, message: object) -> tuple[bool, int]:  # noqa: N802
         if self._hotkey and system.is_hotkey_message(message):
+            opening = not self.expanded
             self.toggle()
+            if opening and self.expanded and self.ctx.settings.hotkey_command:
+                self.panel.command.open_bar()
             return True, 0
         return False, 0
 

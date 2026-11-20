@@ -6,7 +6,16 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QMouseEvent, QPainter
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QLineEdit, QSlider, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ventude.core.timefmt import (
     WEEKDAYS_LETTER,
@@ -19,6 +28,7 @@ from ventude.core.timefmt import (
 )
 from ventude.limits.model import Report, Window
 from ventude.services.media import MediaState, format_time
+from ventude.services.timer import countdown
 from ventude.services.weather import Forecast, Place, icon_for
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
@@ -110,6 +120,8 @@ class ClockCard(Card):
         self.body.addWidget(self.weekday)
         self.body.addWidget(self.time)
         self.body.addWidget(self.date)
+        self.body.addSpacing(6)
+        self.body.addWidget(self._timer_row())
         self.body.addStretch(1)
         self.body.addWidget(self.week)
         self.body.addSpacing(6)
@@ -119,7 +131,64 @@ class ClockCard(Card):
         ctx.data_changed.connect(lambda kind: kind == "events" and self.refresh_event())
         self._day: date | None = None
 
+    # ---------- timer / Pomodoro ----------
+    def _timer_row(self) -> QWidget:
+        holder = QWidget()
+        self.timer_idle = QWidget()
+        idle = hbox(icon_label("clock", theme.MUTED, 14), spacing=4)
+        for text, tip, slot in (
+            ("5", "Timer de 5 min", lambda: self.ctx.timer.start(5 * 60)),
+            ("15", "Timer de 15 min", lambda: self.ctx.timer.start(15 * 60)),
+            ("25", "Timer de 25 min", lambda: self.ctx.timer.start(25 * 60)),
+            ("Foco", "Pomodoro: 25 min de foco + 5 de pausa", self.ctx.timer.start_pomodoro),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("Chip")
+            button.setToolTip(tip)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedHeight(24)
+            button.setStyleSheet("padding: 2px 9px; font-size: 11px;")
+            button.clicked.connect(slot)
+            idle.addWidget(button)
+        idle.addStretch(1)
+        self.timer_idle.setLayout(idle)
+        self.timer_live = QWidget()
+        self.timer_label = label("", "")
+        self.timer_label.setStyleSheet(f"color: {theme.ACCENT}; font-size: 13px; font-weight: 700;")
+        self.timer_pause = IconButton("pause", "Pausar", 26, 13)
+        self.timer_pause.clicked.connect(self.ctx.timer.toggle_pause)
+        stop = IconButton("close", "Parar", 26, 13)
+        stop.clicked.connect(self.ctx.timer.stop)
+        self.timer_live.setLayout(
+            hbox(
+                icon_label("clock", theme.ACCENT, 14),
+                self.timer_label,
+                None,
+                self.timer_pause,
+                stop,
+                spacing=6,
+            )
+        )
+        holder.setLayout(vbox(self.timer_idle, self.timer_live, spacing=0))
+        self.ctx.timer.changed.connect(self._timer_changed)
+        self._timer_changed(self.ctx.timer.state)
+        return holder
+
+    def _timer_changed(self, state: object) -> None:
+        self.timer_idle.setVisible(state is None)
+        self.timer_live.setVisible(state is not None)
+        self._timer_text()
+
+    def _timer_text(self) -> None:
+        state = self.ctx.timer.state
+        if state is None:
+            return
+        self.timer_label.setText(f"{state.label} · {countdown(state.left())}")
+        self.timer_pause.set_icon("pause" if state.running else "play")
+        self.timer_pause.setToolTip("Pausar" if state.running else "Continuar")
+
     def tick(self) -> None:
+        self._timer_text()
         now = datetime.now()
         self.time.setText(clock(now, self.ctx.settings.clock_24h))
         if self._day != now.date():

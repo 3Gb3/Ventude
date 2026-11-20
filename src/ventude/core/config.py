@@ -57,6 +57,7 @@ class Settings:
     island_toasts: bool = True  # avisos na própria ilha (senão, na bandeja)
     toast_music: bool = True  # mostra a música nova quando a faixa troca com a ilha fechada
     agenda_reminders: bool = True  # lembra 10 e 5 min antes dos compromissos com horário
+    hotkey_command: bool = True  # o atalho global abre a barra de comandos
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3

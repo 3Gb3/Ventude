@@ -15,6 +15,7 @@ from ventude.limits.manager import Fetcher, LimitsManager
 from ventude.services.market import MarketService
 from ventude.services.media import MediaService
 from ventude.services.news import NewsService
+from ventude.services.timer import TimerService
 from ventude.services.weather import Forecast, Place, WeatherService
 
 WEATHER_EVERY = 15 * 60_000
@@ -50,6 +51,7 @@ class AppContext(QObject):
         self.news = NewsService(store)
         self.limits = LimitsManager(store, tasks, lambda: self.settings, home=home, fetchers=fetchers)
         self.weather_focus = ""  # dia (ISO) que a aba Clima deve abrir nos detalhes
+        self.timer = TimerService()
         self.forecast: Forecast | None = None
         self.weather_busy = False
         self._weather_city = self.settings.weather_city_json
