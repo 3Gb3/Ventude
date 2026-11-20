@@ -49,7 +49,7 @@ class Tray(QSystemTrayIcon):
         self._menu = menu
         self.setContextMenu(menu)
         self.activated.connect(self._activated)
-        ctx.limits.alert.connect(self._alert)
+        ctx.tray_message.connect(self._alert)
         ctx.limits.changed.connect(lambda _p: self._tooltip())
         self._tooltip()
 

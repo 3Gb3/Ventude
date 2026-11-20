@@ -27,6 +27,7 @@ class AppContext(QObject):
     hold_open = Signal(bool)  # diálogos nativos: não recolher a ilha
     quit_requested = Signal()
     reset_position_requested = Signal()
+    tray_message = Signal(str, str)  # aviso que não coube na ilha vai para a bandeja
     weather_changed = Signal(object)  # Forecast | None: ilha, Início e Clima juntos
     weather_failed = Signal(str)
 
@@ -54,6 +55,9 @@ class AppContext(QObject):
         self._weather_city = self.settings.weather_city_json
         self._weather_again = False
         self._located = False
+        from ventude.ui.toast import Reminders
+
+        self.reminders = Reminders(store)
         self.weather_timer = QTimer(self, interval=WEATHER_EVERY)
         self.weather_timer.timeout.connect(lambda: self.refresh_weather(force=True))
         self.settings_changed.connect(self._weather_settings)
@@ -62,6 +66,7 @@ class AppContext(QObject):
         """Serviços que rodam sozinhos (chamado pelo app; os testes não chamam)."""
         self.weather_timer.start()
         QTimer.singleShot(1200, self.refresh_weather)
+        self.reminders.start()
 
     # ---------- clima (um só lugar para a ilha, o Início e a aba Clima) ----------
     def refresh_weather(self, force: bool = False) -> None:

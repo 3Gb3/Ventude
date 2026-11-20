@@ -38,7 +38,7 @@ THRESHOLDS = (80, 95)
 class LimitsManager(QObject):
     changed = Signal(str)
     ticked = Signal()
-    alert = Signal(str, str)
+    alert = Signal(str, str, str)  # provedor, título, mensagem
 
     def __init__(
         self,
@@ -192,9 +192,9 @@ class LimitsManager(QObject):
         self.changed.emit(provider)
 
     # ---------- avisos ----------
-    def _notify(self, title: str, message: str) -> None:
+    def _notify(self, provider: str, title: str, message: str) -> None:
         if self.settings().limits_notify:
-            self.alert.emit(title, message)
+            self.alert.emit(provider, title, message)
 
     def _threshold_alerts(self, old: Report | None, new: Report) -> None:
         if not old or not old.windows:
@@ -210,6 +210,7 @@ class LimitsManager(QObject):
             if crossed:
                 when = resets_text(window.resets_at)
                 self._notify(
+                    new.provider,
                     f"{new.name}: {now_used:.0f}% usado",
                     f"{window.label} chegou a {now_used:.0f}%." + (f" {when}." if when else ""),
                 )
@@ -226,7 +227,9 @@ class LimitsManager(QObject):
             self._notified.add(key)
             renewed = True
             if (window.used or 0) >= 50:
-                self._notify(f"{report.name}: limite renovado", f"{window.label} está livre de novo.")
+                self._notify(
+                    provider, f"{report.name}: limite renovado", f"{window.label} está livre de novo."
+                )
         if renewed:
             self.changed.emit(provider)
             self.refresh(provider, force=True)

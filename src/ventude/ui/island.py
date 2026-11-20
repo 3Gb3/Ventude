@@ -68,6 +68,7 @@ from ventude.ui.pages.settings import SettingsPage
 from ventude.ui.pages.shortcuts import ShortcutsPage
 from ventude.ui.pages.tasks import TasksPage
 from ventude.ui.pages.weather import WeatherPage
+from ventude.ui.toast import TOAST_HEIGHT, TOAST_WIDTH, Toast, ToastView, event_toast
 from ventude.ui.widgets import ElidedLabel, Equalizer, IconButton, Ring, label, rounded_pixmap
 
 log = logging.getLogger(__name__)
@@ -541,6 +542,12 @@ class Island(QWidget):
         self.pill = Pill(ctx, self)
         self.panel = Panel(ctx, self)
         self.panel.hide()
+        self.toast_view = ToastView(self)
+        self._toast: Toast | None = None
+        self._toasts: list[Toast] = []
+        self._last_track: tuple[str, str] | None = None
+        self.toast_timer = QTimer(self, singleShot=True)
+        self.toast_timer.timeout.connect(self._end_toast)
         self.panel.close_btn.clicked.connect(self.collapse)
         self.anim = QPropertyAnimation(self, b"geometry", self)
         self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -572,6 +579,9 @@ class Island(QWidget):
         self.setGeometry(self.target_rect(False))
         ctx.weather_changed.connect(self._weather_done)
         self._weather_done(ctx.forecast)
+        ctx.limits.alert.connect(self._limit_alert)
+        ctx.reminders.due.connect(self._reminder)
+        ctx.media.thumbnail_changed.connect(self._toast_art)
 
     # ---------- clima na ilha ----------
     def _weather_done(self, forecast: Forecast | None) -> None:
@@ -584,6 +594,8 @@ class Island(QWidget):
     def _sizes(self, expanded: bool) -> tuple[int, int]:
         if expanded:
             return EXPANDED.width(), EXPANDED.height()
+        if self._toast is not None:
+            return TOAST_WIDTH, TOAST_HEIGHT
         return self.pill.preferred_width(), COMPACT_HEIGHT
 
     def _anchor(self) -> tuple[QRect, QPoint]:
@@ -624,6 +636,7 @@ class Island(QWidget):
     def resizeEvent(self, event: object) -> None:
         super().resizeEvent(event)
         self.pill.setGeometry(self.rect())
+        self.toast_view.setGeometry(self.rect())
         self._layout_panel()
 
     def moveEvent(self, event: object) -> None:
@@ -664,6 +677,7 @@ class Island(QWidget):
             self.panel.select("home")
         if self.expanded:
             return
+        self._cancel_toasts()
         self.expanded = True
         self.pill.hide()
         self.panel.refresh_clock()
@@ -702,7 +716,12 @@ class Island(QWidget):
         if self.expanded:
             if not self.panel.isVisible():
                 self._fade_in(self.panel)
+        elif self._toast is not None:
+            self.pill.hide()
+            if not self.toast_view.isVisible():
+                self._fade_in(self.toast_view, 160)
         else:
+            self.toast_view.hide()
             self.pill.show()
         self.update()
 
@@ -921,6 +940,9 @@ class Island(QWidget):
             self.unsetCursor()
             self._save_position()
             self.reposition()
+        elif not self.expanded and self._toast is not None:
+            kind = self._toast.kind
+            self.expand({"limits": "limits", "agenda": "agenda"}.get(kind, "home"))
         elif not self.expanded:
             zone = self.pill.zone_at(event.position().toPoint())
             if zone == "media":  # capa ou equalizador: tocar/pausar
@@ -976,6 +998,77 @@ class Island(QWidget):
         self.pill.set_media(state)
         self.pill.update()
         self._resize_compact()
+        track = (state.title, state.artist) if state else None
+        if track and track != self._last_track and self._last_track is not None and state.is_playing:
+            if self.ctx.settings.toast_music:
+                art = self.ctx.media.thumbnail
+                self.show_toast(
+                    Toast(state.title, state.artist, icon="music", art=art, seconds=3, kind="music")
+                )
+        if track:
+            self._last_track = track
+
+    # ---------- avisos na ilha ----------
+    def show_toast(self, toast: Toast) -> None:
+        """A ilha cresce um pouco com o aviso e volta a ser pílula sozinha."""
+        can_show = (
+            self.ctx.settings.island_toasts
+            and self.isVisible()
+            and not self._auto_hidden
+            and not self.expanded
+            and not self._dragging
+        )
+        if not can_show:
+            if toast.kind in ("limits", "agenda", "timer"):
+                self.ctx.tray_message.emit(toast.title, toast.text)
+            return
+        if toast.kind == "music":  # só a música mais recente importa
+            self._toasts = [t for t in self._toasts if t.kind != "music"]
+            if self._toast is not None and self._toast.kind == "music":
+                self._toast = toast
+                self.toast_view.show_toast(toast)
+                self.toast_timer.start(int(toast.seconds * 1000))
+                return
+        self._toasts.append(toast)
+        if self._toast is None:
+            self._next_toast()
+
+    def _next_toast(self) -> None:
+        if self._toast is not None or not self._toasts or self.expanded:
+            return
+        self._toast = self._toasts.pop(0)
+        self.toast_view.show_toast(self._toast)
+        self.toast_timer.start(int(self._toast.seconds * 1000))
+        self._animate(self.target_rect(False))
+
+    def _end_toast(self) -> None:
+        if self._toast is None:
+            return
+        self._toast = None
+        self.toast_view.hide()
+        if not self.expanded:
+            self._animate(self.target_rect(False))
+        if self._toasts:
+            QTimer.singleShot(350, self._next_toast)
+
+    def _cancel_toasts(self) -> None:
+        self.toast_timer.stop()
+        self._toasts.clear()
+        self._toast = None
+        self.toast_view.hide()
+
+    def _toast_art(self, data: bytes) -> None:
+        if self._toast is not None and self._toast.kind == "music" and data:
+            self._toast.art = data
+            self.toast_view.show_toast(self._toast)
+
+    def _limit_alert(self, provider: str, title: str, message: str) -> None:
+        color = theme.provider_color(provider)
+        self.show_toast(Toast(title, message, icon="gauge", color=color, seconds=5, kind="limits"))
+
+    def _reminder(self, event: object, minutes: int) -> None:
+        if self.ctx.settings.agenda_reminders:
+            self.show_toast(event_toast(event, minutes))  # type: ignore[arg-type]
 
     def _rings_changed(self) -> None:
         before = self.pill.visible_rings()

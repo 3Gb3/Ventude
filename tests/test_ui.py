@@ -402,3 +402,54 @@ def test_pill_width_follows_text(qapp, island, app_ctx):
     )
     wide = island.pill.preferred_width()
     assert 150 <= narrow < wide <= 560
+
+
+def test_island_toast_grows_and_returns(qapp, island, app_ctx):
+    from ventude.ui.toast import TOAST_HEIGHT, Toast
+
+    settle(qapp, 300)
+    island.show_toast(Toast("Claude: 85% usado", "Sessão · 5h chegou a 85%.", kind="limits", seconds=0.3))
+    assert island.target_rect(False).height() == TOAST_HEIGHT
+    settle(qapp, 250)
+    assert island.toast_view.isVisible() and not island.pill.isVisible()
+    assert island.toast_view.title.full_text() == "Claude: 85% usado"
+    settle(qapp, 600)
+    assert island._toast is None and island.pill.isVisible()
+    tray = []
+    app_ctx.tray_message.connect(lambda t, m: tray.append(t))
+    island.expand()
+    island.show_toast(Toast("Lembrete", kind="agenda"))
+    island.show_toast(Toast("Música", kind="music"))
+    assert tray == ["Lembrete"]  # aberto: aviso importante vai para a bandeja, música não
+
+
+def test_limit_alert_and_music_change_become_toasts(qapp, island, app_ctx):
+    settle(qapp, 300)
+    app_ctx.limits.alert.emit("claude", "Claude: 95% usado", "Sessão · 5h chegou a 95%.")
+    assert island._toast is not None and island._toast.kind == "limits"
+    island._cancel_toasts()
+    first = MediaState("Um", "A", "", "playing", 1, 100, time.monotonic(), True, True, True, True)
+    second = MediaState("Dois", "B", "", "playing", 1, 100, time.monotonic(), True, True, True, True)
+    app_ctx.media.state_changed.emit(first)
+    assert island._toast is None  # primeira faixa ao abrir: sem aviso
+    app_ctx.media.state_changed.emit(second)
+    assert island._toast is not None and island._toast.title == "Dois"
+
+
+def test_agenda_reminders(store):
+    from datetime import datetime, timedelta
+
+    from ventude.ui.toast import Reminders
+
+    now = datetime(2026, 11, 20, 14, 0)
+    event = store.add_event("Reunião", now.date(), (now + timedelta(minutes=10)).time())
+    store.add_event("Dia todo", now.date())
+    reminders = Reminders(store)
+    seen = []
+    reminders.due.connect(lambda e, m: seen.append((e.title, m)))
+    reminders.check(now)
+    reminders.check(now + timedelta(seconds=30))  # não repete
+    reminders.check(now + timedelta(minutes=5, seconds=10))
+    reminders.check(now + timedelta(minutes=7))
+    assert seen == [("Reunião", 10), ("Reunião", 5)]
+    assert event.start is not None

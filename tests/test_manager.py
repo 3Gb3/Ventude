@@ -35,7 +35,7 @@ def make(qapp, store, home, settings=None):
         fetchers={"claude": fake, "antigravity": fake, "grok": fake},
     )
     alerts = []
-    manager.alert.connect(lambda t, m: alerts.append((t, m)))
+    manager.alert.connect(lambda _p, t, m: alerts.append((t, m)))
     return manager, fake, alerts, holder
 
 

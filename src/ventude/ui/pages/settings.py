@@ -332,6 +332,27 @@ class SettingsPage(Page):
                 self.progress,
             )
         )
+        self.toasts = self._switch(s.island_toasts, "island_toasts")
+        body.addWidget(
+            setting_row(
+                "Avisos na ilha",
+                "Limites das IAs, lembretes e timer aparecem na própria ilha por alguns segundos. "
+                "Desligado (ou em tela cheia): vão para a bandeja.",
+                self.toasts,
+            )
+        )
+        self.toast_music = self._switch(s.toast_music, "toast_music")
+        body.addWidget(
+            setting_row("Música nova na ilha", "Mostra capa e nome quando a faixa troca.", self.toast_music)
+        )
+        self.reminders = self._switch(s.agenda_reminders, "agenda_reminders")
+        body.addWidget(
+            setting_row(
+                "Lembretes da Agenda",
+                "Avisa 10 e 5 minutos antes dos compromissos com horário.",
+                self.reminders,
+            )
+        )
         self.weather_pill = self._switch(s.pill_weather, "pill_weather")
         body.addWidget(
             setting_row(
