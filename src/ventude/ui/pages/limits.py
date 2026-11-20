@@ -13,9 +13,10 @@ from ventude.ui.pages.base import Page, scroller
 from ventude.ui.widgets import Badge, Card, IconButton, UsageBar, hbox, label, repolish
 
 HOW_TO = {
-    "claude": "Use o Claude Code logado (comando claude) ou cole a sessionKey do claude.ai em Ajustes.",
+    "claude": "Usa o Claude Desktop ou o site? Cole a sessionKey do claude.ai em Ajustes "
+    "(ou use o Claude Code logado).",
     "antigravity": "Deixe o Antigravity aberto e logado. O Ventude lê as cotas direto dele.",
-    "grok": "Use o Grok CLI logado (comando grok) ou cole o cookie do grok.com em Ajustes.",
+    "grok": "Cole o cURL ou o cookie do grok.com em Ajustes (vale para o site, o app e os bots).",
 }
 
 

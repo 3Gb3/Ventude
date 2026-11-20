@@ -319,15 +319,17 @@ class SettingsPage(Page):
                 renew,
             )
         )
-        body.addWidget(label("claude.ai (para quem usa o site ou o app do Claude)", "Caption"))
+        body.addWidget(label("claude.ai (para quem usa o site ou o Claude Desktop)", "Caption"))
         body.addWidget(
             SecretField(self.ctx, "claude_session", "sessionKey (sk-ant-sid01-…) ou cURL copiado", "claude")
         )
         body.addWidget(
             label(
-                "Como pegar: abra claude.ai logado e tecle F12. Jeito rápido: Aplicativo > Cookies > "
-                "claude.ai > copie o valor de sessionKey. Se o Cloudflare barrar: aba Rede, clique "
-                "numa requisição para claude.ai, botão direito > Copiar > Copiar como cURL e cole aqui.",
+                "O Claude Desktop usa a mesma conta do site: os limites são os mesmos. Como pegar: "
+                "entre em claude.ai no navegador com essa conta e tecle F12. Jeito rápido: Aplicativo > "
+                "Cookies > claude.ai > copie o valor de sessionKey. Se o Cloudflare barrar: aba Rede, "
+                "clique numa requisição para claude.ai, botão direito > Copiar > Copiar como cURL e "
+                "cole aqui.",
                 "Faint",
                 wrap=True,
             )
@@ -355,15 +357,16 @@ class SettingsPage(Page):
         mode = combo(GROK_MODES, self.ctx.settings.grok_mode)
         mode.currentIndexChanged.connect(lambda: self._provider_mode("grok", mode.currentData()))
         body.addWidget(setting_row("Fonte", status, mode))
-        body.addWidget(label("grok.com (para quem usa o site ou o app)", "Caption"))
+        body.addWidget(label("grok.com (site, app e bots do Grok)", "Caption"))
         body.addWidget(
             SecretField(self.ctx, "grok_cookie", "cURL copiado ou cookie (sso=…; sso-rw=…)", "grok")
         )
         body.addWidget(
             label(
-                "Como pegar: abra grok.com logado, tecle F12 > Rede e atualize a página. Clique com o "
-                "botão direito numa requisição para grok.com (ex.: rate-limits) > Copiar > "
-                "Copiar como cURL e cole aqui. Assim vão juntos o cookie e o navegador usado.",
+                "O app e os bots do Grok usam a mesma conta do grok.com. Como pegar: abra grok.com "
+                "logado, tecle F12 > Rede e atualize a página. Clique com o botão direito numa "
+                "requisição para grok.com (ex.: rate-limits) > Copiar > Copiar como cURL e cole aqui. "
+                "O Grok usado dentro do Cursor conta no limite do Cursor, não no da sua conta Grok.",
                 "Faint",
                 wrap=True,
             )

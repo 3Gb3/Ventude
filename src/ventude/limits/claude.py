@@ -46,7 +46,7 @@ WINDOWS = [
     ("seven_day_opus", "weekly_opus", "Semana · Opus"),
     ("seven_day_sonnet", "weekly_sonnet", "Semana · Sonnet"),
 ]
-SETUP_HINT = "Faça login no Claude Code (comando claude) ou cole a sessionKey do claude.ai em Ajustes."
+SETUP_HINT = "Cole a sessionKey do claude.ai em Ajustes (vale para o Claude Desktop) ou use o Claude Code."
 
 
 @dataclass

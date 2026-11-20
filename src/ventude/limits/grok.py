@@ -32,7 +32,7 @@ WEB_MODELS = [
     ("grok-4", "Expert"),
     ("grok-4-heavy", "Heavy"),
 ]
-SETUP_HINT = "Faça login no Grok CLI (comando grok) ou cole o cookie do grok.com em Ajustes."
+SETUP_HINT = "Cole o cURL ou o cookie do grok.com em Ajustes (vale para o site, o app e os bots)."
 
 
 def auth_path(home: Path) -> Path:
