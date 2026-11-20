@@ -100,6 +100,65 @@ PATHS: dict[str, str] = {
     '<path d="M16.2 3.8a2.3 2.3 0 0 1 3.3 3.3l-2.3 2.3-3.3-3.3Z"/>'
     '<path d="M14.5 7.5 6 16v2.5h2.5L17 10"/><path d="M4 20.5 6 18.5"/>',
     "dot": '<circle cx="12" cy="12" r="4" fill="currentColor"/>',
+    # ---------- Sistema ----------
+    "cpu": '<rect x="5" y="5" width="14" height="14" rx="2.5"/><rect x="9" y="9" width="6" height="6" rx="1"/>'
+    '<path d="M9.5 2v3M14.5 2v3M9.5 19v3M14.5 19v3M2 9.5h3M2 14.5h3M19 9.5h3M19 14.5h3"/>',
+    "memory": '<rect x="2.5" y="6" width="19" height="11" rx="2"/><path d="M7 9.5v4M11 9.5v4M15 9.5v4'
+    'M6 17v3M10 17v3M14 17v3M18 17v3"/>',
+    "gpu": '<rect x="2" y="6" width="17" height="11" rx="2"/><circle cx="8.5" cy="11.5" r="2.6"/>'
+    '<path d="M13.5 9.5h2.5M13.5 13.5h2.5M19 9h3M19 14h3M6 17v2.5M11 17v2.5"/>',
+    "hard-drive": '<rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5.6 13 8 5h8l2.4 8"/>'
+    '<path d="M7 16.5h.01M10.5 16.5h.01"/>',
+    "battery": '<rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/>',
+    "battery-charging": '<rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/>'
+    '<path d="m11.8 9-2.3 3.2h3l-2.3 3.3"/>',
+    "wifi": '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/>'
+    '<path d="M12 19.5h.01" stroke-width="2.6"/>',
+    "activity": '<path d="M3 12h4l3-7.5 4 15 3-7.5h4"/>',
+    "copy": '<rect x="8.5" y="8.5" width="12.5" height="12.5" rx="2"/>'
+    '<path d="M15.5 8.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8.5a2 2 0 0 0 2 2h3.5"/>',
+    # ---------- áudio e privacidade ----------
+    "volume": '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z"/><path d="M15.5 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>',
+    "volume-1": '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z"/><path d="M15.5 9a4 4 0 0 1 0 6"/>',
+    "volume-x": '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>',
+    "headphones": '<path d="M4 15.5V12a8 8 0 0 1 16 0v3.5"/><rect x="3" y="14" width="4.5" height="7" rx="1.6"/>'
+    '<rect x="16.5" y="14" width="4.5" height="7" rx="1.6"/>',
+    "speaker": '<rect x="5" y="2.5" width="14" height="19" rx="2.5"/><circle cx="12" cy="14.5" r="3.5"/>'
+    '<path d="M12 6.5h.01" stroke-width="2.4"/>',
+    "mic": '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>',
+    "mic-off": '<path d="M15 9.5V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.8 2.4"/>'
+    '<path d="M18.5 11a6.5 6.5 0 0 1-1 3.4M5.5 11a6.5 6.5 0 0 0 10.3 5.3M12 17.5V21M9 21h6M3.5 3.5l17 17"/>',
+    "camera": '<path d="M3 8.5a2 2 0 0 1 2-2h2.5L9 4.5h6l1.5 2H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>'
+    '<circle cx="12" cy="13" r="3.5"/>',
+    "bluetooth": '<path d="m7 7 10 10-5 4.5V2.5L17 7 7 17"/>',
+    # ---------- ferramentas ----------
+    "coffee": '<path d="M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5Z"/><path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16"/>'
+    '<path d="M8 2.8c-.7.9.7 1.9 0 3M12 2.8c-.7.9.7 1.9 0 3M5 21.5h10"/>',
+    "qr": '<rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/>'
+    '<rect x="3" y="14" width="7" height="7" rx="1.2"/><path d="M14 14h3v3M21 14h.01M14 21h3M17.5 17.5v3.5M21 17v4"/>',
+    "calculator": '<rect x="4.5" y="2.5" width="15" height="19" rx="2.5"/><path d="M8 6.5h8M8 11h.01M12 11h.01'
+    'M16 11h.01M8 14.5h.01M12 14.5h.01M16 14.5v3.5M8 18h.01M12 18h.01" stroke-linecap="round"/>',
+    "terminal": '<rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="m7 9.5 3 2.5-3 2.5M12.5 15H17"/>',
+    "code": '<path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16"/>',
+    "window": '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/>',
+    "minus": '<path d="M5 12h14"/>',
+    "maximize": '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+    "restore": '<rect x="4" y="8" width="12" height="12" rx="2"/><path d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8'
+    'a2 2 0 0 1-2 2h-2"/>',
+    "dock": '<rect x="2.5" y="15" width="19" height="5.5" rx="2.75"/><path d="M7 17.75h.01M11 17.75h.01'
+    'M15 17.75h.01" stroke-width="2.4"/><path d="M5 11V5.5A2.5 2.5 0 0 1 7.5 3h9A2.5 2.5 0 0 1 19 5.5V11"/>',
+    "ventude": '<rect x="2.5" y="7.5" width="19" height="9" rx="4.5"/><circle cx="16.5" cy="12" r="2" '
+    'fill="currentColor"/><path d="M6.5 12h4.5"/>',
+    # ---------- energia ----------
+    "lock": '<rect x="4.5" y="10.5" width="15" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>'
+    '<path d="M12 14.5v2.5"/>',
+    "hibernation": '<path d="M19 15A7.8 7.8 0 0 1 9.1 5.1 7.9 7.9 0 1 0 19 15Z"/><path d="M14.5 3h4.5l-4.5 5h4.5"/>',
+    "rotate-cw": '<path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5V8H16"/>',
+    "refresh-badge": '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3.5v3.7h-3.7"/>'
+    '<path d="M12 8v6.5M9.3 11.8 12 14.5l2.7-2.7"/>',
+    "power-badge": '<path d="M12 2.5v5"/><path d="M6.4 5.6a8 8 0 1 0 11.2 0"/><path d="M12 11v6M9.5 14.5 12 17l2.5-2.5"/>',
+    "log-out": '<path d="M9 21H5.5A1.5 1.5 0 0 1 4 19.5v-15A1.5 1.5 0 0 1 5.5 3H9"/>'
+    '<path d="m15.5 16.5 4.5-4.5-4.5-4.5M20 12H9"/>',
 }
 
 

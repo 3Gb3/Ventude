@@ -20,7 +20,33 @@ Ainda não está na `main`: outros ajustes entram nesta branch antes.
 - [x] **Estante** (aba nova, já ligada): arrastar para a ilha mostra duas áreas, "Guardar na estante" e "Adicionar aos atalhos". Arquivos, pastas, imagens (inclusive do navegador), links e textos; arrastar para fora, colar da área de transferência, copiar, abrir. Some ao fechar o Ventude. Contador na ilha.
 - [x] **Conta-gotas** com lupa (HEX na área de transferência) e **captura de texto** por região com o OCR do Windows (Windows.Media.Ocr via WinRT), no topo do painel.
 
+### Pacote "Ventude Shell & Sistema"
+
+Tudo via ctypes/WinRT e biblioteca padrão (sem psutil, pywin32 ou comtypes).
+
+- [x] **Polimentos**: a pílula some antes do aviso e o aviso entra junto com a expansão; Ctrl + 0 e Ctrl + , abrem Ajustes; digitar com a busca aberta (e o foco fora do campo) continua o texto em vez de apagar.
+- [x] **Aba Sistema**: CPU (`GetSystemTimes`, núcleos, temperatura pela zona térmica do ACPI quando o PC informa, 3 processos que mais usam), GPU (NVML nas NVIDIA: uso, VRAM, temperatura e consumo; contadores PDH de GPU Engine/Adapter Memory nas demais, com o nome e a VRAM total do registro do driver), RAM (`GlobalMemoryStatusEx` + 3 processos com mais memória), rede (`GetIfTable2`, só placas físicas, sem filtros/VPN, contadores de 64 bits; ping ICMP sem administrador) e disco/bateria. Gráfico dos últimos 60 s. Botões para copiar o IP local e o público (api.ipify.org, só ao clicar).
+- [x] **Métricas na pílula**: alfinete em CPU, GPU, temperatura da GPU, RAM, download, upload, ping e bateria (`pinned_metrics_json`). A largura usa o texto mais largo possível de cada métrica, então a ilha não "pula" a cada leitura; clique abre a aba Sistema. Leitura a cada 1,5 s só com a aba aberta ou com métrica fixada; fora isso, uma leitura leve a cada 20 s cuida dos avisos de GPU/CPU acima de 85 °C e RAM acima de 92% (no máximo um a cada 10 min).
+- [x] **Aba Áudio**: saídas e entradas ativas (`IMMDeviceEnumerator`), troca do padrão nos três papéis (`IPolicyConfig::SetDefaultEndpoint`), volume e mudo do master e do microfone (`IAudioEndpointVolume`) e mixer por aplicativo agrupado por .exe, com o ícone real (`IAudioSessionManager2` + `ISimpleAudioVolume`). Thread própria (`ventude-audio`) que junta comandos repetidos (arrastar o slider).
+- [x] **Volume na pílula**: a roda muda o volume direto pelo Core Audio (2% por "dente", sem o aviso do Windows) e mostra "Volume 68%" na ilha, com ou sem música.
+- [x] **Privacidade**: ponto laranja (microfone) e verde (câmera) na pílula pelo `CapabilityAccessManager\ConsentStore` (`LastUsedTimeStop == 0`), com o nome do app; clique no laranja muta/desmuta o microfone com aviso.
+- [x] **Modo Cafeína**: xícara no topo do painel, `cafeina`, `cafeina 30m`, `cafeina 2h`, `cafeina off` na busca; `SetThreadExecutionState`; ícone na pílula enquanto ligado; desliga ao sair.
+- [x] **Histórico da área de transferência na Estante**: últimos 20 textos, links, cores HEX, imagens e arquivos copiados; respeita os formatos que gerenciadores de senha usam para ficar fora de históricos; filtro Tudo/Copiados/Fixados; itens fixados ficam no SQLite (imagens numa pasta própria) e voltam ao abrir. O histórico não conta no contador da pílula.
+- [x] **QR Code** nativo (gerador próprio, ISO 18004: modo byte, Reed–Solomon, máscaras, versões 1–40) num cartão dentro da ilha: menu da Estante ("Mostrar QR Code") e `qr <texto>` na busca. Conferido contra os vetores da norma.
+- [x] **Letra sincronizada** (lrclib.net, cache no SQLite: 30 dias com letra, 1 dia sem) no player do Início, verso a verso.
+- [x] **Busca universal / Menu Iniciar**: apps do menu Iniciar (.lnk/.appref-ms) e da Loja (Get-StartApps), pastas e arquivos (Área de Trabalho, Downloads, Documentos, Imagens, Vídeos, Músicas, pasta do usuário, OneDrive e raízes dos discos, até 3–4 níveis, sem node_modules/.git/.venv/AppData etc., no máximo 60 mil itens, refeito a cada 15 min). `/p` ou `pasta:` só pastas; Enter abre, Ctrl + Enter Terminal, Shift + Enter Cursor/VS Code (também por botões). Calculadora segura (árvore da expressão, sem eval), com vírgula decimal e `^`.
+- [x] **Tecla Windows** (ajuste, desligado por padrão): hook `WH_KEYBOARD_LL` numa thread própria. Win sozinha e Win + S abrem a busca; outros atalhos com Win seguem para o Windows. Para o Iniciar nativo não abrir, a soltura do Win é bloqueada e reinjetada depois de uma tecla-máscara, numa única chamada `SendInput` (o Win nunca fica "preso"). Removido ao desligar e ao sair.
+- [x] **Central de Energia**: botão no topo do painel (com selo quando há atualização do Windows esperando reiniciar) e comandos na busca: bloquear, suspender, hibernar, reiniciar, desligar, sair da sessão e, com atualização pendente, atualizar e reiniciar/desligar (`UsoClient StartInstall` + `InitiateShutdownW` com `SHUTDOWN_INSTALL_UPDATES`). Destrutivas pedem um segundo clique ou Enter.
+- [x] **Dock do Ventude** (ajuste, desligado por padrão): esconde `Shell_TrayWnd`/`Shell_SecondaryTrayWnd` e libera a área útil; dock em pílula com o botão do Ventude, os Atalhos fixados e as janelas abertas (regras do Alt + Tab, `DWMWA_CLOAKED`, apps da Loja pelo processo real), ponto/traço de aberto/em foco, clique foca ou minimiza, clique do meio fecha, menu com focar, minimizar, maximizar/restaurar, fechar e fixar nos Atalhos; some com janela maximizada/tela cheia e volta ao encostar o mouse embaixo. A barra do Windows volta ao desligar o ajuste, ao sair (`aboutToQuit` e `atexit`), em erro não tratado (`sys.excepthook`) e, se o Ventude for morto, na próxima abertura (arquivo marcador com as áreas originais).
+
 ### A validar no seu PC
+
+- **Dock e tecla Windows** no seu Windows 11 (ficam desligados até você ligar em Ajustes > Geral). Conferir: barra some e volta ao desligar; Win sozinha não abre o Iniciar nativo; Win + E/D/L/V/Tab/setas e Win + Shift + S continuam normais; ícones do Dock (apps da Loja).
+- Troca de saída/entrada padrão e mixer com os seus fones/HDMI (a leitura de dispositivos e sessões já foi conferida nesta máquina).
+- Ponto de privacidade com Discord/Teams usando o microfone e a câmera.
+- GPU NVIDIA (NVML) e a temperatura do processador (muitas placas não informam pela zona térmica do ACPI).
+- Central de Energia de verdade (os testes nunca executam as ações) e "atualizar e reiniciar" com uma atualização pendente.
+- Escanear o QR Code com o celular.
 
 - Codex, Cursor e Copilot com as suas contas: os endpoints de uso deles não são APIs públicas documentadas.
 - OCR do Windows (precisa de um idioma de OCR instalado: Configurações > Hora e idioma > Idioma) e conta-gotas com mais de um monitor e escalas diferentes.

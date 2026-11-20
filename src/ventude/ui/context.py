@@ -8,13 +8,20 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from ventude.core.config import Settings
+from ventude.core.config import LAYOUT_VERSION, Settings
 from ventude.core.store import Store
 from ventude.core.tasks import Tasks
 from ventude.limits.manager import Fetcher, LimitsManager
+from ventude.services.audio import AudioService
+from ventude.services.caffeine import CaffeineService
+from ventude.services.hardware import HardwareMonitor
+from ventude.services.indexer import Indexer
+from ventude.services.lyrics import LyricsService
 from ventude.services.market import MarketService
 from ventude.services.media import MediaService
 from ventude.services.news import NewsService
+from ventude.services.power import PowerService
+from ventude.services.privacy import PrivacyMonitor
 from ventude.services.shelf import ShelfService
 from ventude.services.timer import TimerService
 from ventude.services.weather import Forecast, Place, WeatherService
@@ -32,6 +39,7 @@ class AppContext(QObject):
     tray_message = Signal(str, str)  # aviso que não coube na ilha vai para a bandeja
     weather_changed = Signal(object)  # Forecast | None: ilha, Início e Clima juntos
     weather_failed = Signal(str)
+    qr_requested = Signal(str)  # texto/link para mostrar como QR Code dentro da ilha
 
     def __init__(
         self,
@@ -53,7 +61,18 @@ class AppContext(QObject):
         self.limits = LimitsManager(store, tasks, lambda: self.settings, home=home, fetchers=fetchers)
         self.weather_focus = ""  # dia (ISO) que a aba Clima deve abrir nos detalhes
         self.timer = TimerService()
-        self.shelf = ShelfService()
+        self.shelf = ShelfService(store)
+        # Serviços da 1.2 "shell": nenhum mexe no sistema antes de start() (os testes não chamam).
+        self.hardware = HardwareMonitor(
+            self.run, lambda: self.settings.pinned_metrics(), lambda: self.settings.hardware_alerts
+        )
+        self.audio = AudioService()
+        self.privacy = PrivacyMonitor(self.run)
+        self.caffeine = CaffeineService()
+        self.power = PowerService()
+        self.lyrics = LyricsService(store, self.run)
+        self.indexer = Indexer(self.run)
+        self.settings_changed.connect(lambda _s: self.hardware.sync())
         self.forecast: Forecast | None = None
         self.weather_busy = False
         self._weather_city = self.settings.weather_city_json
@@ -71,10 +90,33 @@ class AppContext(QObject):
         self.weather_timer.start()
         QTimer.singleShot(1200, self.refresh_weather)
         self.reminders.start()
-        if self.settings.layout_version < 4:  # primeira abertura da 1.2
-            modules = self.settings.enabled_modules() | {"shelf"}  # aba nova já ligada
-            self.update_settings(modules=",".join(sorted(modules)))
-            self.detect_providers(lambda _found: self.update_settings(layout_version=4))
+        version = self.settings.layout_version
+        if version < LAYOUT_VERSION:  # primeira abertura da 1.2: abas novas já ligadas
+            modules = self.settings.enabled_modules() | {"hardware", "audio"}
+            if version < 4:
+                modules |= {"shelf"}
+            self.update_settings(modules=",".join(sorted(modules)), layout_version=LAYOUT_VERSION)
+            if version < 4:
+                self.detect_providers()
+        self.hardware.start()
+        self.audio.start()
+        self.privacy.start()
+        self.power.start()
+        self.lyrics.start()
+        self.indexer.start()
+        self.shelf.set_clipboard_history(
+            self.settings.clipboard_history and self.settings.module_enabled("shelf")
+        )
+        self.settings_changed.connect(
+            lambda s: self.shelf.set_clipboard_history(s.clipboard_history and s.module_enabled("shelf"))
+        )
+
+    def stop(self) -> None:
+        """Desfaz o que mexe no sistema (chamado ao sair)."""
+        self.caffeine.stop()
+        self.audio.stop()
+        self.hardware.stop()
+        self.privacy.stop()
 
     # ---------- IAs instaladas ----------
     def detect_providers(self, done: Callable[[list[str]], None] | None = None) -> None:

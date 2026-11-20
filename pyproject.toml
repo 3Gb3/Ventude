@@ -43,5 +43,8 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/ventude/ui/icons.py" = ["E501"]  # caminhos SVG
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

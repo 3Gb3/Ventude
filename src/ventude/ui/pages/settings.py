@@ -378,6 +378,60 @@ class SettingsPage(Page):
                 self.weather_locate,
             )
         )
+        self.replace_taskbar = self._switch(s.replace_taskbar, "replace_taskbar")
+        self.replace_taskbar.setEnabled(system.autostart_supported())
+        body.addWidget(
+            setting_row(
+                "Substituir barra de tarefas pelo Dock do Ventude",
+                "Esconde a barra do Windows (junto com os ícones da bandeja dela) e mostra o Dock: apps "
+                "fixados, janelas abertas e relógio. A barra sempre volta ao desligar ou fechar o Ventude.",
+                self.replace_taskbar,
+            )
+        )
+        self.replace_start = self._switch(s.replace_start_menu, "replace_start_menu")
+        self.replace_start.setEnabled(system.autostart_supported())
+        body.addWidget(
+            setting_row(
+                "Tecla Windows abre o Ventude",
+                "Win sozinha e Win + S abrem o Menu Iniciar / Busca do Ventude (apps, pastas, arquivos, "
+                "calculadora, energia). Win + E, D, L, V, Tab, setas e outros atalhos seguem do Windows.",
+                self.replace_start,
+            )
+        )
+        self.clipboard = self._switch(s.clipboard_history, "clipboard_history")
+        body.addWidget(
+            setting_row(
+                "Histórico da área de transferência na Estante",
+                "Guarda os últimos 20 textos, links, cores e imagens que você copia (só na memória; fixe o "
+                "que quiser manter). Senhas copiadas de gerenciadores ficam de fora.",
+                self.clipboard,
+            )
+        )
+        self.privacy = self._switch(s.pill_privacy, "pill_privacy")
+        body.addWidget(
+            setting_row(
+                "Microfone e câmera em uso na ilha",
+                "Ponto laranja (microfone) e verde (câmera) com o nome do app. Clique no laranja muta o "
+                "microfone.",
+                self.privacy,
+            )
+        )
+        self.hw_alerts = self._switch(s.hardware_alerts, "hardware_alerts")
+        body.addWidget(
+            setting_row(
+                "Avisos de temperatura e memória",
+                "Avisa na ilha quando a GPU ou o processador passam de 85 °C ou a RAM passa de 92%.",
+                self.hw_alerts,
+            )
+        )
+        self.lyrics = self._switch(s.lyrics_enabled, "lyrics_enabled")
+        body.addWidget(
+            setting_row(
+                "Letra da música no Início",
+                "Verso atual sincronizado no player. Busca no lrclib.net (envia só título e artista).",
+                self.lyrics,
+            )
+        )
         column.addWidget(card)
 
         # ---------- abas ----------

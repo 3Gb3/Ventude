@@ -55,8 +55,10 @@ from PySide6.QtWidgets import (
 
 from ventude.core.config import MODULES, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
-from ventude.services import system
+from ventude.services import hardware, system
+from ventude.services.hardware import Snapshot
 from ventude.services.media import MediaState
+from ventude.services.privacy import PrivacyState
 from ventude.services.timer import TimerState, countdown, finished_text
 from ventude.services.weather import Forecast
 from ventude.ui import icons, theme
@@ -64,7 +66,9 @@ from ventude.ui.capture import CaptureSession, color_hex, png_bytes, prepare_for
 from ventude.ui.command import CommandBar
 from ventude.ui.context import AppContext
 from ventude.ui.pages.agenda import AgendaPage
+from ventude.ui.pages.audio import AudioPage
 from ventude.ui.pages.base import Page
+from ventude.ui.pages.hardware import HardwarePage
 from ventude.ui.pages.home import HomePage, fill_ring
 from ventude.ui.pages.limits import LimitsPage
 from ventude.ui.pages.market import MarketPage
@@ -74,14 +78,18 @@ from ventude.ui.pages.shelf import ShelfPage
 from ventude.ui.pages.shortcuts import ShortcutsPage
 from ventude.ui.pages.tasks import TasksPage
 from ventude.ui.pages.weather import WeatherPage
+from ventude.ui.power_menu import PowerMenu
+from ventude.ui.qr import QrCard
 from ventude.ui.toast import TOAST_HEIGHT, TOAST_WIDTH, Toast, ToastView, event_toast
-from ventude.ui.widgets import ElidedLabel, Equalizer, IconButton, Ring, label, rounded_pixmap
+from ventude.ui.widgets import BadgeButton, ElidedLabel, Equalizer, IconButton, Ring, label, rounded_pixmap
 
 log = logging.getLogger(__name__)
 
 PAGES: dict[str, Callable[[AppContext], Page]] = {
     "home": HomePage,
     "limits": LimitsPage,
+    "hardware": HardwarePage,
+    "audio": AudioPage,
     "shortcuts": ShortcutsPage,
     "shelf": ShelfPage,
     "agenda": AgendaPage,
@@ -91,6 +99,9 @@ PAGES: dict[str, Callable[[AppContext], Page]] = {
     "news": NewsPage,
     "settings": SettingsPage,
 }
+MIC_COLOR = "#FF9F43"  # laranja: microfone em uso
+CAM_COLOR = "#34D399"  # verde: câmera em uso
+METRIC_GAP = "   "
 COMPACT_HEIGHT = 38
 EXPANDED = QSize(860, 568)
 HEADER_HEIGHT = 54
@@ -111,6 +122,14 @@ def anchored_rect(area: QRect, width: int, height: int, anchor: QPoint) -> QRect
 def screen_for(index: int):  # noqa: ANN201
     screens = QGuiApplication.screens()
     return screens[index] if 0 <= index < len(screens) else QGuiApplication.primaryScreen()
+
+
+def privacy_dot(color: str) -> QLabel:
+    dot = QLabel()
+    dot.setFixedSize(8, 8)
+    dot.setStyleSheet(f"background: {color}; border-radius: 4px;")
+    dot.hide()
+    return dot
 
 
 class Pill(QWidget):
@@ -171,6 +190,25 @@ class Pill(QWidget):
         shelf_row.addWidget(self.shelf_count)
         self.shelf_chip.setToolTip("Itens na estante")
         self.shelf_chip.hide()
+        # Privacidade: laranja = microfone em uso, verde = câmera em uso (como no iPhone).
+        self.mic_dot, self.cam_dot = privacy_dot(MIC_COLOR), privacy_dot(CAM_COLOR)
+        self.privacy_box = QWidget()
+        privacy_row = QHBoxLayout(self.privacy_box)
+        privacy_row.setContentsMargins(0, 0, 0, 0)
+        privacy_row.setSpacing(5)
+        privacy_row.addWidget(self.mic_dot)
+        privacy_row.addWidget(self.cam_dot)
+        self.privacy_box.hide()
+        self.caffeine_icon = QLabel()
+        self.caffeine_icon.setFixedSize(15, 15)
+        self.caffeine_icon.setPixmap(icons.pixmap("coffee", theme.SUN, 15))
+        self.caffeine_icon.hide()
+        self.metrics_chip = label("", "")
+        self.metrics_chip.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 12px; font-weight: 600;")
+        self.metrics_chip.setToolTip("Sistema ao vivo (clique para abrir)")
+        self.metrics_chip.hide()
+        self.metrics: list[str] = []
+        row.addWidget(self.privacy_box)
         row.addWidget(self.art)
         row.addWidget(self.date)
         row.addStretch(1)
@@ -179,6 +217,8 @@ class Pill(QWidget):
         row.addWidget(self.eq)
         row.addWidget(self.shelf_chip)
         row.addWidget(self.timer_chip)
+        row.addWidget(self.caffeine_icon)
+        row.addWidget(self.metrics_chip)
         row.addWidget(self.weather)
         row.addWidget(self.time)
         row.addStretch(1)
@@ -200,10 +240,37 @@ class Pill(QWidget):
             self.weather,
             self.timer_chip,
             self.shelf_chip,
+            self.caffeine_icon,
+            self.metrics_chip,
         ):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.media: MediaState | None = None
         self.set_media(None)
+
+    # ---------- privacidade, cafeína e métricas ----------
+    def set_privacy(self, state: PrivacyState, enabled: bool = True) -> None:
+        mic, cam = bool(state.mic) and enabled, bool(state.cam) and enabled
+        self.mic_dot.setVisible(mic)
+        self.cam_dot.setVisible(cam)
+        self.mic_dot.setToolTip(state.text("mic") + "\nClique para mutar/ativar o microfone")
+        self.cam_dot.setToolTip(state.text("cam"))
+        self.privacy_box.setVisible(mic or cam)
+
+    def set_caffeine(self, active: bool, tip: str = "") -> None:
+        self.caffeine_icon.setVisible(active)
+        self.caffeine_icon.setToolTip(tip)
+
+    def set_metrics(self, metrics: list[str], snap: Snapshot | None) -> None:
+        """Chip ao vivo das métricas fixadas (ex.: 'CPU 22%   GPU 75% · 64°   ↓ 12,4 MB/s')."""
+        self.metrics = list(metrics)
+        parts = hardware.pill_parts(metrics, snap)
+        self.metrics_chip.setText(METRIC_GAP.join(parts))
+        self.metrics_chip.setVisible(bool(parts))
+        if snap is not None:
+            alert = (snap.gpu.temp or 0) >= hardware.TEMP_LIMIT or (snap.ram_pct or 0) >= hardware.RAM_LIMIT
+            style = f"color: {theme.WARN if alert else theme.TEXT_2}; font-size: 12px; font-weight: 600;"
+            if style != self.metrics_chip.styleSheet():
+                self.metrics_chip.setStyleSheet(style)
 
     @property
     def playing(self) -> bool:
@@ -321,6 +388,15 @@ class Pill(QWidget):
             parts.append(14 + 3 + self._text_width(self.shelf_count))
         if not self.timer_chip.isHidden():
             parts.append(15 + 5 + self._text_width(self.timer_text, "00:00"))
+        if not self.privacy_box.isHidden():
+            dots = (not self.mic_dot.isHidden()) + (not self.cam_dot.isHidden())
+            parts.append(dots * 8 + (dots - 1) * 5)
+        if not self.caffeine_icon.isHidden():
+            parts.append(15)
+        if not self.metrics_chip.isHidden():
+            # Largura pelo texto mais largo possível de cada métrica: a ilha não "pula" a cada leitura.
+            template = METRIC_GAP.join(hardware.pill_parts(self.metrics, None, template=True))
+            parts.append(self._text_width(self.metrics_chip, template))
         if not self.weather.isHidden():
             width = 16 + 4 + self._text_width(self.weather_temp)
             if not self.weather_rain.isHidden():
@@ -333,16 +409,27 @@ class Pill(QWidget):
         margins = self.row.contentsMargins()
         breathing = 10 if self.has_media else 34  # sem música, a hora fica mais ao centro
         total = margins.left() + margins.right() + sum(parts) + spacing * (len(parts) - 1) + breathing
-        return max(150, min(total, 560))
+        return max(150, min(total, 720 if not self.metrics_chip.isHidden() else 560))
 
     def zone_at(self, pos: QPoint) -> str:
-        """Qual parte da pílula está sob o ponto: rings, weather, media, date, time ou ''."""
+        """Qual parte da pílula está sob o ponto: rings, weather, metrics, mic, cam, media, date, time..."""
 
         def hit(widget: QWidget, pad: int = 4) -> bool:
-            return widget.isVisibleTo(self) and widget.geometry().adjusted(-pad, -20, pad, 20).contains(pos)
+            if not widget.isVisibleTo(self):
+                return False
+            rect = QRect(widget.mapTo(self, QPoint(0, 0)), widget.size())
+            return rect.adjusted(-pad, -20, pad, 20).contains(pos)
 
+        if hit(self.mic_dot, 3):
+            return "mic"
+        if hit(self.cam_dot, 3):
+            return "cam"
         if hit(self.ring_box):
             return "rings"
+        if hit(self.metrics_chip):
+            return "metrics"
+        if hit(self.caffeine_icon):
+            return "caffeine"
         if hit(self.weather):
             return "weather"
         if hit(self.shelf_chip):
@@ -477,6 +564,14 @@ class Panel(QWidget):
         self.ocr_btn.clicked.connect(lambda: self.tool_requested.emit("ocr"))
         header.addWidget(self.color_btn)
         header.addWidget(self.ocr_btn)
+        self.coffee_btn = IconButton("coffee", "", 30, 15)
+        self.coffee_btn.clicked.connect(ctx.caffeine.toggle)
+        ctx.caffeine.changed.connect(lambda _on: self._coffee_changed())
+        header.addWidget(self.coffee_btn)
+        self.power_btn = BadgeButton("power", "Energia: bloquear, suspender, reiniciar, desligar…", 30, 15)
+        self.power_btn.clicked.connect(self.show_power)
+        ctx.power.changed.connect(self._power_changed)
+        header.addWidget(self.power_btn)
         header.addSpacing(4)
         self.clock = label("", "Muted")
         self.clock.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -504,7 +599,42 @@ class Panel(QWidget):
         self.command = CommandBar(ctx, self)
         self.command.navigate.connect(self.select)
         self.command.tool.connect(self.tool_requested.emit)
+        self.qr = QrCard(self)
+        self.power_menu: PowerMenu | None = None
         self.rebuild_tabs()
+        self._coffee_changed()
+        self._power_changed(ctx.power.pending)
+
+    # ---------- cafeína e energia ----------
+    def _coffee_changed(self) -> None:
+        on = self.ctx.caffeine.active
+        self.coffee_btn.set_icon("coffee", theme.SUN if on else None)
+        self.coffee_btn.setToolTip(
+            self.ctx.caffeine.describe() + ". Clique para desligar."
+            if on
+            else "Cafeína: não deixa o Windows apagar a tela nem suspender"
+        )
+
+    def _power_changed(self, pending: bool) -> None:
+        self.power_btn.set_badge(theme.WARN if pending else "")
+        self.power_btn.setToolTip(
+            "Energia · atualização do Windows esperando reiniciar"
+            if pending
+            else "Energia: bloquear, suspender, reiniciar, desligar…"
+        )
+
+    def show_power(self) -> None:
+        self.power_menu = PowerMenu(self.ctx.power.available(), self)
+        self.power_menu.acted.connect(self._power_done)
+        self.power_menu.popup_below(self.power_btn)
+
+    def _power_done(self, result: str) -> None:
+        if result.startswith("erro:"):
+            self.ctx.tray_message.emit("Energia", result[5:] or "O Windows recusou o pedido.")
+
+    def show_qr(self, text: str) -> None:
+        self.command.close_bar()
+        self.qr.show_text(text)
 
     def _pin_changed(self, pinned: bool) -> None:
         self.pin.set_icon("pin", theme.ACCENT if pinned else None)
@@ -622,6 +752,8 @@ class Panel(QWidget):
     def resizeEvent(self, event: object) -> None:
         super().resizeEvent(event)
         self.drop_hint.setGeometry(self.rect().adjusted(6, 6, -6, -6))
+        if self.qr.isVisible():
+            self.qr.setGeometry(self.rect().adjusted(6, 6, -6, -6))
 
     def select_index(self, index: int) -> None:
         keys = list(self.tabs)
@@ -710,6 +842,99 @@ class Island(QWidget):
         self.pulse.valueChanged.connect(lambda _v: self.update())
         ctx.reminders.due.connect(self._reminder)
         ctx.media.thumbnail_changed.connect(self._toast_art)
+        # ---------- Sistema, áudio, privacidade, cafeína, QR e tecla Windows ----------
+        ctx.hardware.updated.connect(self._metrics_changed)
+        ctx.hardware.alert.connect(self._hardware_alert)
+        ctx.privacy.changed.connect(self._privacy_changed)
+        ctx.caffeine.changed.connect(lambda _on: self._caffeine_changed())
+        ctx.audio.master_feedback.connect(self._volume_feedback)
+        ctx.audio.mic_feedback.connect(self._mic_feedback)
+        ctx.qr_requested.connect(self.show_qr)
+        self.keys = system.KeyboardHook()
+        self.keys.start_pressed.connect(lambda: self.open_start(toggle=True))
+        self.keys.search_pressed.connect(lambda: self.open_start())
+        self._metrics_changed(ctx.hardware.last)
+
+    # ---------- Sistema (métricas fixadas), privacidade e cafeína na pílula ----------
+    def _metrics_changed(self, snap: Snapshot | None = None) -> None:
+        metrics = self.ctx.settings.pinned_metrics()
+        before = (self.pill.metrics_chip.isHidden(), list(self.pill.metrics))
+        self.pill.set_metrics(metrics, snap if snap is not None else self.ctx.hardware.last)
+        if before != (self.pill.metrics_chip.isHidden(), metrics):
+            self._resize_compact()
+
+    def _hardware_alert(self, kind: str, title: str, text: str) -> None:
+        icon = "memory" if kind == "ram" else "thermo"
+        self.show_toast(Toast(title, text, icon=icon, color=theme.DANGER, seconds=6, kind="hardware"))
+
+    def _privacy_changed(self, state: PrivacyState | None = None) -> None:
+        before = self.pill.privacy_box.isHidden()
+        self.pill.set_privacy(state or self.ctx.privacy.state, self.ctx.settings.pill_privacy)
+        if before != self.pill.privacy_box.isHidden():
+            self._resize_compact()
+
+    def _caffeine_changed(self) -> None:
+        caffeine = self.ctx.caffeine
+        before = self.pill.caffeine_icon.isHidden()
+        self.pill.set_caffeine(caffeine.active, caffeine.describe())
+        if before != self.pill.caffeine_icon.isHidden():
+            self._resize_compact()
+        self.show_toast(
+            Toast(
+                "Cafeína ligada" if caffeine.active else "Cafeína desligada",
+                caffeine.describe() if caffeine.active else "O Windows volta a apagar a tela e suspender",
+                icon="coffee",
+                color=theme.SUN,
+                seconds=2.5,
+                kind="tool",
+            )
+        )
+
+    def _volume_feedback(self, level: float, muted: bool) -> None:
+        """Depois da roda do mouse na pílula: chip rápido com o volume novo."""
+        icon = "volume-x" if muted or level <= 0 else ("volume-1" if level < 0.5 else "volume")
+        text = "Mudo" if muted else f"{round(level * 100)}%"
+        self.show_toast(
+            Toast(f"Volume {text}", "", icon=icon, color=theme.ACCENT, seconds=1.2, kind="volume")
+        )
+
+    def _mic_feedback(self, muted: bool) -> None:
+        self.show_toast(
+            Toast(
+                "Microfone mutado" if muted else "Microfone ativo",
+                "Clique no ponto laranja da ilha para mudar" if muted else "",
+                icon="mic-off" if muted else "mic",
+                color=theme.DANGER if muted else MIC_COLOR,
+                seconds=2.2,
+                kind="tool",
+            )
+        )
+
+    def show_qr(self, text: str) -> None:
+        self.expand()
+        self.panel.show_qr(text)
+
+    # ---------- Menu Iniciar / Busca Universal (tecla Windows) ----------
+    def open_start(self, toggle: bool = False, text: str = "") -> None:
+        if toggle and self.expanded and self.panel.command.isVisible():
+            self.collapse()
+            return
+        if not self.isVisible():
+            self.user_hidden(False)
+        self.expand()
+        self.raise_()
+        self.activateWindow()
+        from ventude.services.winutil import force_foreground
+
+        force_foreground(int(self.winId()))
+        self.panel.command.open_bar(text, start=True)
+
+    def _update_hook(self) -> None:
+        want = self.ctx.settings.replace_start_menu
+        if want and not self.keys.active:
+            self.keys.install()
+        elif not want and self.keys.active:
+            self.keys.remove()
 
     # ---------- clima na ilha ----------
     def _weather_done(self, forecast: Forecast | None) -> None:
@@ -871,7 +1096,7 @@ class Island(QWidget):
     def _keep_open(self) -> bool:
         if self.panel.pin.isChecked() or self._holds > 0 or self._dragging or self._drag_files:
             return True
-        if self.panel.command.isVisible():
+        if self.panel.command.isVisible() or self.panel.qr.isVisible():
             return True
         if QApplication.activePopupWidget() or QApplication.activeModalWidget():
             return True
@@ -911,9 +1136,17 @@ class Island(QWidget):
         """Aba que cada parte da pílula abre. No hover, só anéis e clima (intenção clara)."""
         if not click and not self.ctx.settings.zone_open:
             return None
-        pages = {"rings": "limits", "weather": "weather", "shelf": "shelf"}
+        pages = {"rings": "limits", "weather": "weather", "shelf": "shelf", "metrics": "hardware"}
         if click:
-            pages |= {"date": "agenda", "time": "home", "title": "home", "timer": "home"}
+            pages |= {
+                "date": "agenda",
+                "time": "home",
+                "title": "home",
+                "timer": "home",
+                "cam": "audio",
+                "mic": "audio",
+                "caffeine": "home",
+            }
         page = pages.get(zone)
         return page if page and (page == "home" or self.ctx.settings.module_enabled(page)) else None
 
@@ -949,18 +1182,23 @@ class Island(QWidget):
             self.collapse_timer.start(self.ctx.settings.collapse_delay_ms)
 
     def wheelEvent(self, event: object) -> None:
-        """Roda sobre a pílula com música: volume. Shift ou roda lateral: troca de faixa."""
-        if self.expanded or not self.pill.has_media:
+        """Roda sobre a pílula: volume do Windows (com o valor na ilha). Com música, Shift ou roda
+        lateral troca de faixa."""
+        if self.expanded:
             return
         self.hover_timer.stop()
-        self._media_hold = True  # mexeu na música: não abre o painel por cima
+        self._media_hold = True  # mexeu no volume/música: não abre o painel por cima
         delta = event.angleDelta()  # type: ignore[attr-defined]
         shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)  # type: ignore[attr-defined]
         horizontal = delta.x() if delta.x() else (delta.y() if shift else 0)
-        if horizontal:
+        if horizontal and self.pill.has_media:
             (self.ctx.media.next if horizontal < 0 else self.ctx.media.previous)()
-        elif delta.y():
-            system.volume_step(delta.y() > 0, max(1, abs(delta.y()) // 120))
+        elif delta.y() and not horizontal:
+            up, steps = delta.y() > 0, max(1, abs(delta.y()) // 120)
+            if self.ctx.audio.running:
+                self.ctx.audio.step_master(up, steps)  # muda direto e mostra o volume na ilha
+            else:
+                system.volume_step(up, steps)  # sem Core Audio: teclas de volume (aviso do Windows)
         event.accept()  # type: ignore[attr-defined]
 
     # ---------- arrastar e soltar (Estante e Atalhos) ----------
@@ -1047,7 +1285,12 @@ class Island(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self.collapse()
+            if self.panel.qr.isVisible():
+                self.panel.qr.close_card()  # Esc fecha o QR primeiro
+            else:
+                self.collapse()
+            return
+        if self.panel.qr.isVisible():
             return
         ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if self.expanded and ctrl and event.key() == Qt.Key.Key_K:
@@ -1058,13 +1301,19 @@ class Island(QWidget):
             event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
         )
         if self.expanded and plain and typed and typed.isprintable() and not typed.isspace():
-            self.panel.command.open_bar(typed)  # começou a digitar: vira busca
+            bar = self.panel.command
+            if not bar.isVisible():
+                bar.open_bar(typed)  # começou a digitar: vira busca
+            else:
+                # O foco saiu do campo, mas a busca continua: devolve o foco sem apagar o que já foi digitado.
+                bar.input.setFocus()
+                bar.input.insert(typed)
             return
-        if (
-            event.modifiers() & Qt.KeyboardModifier.ControlModifier
-            and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_9
-        ):
+        if ctrl and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_9:
             self.panel.select_index(event.key() - Qt.Key.Key_1)
+            return
+        if ctrl and event.key() in (Qt.Key.Key_0, Qt.Key.Key_Comma):
+            self.panel.select("settings")  # Ctrl + 0 ou Ctrl + , : Ajustes (a aba que passa da 9ª)
             return
         super().keyPressEvent(event)
 
@@ -1115,12 +1364,18 @@ class Island(QWidget):
             self.reposition()
         elif not self.expanded and self._toast is not None:
             kind = self._toast.kind
-            self.expand({"limits": "limits", "agenda": "agenda"}.get(kind, "home"))
+            pages = {"limits": "limits", "agenda": "agenda", "volume": "audio", "hardware": "hardware"}
+            page = pages.get(kind, "home")
+            self.expand(page if page == "home" or self.ctx.settings.module_enabled(page) else "home")
         elif not self.expanded:
             zone = self.pill.zone_at(event.position().toPoint())
             if zone == "media":  # capa ou equalizador: tocar/pausar
                 self._media_hold = True
                 self.ctx.media.play_pause()
+                return
+            if zone == "mic" and self.ctx.audio.running:  # ponto laranja: muta/desmuta o microfone
+                self._media_hold = True
+                self.ctx.audio.toggle_mic_mute()
                 return
             self.expand(self._zone_page(zone, click=True))
 
@@ -1204,9 +1459,9 @@ class Island(QWidget):
             if toast.kind in ("limits", "agenda", "timer"):
                 self.ctx.tray_message.emit(toast.title, toast.text)
             return
-        if toast.kind == "music":  # só a música mais recente importa
-            self._toasts = [t for t in self._toasts if t.kind != "music"]
-            if self._toast is not None and self._toast.kind == "music":
+        if toast.kind in ("music", "volume"):  # só a música (ou o volume) mais recente importa
+            self._toasts = [t for t in self._toasts if t.kind != toast.kind]
+            if self._toast is not None and self._toast.kind == toast.kind:
                 self._toast = toast
                 self.toast_view.show_toast(toast)
                 self.toast_timer.start(int(toast.seconds * 1000))
@@ -1221,7 +1476,11 @@ class Island(QWidget):
         self._toast = self._toasts.pop(0)
         self.toast_view.show_toast(self._toast)
         self.toast_timer.start(int(self._toast.seconds * 1000))
+        # A pílula some na hora e o aviso aparece junto com a ilha crescendo (sem "piscar" no meio).
+        self.pill.hide()
         self._animate(self.target_rect(False))
+        if not self.toast_view.isVisible():
+            self._fade_in(self.toast_view, max(120, int(self.ctx.settings.animation_ms * 0.8)))
 
     def _end_toast(self) -> None:
         if self._toast is None:
@@ -1236,8 +1495,11 @@ class Island(QWidget):
     def _cancel_toasts(self) -> None:
         self.toast_timer.stop()
         self._toasts.clear()
+        had_toast = self._toast is not None
         self._toast = None
         self.toast_view.hide()
+        if had_toast and not self.expanded:
+            self._resize_compact()  # volta ao tamanho da pílula (o aviso tinha outro tamanho)
 
     def _toast_art(self, data: bytes) -> None:
         if self._toast is not None and self._toast.kind == "music" and data:
@@ -1342,6 +1604,9 @@ class Island(QWidget):
         self._weather_done(self.ctx.forecast)
         self._tick()
         self._update_hotkey()
+        self._update_hook()
+        self._metrics_changed()
+        self._privacy_changed()
         if not self._dragging and self.anim.state() != QPropertyAnimation.State.Running:
             target = self.target_rect(self.expanded)
             if target.topLeft() != self.geometry().topLeft() or not self.expanded:
@@ -1373,6 +1638,7 @@ class Island(QWidget):
     def showEvent(self, event: object) -> None:
         super().showEvent(event)
         self._update_hotkey()
+        self._update_hook()
 
     def nativeEvent(self, event_type: object, message: object) -> tuple[bool, int]:  # noqa: N802
         if self._hotkey and system.is_hotkey_message(message):

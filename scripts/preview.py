@@ -500,7 +500,130 @@ def main() -> None:
     area.verticalScrollBar().setValue(page.providers.parentWidget().y() - 40)
     settle(island, 300)
     shot(island, out / "31-ajustes-ias.png")
+    shell_screens(ctx, island, media, out)
     print(f"Capturas em {out.resolve()}")
+
+
+def shell_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
+    """Telas do pacote "Ventude Shell & Sistema" (1.2)."""
+    from ventude.services import indexer
+    from ventude.services.audio import AppSession, AudioState, Device
+    from ventude.services.hardware import Battery, Gpu, Snapshot
+    from ventude.services.privacy import PrivacyState
+    from ventude.ui.dock import Dock, DockItem
+    from ventude.ui.power_menu import PowerMenu
+
+    island.collapse()
+    ctx.timer.stop()
+    ctx.shelf.clear()
+    media.state = None
+    media.state_changed.emit(None)
+    ctx.caffeine._apply = lambda _flags: True  # prévia: não mexe no estado de energia do PC
+    snap = Snapshot(
+        cpu=23.0,
+        cores=16,
+        cpu_temp=58.0,
+        gpu=Gpu("AMD Radeon RX 7600", 41.0, 3.1 * 1024**3, 8.0 * 1024**3, 64.0, 92.0, "pdh"),
+        ram_used=15.2 * 1024**3,
+        ram_total=31.9 * 1024**3,
+        net_down=12.4 * 1024**2,
+        net_up=420 * 1024,
+        ping=18.0,
+        disk_path="C:\\",
+        disk_used=255 * 1024**3,
+        disk_total=476 * 1024**3,
+        battery=Battery(82, charging=True, plugged=True),
+        top_cpu=[("Claude", 7.9), ("Firefox", 3.1), ("Discord", 0.7)],
+        top_ram=[("Firefox", 3.5 * 1024**3), ("Discord", 3.0 * 1024**3), ("Claude", 2.9 * 1024**3)],
+    )
+    import math
+
+    for index in range(40):
+        wave = (math.sin(index / 4) + 1) / 2
+        ctx.hardware.history["cpu"].append(12 + wave * 30)
+        ctx.hardware.history["gpu"].append(20 + wave * 45)
+        ctx.hardware.history["ram"].append(46 + wave * 3)
+        ctx.hardware.history["net_down"].append(wave * 14 * 1024**2)
+        ctx.hardware.history["net_up"].append((1 - wave) * 600 * 1024)
+    ctx.update_settings(pinned_metrics_json='["cpu", "gpu", "gpu_temp", "net_down"]')
+    ctx.hardware._done(snap)
+    ctx.privacy.apply(PrivacyState(mic=("Discord",), cam=()))
+    ctx.caffeine.start(2 * 3600)
+    island._cancel_toasts()
+    settle(island, 800)
+    shot(island, out / "40-ilha-sistema-privacidade.png", 18)
+    island._volume_feedback(0.68, False)
+    settle(island, 500)
+    shot(island, out / "41-ilha-volume.png", 18)
+    island._cancel_toasts()
+    island.expand("hardware")
+    settle(island, 700)
+    ctx.hardware._done(snap)
+    settle(island, 300)
+    shot(island, out / "42-sistema.png")
+    island.panel.select("audio")
+    settle(island, 400)
+    ctx.audio.changed.emit(
+        AudioState(
+            outputs=(
+                Device("1", "Alto-falantes (Redragon Gaming Headset)", "render", True),
+                Device("2", "1 - LC24RG50 (AMD High Definition Audio Device)", "render"),
+                Device("3", "Fones de ouvido (WH-1000XM4)", "render"),
+            ),
+            inputs=(
+                Device("4", "Microfone (Redragon Gaming Headset)", "capture", True),
+                Device("5", "Microfone (2- XWF-1080P)", "capture"),
+            ),
+            master=0.5,
+            mic=0.9,
+            sessions=(
+                AppSession("discord", "Discord", "", (1,), 0.8, False, True),
+                AppSession("spotify", "Spotify", "", (2,), 0.55, False, True),
+                AppSession("firefox", "Firefox", sys.executable, (3,), 1.0, True),
+                AppSession("system", "Sons do sistema", "", (4,), 1.0, False, system=True),
+            ),
+        )
+    )
+    settle(island, 300)
+    shot(island, out / "43-audio.png")
+    island.panel.select("home")
+    ctx.indexer.files = [
+        indexer.entry("Ventude_Notch", str(Path.cwd()), "folder"),
+        indexer.entry("Projetos", str(Path.home()), "folder"),
+    ]
+    ctx.indexer.apps = [indexer.entry("Visual Studio Code", sys.executable, "app")]
+    island.open_start(text="1450 * 5,85")
+    settle(island, 300)
+    shot(island, out / "44-busca-calculadora.png")
+    island.panel.command.open_bar("/p ven", start=True)
+    settle(island, 300)
+    shot(island, out / "45-busca-pasta.png")
+    island.panel.command.close_bar()
+    island.panel.show_qr("https://github.com")
+    settle(island, 300)
+    shot(island, out / "46-qr.png")
+    island.panel.qr.close_card()
+    ctx.power.pending = True
+    island.panel._power_changed(True)
+    menu = PowerMenu(ctx.power.available())
+    menu.choose("restart")
+    menu.adjustSize()
+    menu.show()
+    settle(island, 300)
+    shot(menu, out / "47-energia.png", 18)
+    menu.hide()
+    dock = Dock(ctx, lambda: None)
+    items = [
+        DockItem("a", "Explorador", str(Path(sys.executable)), windows=[]),
+        DockItem("b", "Python", sys.executable, kind="window"),
+    ]
+    dock.set_items(items)
+    dock.place()
+    dock.show()
+    settle(island, 300)
+    shot(dock, out / "48-dock.png", 18)
+    dock.hide()
+    ctx.caffeine.stop()
 
 
 if __name__ == "__main__":

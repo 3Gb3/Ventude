@@ -8,6 +8,8 @@ from typing import Any
 MODULES: list[tuple[str, str, str]] = [
     ("home", "Início", "home"),
     ("limits", "IAs", "gauge"),
+    ("hardware", "Sistema", "cpu"),
+    ("audio", "Áudio", "volume"),
     ("shortcuts", "Atalhos", "apps"),
     ("shelf", "Estante", "inbox"),
     ("agenda", "Agenda", "calendar"),
@@ -18,10 +20,12 @@ MODULES: list[tuple[str, str, str]] = [
     ("settings", "Ajustes", "settings"),
 ]
 ALWAYS_ON = {"home", "settings"}
-DEFAULT_MODULES = "limits,shortcuts,shelf,agenda,tasks,weather,market,news"
+DEFAULT_MODULES = "limits,hardware,audio,shortcuts,shelf,agenda,tasks,weather,market,news"
+LAYOUT_VERSION = 5  # 5: abas Sistema e Áudio (1.2)
 DEFAULT_SYMBOLS = "^BVSP:Ibovespa,BRL=X:Dólar,BTC-USD:Bitcoin,PETR4.SA:Petrobras,VALE3.SA:Vale,AAPL:Apple"
 DEFAULT_NEWS = "G1,BBC Brasil,Tecnoblog"
 ANIMATION_SPEEDS = {"rapida": 170, "normal": 260, "suave": 380}
+METRIC_KEYS = ("cpu", "gpu", "gpu_temp", "ram", "net_down", "net_up", "ping", "battery")
 
 
 @dataclass
@@ -59,6 +63,13 @@ class Settings:
     toast_music: bool = True  # mostra a música nova quando a faixa troca com a ilha fechada
     agenda_reminders: bool = True  # lembra 10 e 5 min antes dos compromissos com horário
     hotkey_command: bool = True  # o atalho global abre a barra de comandos
+    pinned_metrics_json: str = ""  # ["cpu", "ram", ...]: métricas ao vivo na pílula fechada
+    hardware_alerts: bool = True  # avisa de GPU/CPU acima de 85 °C e RAM acima de 92%
+    pill_privacy: bool = True  # pontinhos de microfone (laranja) e câmera (verde) em uso
+    clipboard_history: bool = True  # o que você copia (Ctrl + C) vai para a Estante
+    lyrics_enabled: bool = True  # letra sincronizada (lrclib.net) no player do Início
+    replace_taskbar: bool = False  # esconde a barra do Windows e mostra o Dock do Ventude
+    replace_start_menu: bool = False  # tecla Windows e Win + S abrem a busca do Ventude
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3
@@ -105,6 +116,23 @@ class Settings:
         else:
             pins.pop(provider, None)
         return json.dumps(pins, sort_keys=True) if pins else ""
+
+    def pinned_metrics(self) -> list[str]:
+        """Métricas fixadas na pílula, na ordem em que foram fixadas."""
+        try:
+            data = json.loads(self.pinned_metrics_json) if self.pinned_metrics_json else []
+        except ValueError:
+            return []
+        if not isinstance(data, list):
+            return []
+        return list(dict.fromkeys(str(m) for m in data if m in METRIC_KEYS))
+
+    def with_metric(self, metric: str, on: bool) -> str:
+        """JSON novo de pinned_metrics_json com a métrica fixada (ou solta)."""
+        metrics = [m for m in self.pinned_metrics() if m != metric]
+        if on and metric in METRIC_KEYS:
+            metrics.append(metric)
+        return json.dumps(metrics) if metrics else ""
 
     def copy(self, **changes: Any) -> Settings:
         data = self.to_dict()

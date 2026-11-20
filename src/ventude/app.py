@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import getpass
 import logging
 import sys
@@ -54,6 +55,37 @@ def _check_for_update(tasks: Tasks, app: QApplication) -> None:
     tasks.run(updates.check, __version__, done=found)
 
 
+def _install_failsafes(app: QApplication, dock: object, island: object) -> None:
+    """A barra do Windows sempre volta e a tecla Windows sempre é solta: ao sair, ao fechar o Qt
+    e em qualquer erro não tratado."""
+    hider = dock.hider  # type: ignore[attr-defined]
+
+    def restore_shell() -> None:
+        try:
+            if hider.hidden or hider.marker.exists():
+                hider.restore()  # só ctypes: funciona mesmo depois do Qt fechar
+        except Exception:  # noqa: BLE001
+            log.exception("Falha ao restaurar a barra de tarefas")
+        try:
+            island.keys.remove()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            log.exception("Falha ao remover o atalho da tecla Windows")
+
+    atexit.register(restore_shell)
+    app.aboutToQuit.connect(restore_shell)
+    previous = sys.excepthook
+
+    def excepthook(kind, value, tb) -> None:  # noqa: ANN001
+        log.error("Erro inesperado", exc_info=(kind, value, tb))
+        try:
+            dock.emergency()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            restore_shell()
+        previous(kind, value, tb)
+
+    sys.excepthook = excepthook
+
+
 def run() -> int:
     setup_logging()
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
@@ -84,6 +116,10 @@ def run() -> int:
         system.set_autostart(True)  # mantém o caminho certo se o projeto mudou de pasta
     island = Island(ctx)
     tray = Tray(ctx, island)
+    from ventude.ui.dock import DockController
+
+    dock = DockController(ctx, island.open_start)
+    _install_failsafes(app, dock, island)
 
     def reveal() -> None:
         connection = server.nextPendingConnection()
@@ -113,12 +149,16 @@ def run() -> int:
     ctx.start()
     tray.show()
     island.show()
+    dock.start()
     log.info("Ventude %s iniciado", __version__)
     tasks.run(net.browser_transport, done=lambda name: log.info("Conexão com claude.ai/grok.com: %s", name))
     if updates.enabled():
         QTimer.singleShot(3000, lambda: _check_for_update(tasks, app))
     code = app.exec()
 
+    dock.restore()
+    island.keys.remove()
+    ctx.stop()
     tray.hide()
     ctx.media.stop()
     tasks.shutdown()

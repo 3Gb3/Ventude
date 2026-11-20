@@ -36,7 +36,9 @@ Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma píl
 |-----|-----------|
 | **Início** | Relógio, semana, próximo compromisso, clima, anéis das IAs, player e tarefas pendentes. |
 | **IAs** | Limites de cada IA, janela por janela (no Gemini, modelo por modelo, agrupados por família), com porcentagem usada e quando renova. O alfinete escolhe qual limite vai no anel da ilha. |
-| **Estante** | Guarda por um tempo arquivos, imagens, links e textos soltos na ilha, para arrastar depois para o navegador, o e-mail ou o Discord. Some ao fechar o Ventude. |
+| **Sistema** | CPU (com os processos que mais usam), GPU (uso, VRAM, temperatura e consumo nas NVIDIA), RAM, rede (download, upload e ping), disco e bateria ao vivo, com gráfico do último minuto. O alfinete fixa a métrica na ilha fechada. |
+| **Áudio** | Troca a saída (fones, caixas, HDMI, Bluetooth) e o microfone padrão com 1 clique, volume master e do microfone e mixer por aplicativo, com o ícone de cada app. |
+| **Estante** | Guarda arquivos, imagens, links, textos e cores soltos na ilha e (com o histórico ligado) os últimos 20 que você copiou. Filtro Tudo/Copiados/Fixados, QR Code de textos e links e fixar para não sumir ao fechar. |
 | **Atalhos** | Apps, pastas, arquivos e sites a um clique. Arraste do Explorer para a ilha, mesmo fechada: ela abre nos Atalhos. |
 | **Agenda** | Calendário do mês e compromissos do dia (`14:00`, `14h`, `9-10`). Avisa na ilha 10 e 5 minutos antes. |
 | **Tarefas** | Listas rápidas: marque, edite com dois cliques e limpe as concluídas. |
@@ -48,11 +50,18 @@ Uma Dynamic Island leve para Windows 10 e 11. Fica no topo da tela como uma píl
 Também tem:
 
 - Clima de agora (ícone e temperatura) na ilha fechada, com aviso de chuva na próxima hora. Sem cidade escolhida, ele estima pelo IP.
-- **Na ilha fechada**: clique nos anéis abre a aba IAs, no clima abre o Clima, na data abre a Agenda. Clique do meio ou na capa toca/pausa, a roda do mouse muda o volume e Shift + roda troca de faixa. Uma linha fina mostra o andamento da música.
+- **Na ilha fechada**: clique nos anéis abre a aba IAs, no clima abre o Clima, na data abre a Agenda, nas métricas abre o Sistema. Clique do meio ou na capa toca/pausa, a roda do mouse muda o volume do Windows (e mostra o valor na ilha) e Shift + roda troca de faixa. Uma linha fina mostra o andamento da música.
 - **Avisos na própria ilha**: limites das IAs, música nova e lembretes da Agenda aparecem por alguns segundos e somem.
 - **Timer e Pomodoro** pelo Início ou pela barra de comandos, com a contagem na ilha e um pulso ao terminar.
 - **Barra de comandos** (atalho global, Ctrl + K ou começar a digitar): abre atalhos, cria tarefas (`t: revisar PR`), compromissos (`a: call 15h`, `a: dentista amanhã 9h-10h`) e timers (`timer 15m`, `pomodoro`).
 - **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows) no topo do painel.
+- **Busca universal / Menu Iniciar**: apps instalados (inclusive da Loja), pastas e arquivos do usuário. Pasta: Enter abre no Explorer, Ctrl + Enter abre o Terminal nela e Shift + Enter abre no Cursor/VS Code. `/p nome` busca só pastas, `1450 * 5,85` calcula e copia, `qr texto` mostra um QR Code.
+- **Tecla Windows** (opcional, em Ajustes): Win sozinha e Win + S abrem a busca do Ventude; os outros atalhos com Win continuam do Windows.
+- **Dock do Ventude** (opcional): esconde a barra de tarefas do Windows e mostra um dock com os apps fixados, as janelas abertas e o relógio. A barra do Windows sempre volta ao desligar o ajuste ou fechar o Ventude.
+- **Central de Energia** no topo do painel e na busca: bloquear, suspender, hibernar, reiniciar, desligar, sair da sessão e, com atualização do Windows pendente, atualizar e reiniciar/desligar. As ações que fecham tudo pedem um segundo clique (ou Enter).
+- **Modo Cafeína** (xícara no topo do painel ou `cafeina 2h`): o Windows não apaga a tela nem suspende.
+- **Privacidade na ilha**: ponto laranja com o microfone em uso, verde com a câmera, com o nome do app. Clique no laranja muta o microfone.
+- **Letra sincronizada** da música no Início (lrclib.net).
 - Player do Spotify com capa, avanço e controles; pausado, a música continua na ilha. Em **Ajustes > Música** dá para seguir qualquer player do Windows.
 - Abre na hora ao passar o mouse (o tempo é ajustável) e troca de aba com animação.
 - Avisos na bandeja quando uma IA chega a 80% e 95% e quando o limite renova.
@@ -116,7 +125,7 @@ Rodando pelo código, o Ventude não se atualiza sozinho: use `git pull`.
 - **Arraste** apps, pastas, arquivos ou links para a ilha: ela abre nos Atalhos e adiciona ao soltar.
 - **Clique** na ilha para abrir, mesmo com a abertura por mouse desligada.
 - **Arraste** a pílula ou o topo do painel para mover, inclusive para outro monitor.
-- **Esc** fecha. **Ctrl + 1…9** troca de aba. O **alfinete** mantém o painel aberto.
+- **Esc** fecha. **Ctrl + 1…9** troca de aba e **Ctrl + 0** (ou **Ctrl + ,**) abre os Ajustes. O **alfinete** mantém o painel aberto.
 - **Bandeja**: clique para abrir e fechar. Clique com o botão direito para ocultar a ilha, trocar de monitor, atualizar os limites ou sair.
 
 ## Dados

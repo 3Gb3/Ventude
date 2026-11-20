@@ -1,10 +1,13 @@
-"""Integração com o Windows: iniciar com o sistema e atalho global de teclado."""
+"""Integração com o Windows: iniciar com o sistema, atalho global, tecla Windows e volume."""
 
 from __future__ import annotations
 
 import logging
 import sys
+import threading
 from pathlib import Path
+
+from PySide6.QtCore import QObject, Signal
 
 log = logging.getLogger(__name__)
 
@@ -159,3 +162,216 @@ def volume_step(up: bool, steps: int = 1) -> bool:
         log.debug("Não foi possível mudar o volume", exc_info=True)
         return False
     return True
+
+
+# ---------- tecla Windows abre o Ventude (hook de teclado de baixo nível) ----------
+VK_LWIN, VK_RWIN, VK_S = 0x5B, 0x5C, 0x53
+WIN_KEYS = (VK_LWIN, VK_RWIN)
+MODIFIERS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}  # Shift, Ctrl e Alt (esq./dir.)
+MASK_VK = 0xE8  # tecla sem uso: no meio do Win, faz o Windows achar que foi um atalho e não abrir o Iniciar
+WH_KEYBOARD_LL = 13
+WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_QUIT = 0x0100, 0x0101, 0x0104, 0x0105, 0x0012
+LLKHF_INJECTED = 0x10
+KEYEVENTF_EXTENDEDKEY = 0x0001
+INPUT_KEYBOARD = 1
+PASS, BLOCK = "pass", "block"
+
+
+class WinKeyLogic:
+    """Decide o que fazer com cada tecla quando a tecla Windows abre o Ventude.
+
+    - Win sozinha (apertou e soltou): abre o Ventude e não deixa o Iniciar abrir ("start").
+    - Win + S: abre a busca do Ventude ("search") e engole o S.
+    - Win + qualquer outra tecla (E, D, L, V, Tab, setas, Shift + S...): segue para o Windows.
+    Teclas injetadas por programas (inclusive pelo próprio Ventude) passam direto.
+    """
+
+    def __init__(self) -> None:
+        self.wins: set[int] = set()
+        self.mods: set[int] = set()
+        self.combo = False  # outra tecla passou junto com o Win (atalho do Windows)
+        self.swallowed = False  # engolimos uma tecla (Win + S): o Windows precisa da máscara
+
+    def feed(self, vk: int, down: bool, injected: bool = False) -> tuple[str, str]:
+        """(pass|block, evento) — evento: '' | 'start' | 'search' | 'mask'."""
+        if injected:
+            return PASS, ""
+        if vk in MODIFIERS:
+            (self.mods.add if down else self.mods.discard)(vk)
+            if down and self.wins:
+                self.combo = True
+            return PASS, ""
+        if vk in WIN_KEYS:
+            if down:
+                if not self.wins:
+                    self.combo, self.swallowed = bool(self.mods), False
+                self.wins.add(vk)
+                return PASS, ""
+            self.wins.discard(vk)
+            if self.wins:
+                return PASS, ""
+            if not self.combo:
+                return BLOCK, "start"
+            return (BLOCK, "mask") if self.swallowed else (PASS, "")
+        if not self.wins:
+            return PASS, ""
+        if vk == VK_S and not self.mods:
+            first = down and not self.swallowed
+            if down:
+                self.swallowed = self.combo = True
+            return BLOCK, "search" if first else ""
+        self.combo = True
+        return PASS, ""
+
+
+class KeyboardHook(QObject):
+    """WH_KEYBOARD_LL numa thread própria (com laço de mensagens). remove() desliga na hora."""
+
+    start_pressed = Signal()
+    search_pressed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.logic = WinKeyLogic()
+        self._thread: threading.Thread | None = None
+        self._thread_id = 0
+        self._hook = 0
+        self._proc = None
+
+    @property
+    def active(self) -> bool:
+        return bool(self._hook) and self._thread is not None and self._thread.is_alive()
+
+    def install(self) -> bool:
+        if sys.platform != "win32":
+            return False
+        if self.active:
+            return True
+        self.logic = WinKeyLogic()
+        ready = threading.Event()
+        self._thread = threading.Thread(target=self._run, args=(ready,), name="ventude-keys", daemon=True)
+        self._thread.start()
+        ready.wait(2)
+        if not self._hook:
+            log.warning("Não deu para instalar o atalho da tecla Windows")
+        return bool(self._hook)
+
+    def remove(self) -> None:
+        thread = self._thread
+        if thread is None:
+            return
+        if thread.is_alive() and self._thread_id:
+            import ctypes
+
+            ctypes.windll.user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)  # type: ignore[attr-defined]
+            thread.join(timeout=1.5)
+        self._thread = None
+
+    def _run(self, ready: threading.Event) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        lresult = ctypes.c_ssize_t
+
+        class KBDLLHOOKSTRUCT(ctypes.Structure):
+            _fields_ = [
+                ("vkCode", wintypes.DWORD),
+                ("scanCode", wintypes.DWORD),
+                ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_size_t),
+            ]
+
+        hookproc = ctypes.WINFUNCTYPE(lresult, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+        user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+        user32.CallNextHookEx.restype = lresult
+        user32.SetWindowsHookExW.argtypes = [ctypes.c_int, hookproc, wintypes.HINSTANCE, wintypes.DWORD]
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+        user32.GetAsyncKeyState.restype = ctypes.c_short
+        kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+
+        def win_held() -> bool:
+            return any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in WIN_KEYS)
+
+        def proc(code: int, wparam: int, lparam: int) -> int:
+            if code == 0:
+                data = KBDLLHOOKSTRUCT.from_address(lparam)
+                down = wparam in (WM_KEYDOWN, WM_SYSKEYDOWN)
+                if self.logic.wins and data.vkCode not in WIN_KEYS and not win_held():
+                    self.logic.wins.clear()  # perdemos o "soltar" do Win (ex.: tela do UAC): não engole o S
+                try:
+                    action, event = self.logic.feed(int(data.vkCode), down, bool(data.flags & LLKHF_INJECTED))
+                except Exception:  # noqa: BLE001 - nunca travar o teclado
+                    action, event = PASS, ""
+                if event in ("start", "mask"):
+                    release_win_masked(int(data.vkCode))
+                if event == "start":
+                    self.start_pressed.emit()
+                elif event == "search":
+                    self.search_pressed.emit()
+                if action == BLOCK:
+                    return 1
+            return user32.CallNextHookEx(None, code, wparam, lparam)
+
+        self._proc = hookproc(proc)
+        self._thread_id = kernel32.GetCurrentThreadId()
+        self._hook = (
+            user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, kernel32.GetModuleHandleW(None), 0) or 0
+        )
+        ready.set()
+        if not self._hook:
+            return
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+        user32.UnhookWindowsHookEx(self._hook)
+        self._hook = 0
+
+
+def release_win_masked(win_vk: int) -> None:
+    """Máscara (desce/sobe) + soltar o Win numa chamada só: o Iniciar não abre e o Win não fica preso."""
+    import ctypes
+    from ctypes import wintypes
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_size_t),
+        ]
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG),
+            ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_size_t),
+        ]
+
+    class _UNION(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("u", _UNION)]
+
+    events = (INPUT * 3)()
+    for event, (vk, flags) in zip(
+        events,
+        ((MASK_VK, 0), (MASK_VK, KEYEVENTF_KEYUP), (win_vk, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY)),
+        strict=True,
+    ):
+        event.type = INPUT_KEYBOARD
+        event.u.ki = KEYBDINPUT(vk, 0, flags, 0, 0)
+    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    sent = user32.SendInput(3, events, ctypes.sizeof(INPUT))
+    if sent < 3:  # garantia: nunca deixar o Win "apertado"
+        user32.keybd_event(win_vk, 0, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY, 0)

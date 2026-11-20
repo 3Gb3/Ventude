@@ -29,10 +29,22 @@ src/ventude/
     market.py          Yahoo Finance (chart v8)
     news.py            RSS/Atom
     launcher.py        abrir apps, pastas, arquivos e sites
-    system.py          iniciar com o Windows, atalho global, tela cheia, teclas de volume
+    system.py          iniciar com o Windows, atalho global, tela cheia, volume, hook da tecla Windows
     timer.py           timer e Pomodoro (QTimer + time.monotonic)
-    shelf.py           estante temporária (itens em memória, imagens soltas em %APPDATA%\Ventude\estante)
+    shelf.py           estante (soltos, histórico da área de transferência, fixados no SQLite)
     ocr.py             OCR do Windows (Windows.Media.Ocr) numa thread de trabalho
+    com.py             COM mínimo via ctypes: GUIDs, CoCreateInstance, chamadas pela vtable
+    winutil.py         processos, descrição do .exe, atalhos .lnk e foco de janelas
+    hardware.py        CPU, GPU (NVML/PDH), RAM, processos, rede (GetIfTable2), ping, disco e bateria
+    audio.py           Core Audio: dispositivos, padrão (IPolicyConfig), volumes e mixer por app
+    privacy.py         microfone/câmera em uso (CapabilityAccessManager\ConsentStore)
+    caffeine.py        SetThreadExecutionState (tela sempre acesa)
+    qr.py              gerador de QR Code (ISO 18004) em Python puro
+    lyrics.py          letra sincronizada do lrclib.net, com cache
+    calc.py            calculadora segura da busca (ast, sem eval)
+    indexer.py         índice de apps, pastas e arquivos + abrir no Terminal/editor
+    power.py           Central de Energia e atualização do Windows pendente
+    taskbar.py         esconder/restaurar a barra do Windows e listar janelas (Alt + Tab)
   ui/
     theme.py           paleta, fonte do sistema e folha de estilo única
     icons.py           ícones SVG de traço (sem fontes de ícones)
@@ -40,8 +52,11 @@ src/ventude/
     context.py         AppContext: serviços + ajustes vivos + sinais compartilhados + clima central
     island.py          janela da ilha: pílula (zonas), painel, avisos, animação, arraste, hover, atalho
     toast.py           avisos na ilha e lembretes da Agenda
-    command.py         barra de comandos
+    command.py         barra de comandos / Menu Iniciar / busca universal
     capture.py         sobreposição de tela: conta-gotas e seleção para OCR
+    qr.py              cartão do QR Code dentro da ilha
+    power_menu.py      menu da Central de Energia (confirmação em dois cliques)
+    dock.py            Dock do Ventude + DockController (barra do Windows sempre restaurada)
     tray.py            ícone e menu da bandeja, avisos
     pages/             uma classe por aba, criada só quando a aba é aberta
 ```
@@ -51,6 +66,13 @@ src/ventude/
 - **Interface (Qt):** tudo que desenha.
 - **Pool `ventude-*` (4 threads):** HTTP, leitura de credenciais, descoberta do Antigravity. O resultado volta por sinal Qt enfileirado (`Tasks.run(..., done=...)`).
 - **`ventude-media`:** loop asyncio do WinRT; eventos chegam à interface por sinais.
+- **`ventude-audio`:** COM inicializado uma vez; fila de comandos de áudio que junta os repetidos (só o último valor de um slider é aplicado) e relê o estado depois de cada lote.
+- **`ventude-keys`:** só com "Tecla Windows abre o Ventude" ligado: hook `WH_KEYBOARD_LL` com laço de mensagens próprio, para a digitação nunca depender da thread da interface. A decisão de cada tecla fica em `WinKeyLogic` (testável sem hook).
+- **Leituras do Sistema, privacidade e lista de janelas do Dock** rodam no pool; o `HardwareMonitor` faz uma leitura por vez.
+
+## Serviços que mexem no sistema
+
+Nenhum serviço que altera o Windows roda antes de `AppContext.start()` (chamado só pelo app): os testes criam o contexto sem iniciar nada. A barra de tarefas e o hook de teclado têm várias camadas de restauração: desligar o ajuste, `aboutToQuit`, `atexit`, `sys.excepthook` (`DockController.emergency`) e, para um processo morto à força, o marcador `barra-escondida.json` lido na próxima abertura.
 
 ## Limites das IAs
 

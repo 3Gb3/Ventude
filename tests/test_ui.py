@@ -1,6 +1,7 @@
 import time
 from datetime import date
 from datetime import time as dtime
+from pathlib import Path
 
 import pytest
 
@@ -16,34 +17,6 @@ def settle(qapp, ms=300):
     while time.monotonic() < end:
         qapp.processEvents()
         time.sleep(0.005)
-
-
-@pytest.fixture
-def app_ctx(qapp, store, home):
-    from ventude.ui.context import AppContext
-
-    now = time.time()
-    fetchers = {
-        "claude": lambda c: Report("claude", "ok", [Window("session", "Sessão · 5h", 55, now + 3600)], "Pro"),
-        "antigravity": lambda c: Report("antigravity", "setup", message="Abra o Antigravity"),
-        "grok": lambda c: Report("grok", "error", message="Cookie recusado"),
-    }
-    ctx = AppContext(store, Tasks(), media=MediaService(), fetchers=fetchers, home=home)
-    store.save_settings(ctx.settings.copy(animation="rapida"))
-    ctx.settings = store.load_settings()
-    yield ctx
-    ctx.tasks.shutdown()
-
-
-@pytest.fixture
-def island(qapp, app_ctx):
-    from ventude.ui.island import Island
-
-    widget = Island(app_ctx)
-    widget.show()
-    yield widget
-    widget.hide()
-    widget.deleteLater()
 
 
 def test_every_tab_opens(qapp, island, app_ctx):
@@ -198,7 +171,7 @@ def test_drop_on_shelf_and_drag_out(qapp, island, app_ctx, tmp_path):
     island.dropEvent(QDropEvent(QPointF(left), args[0], text, *args[2:]))
     assert app_ctx.shelf.items[0].kind == "text"
     out = item_mime(app_ctx.shelf.items)
-    assert out.text() == "um trecho copiado" and out.urls()[0].toLocalFile() == str(file)
+    assert out.text() == "um trecho copiado" and Path(out.urls()[0].toLocalFile()) == file
     page = island.panel.pages["shelf"]
     assert page.grid.count() == 2 and page.grid.dragEnabled()
     app_ctx.shelf.clear()

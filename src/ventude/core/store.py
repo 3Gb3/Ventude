@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS secrets (name TEXT PRIMARY KEY, blob BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS usage_samples (
     provider TEXT NOT NULL, key TEXT NOT NULL, ts REAL NOT NULL, used REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS usage_samples_idx ON usage_samples(provider, key, ts);
+CREATE TABLE IF NOT EXISTS shelf_pins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL, value TEXT NOT NULL UNIQUE, name TEXT NOT NULL, added REAL NOT NULL);
 """
 
 
@@ -236,6 +239,24 @@ class Store:
 
     def prune_samples(self, before: float) -> None:
         self._exec("DELETE FROM usage_samples WHERE ts<?", (before,))
+
+    # ---------- itens fixados na Estante ----------
+    def shelf_pins(self) -> list[tuple[str, str, str, float]]:
+        """(tipo, valor, nome, quando entrou), do mais novo para o mais antigo."""
+        return [
+            (str(k), str(v), str(n), float(a))
+            for k, v, n, a in self._all("SELECT kind, value, name, added FROM shelf_pins ORDER BY added DESC")
+        ]
+
+    def add_shelf_pin(self, kind: str, value: str, name: str, added: float) -> None:
+        self._exec(
+            "INSERT INTO shelf_pins(kind, value, name, added) VALUES(?,?,?,?) "
+            "ON CONFLICT(value) DO UPDATE SET kind=excluded.kind, name=excluded.name",
+            (kind, value, name, added),
+        )
+
+    def remove_shelf_pin(self, value: str) -> None:
+        self._exec("DELETE FROM shelf_pins WHERE value=?", (value,))
 
     # ---------- segredos ----------
     def secret(self, name: str) -> str:

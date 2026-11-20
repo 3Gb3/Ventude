@@ -139,6 +139,44 @@ class IconButton(QPushButton):
         self.setIcon(icons.icon(name, color, self._icon_size))
 
 
+class BadgeButton(IconButton):
+    """Botão de ícone com um pontinho de aviso no canto (ex.: atualização do Windows pendente)."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self._badge = ""
+
+    def set_badge(self, color: str = "") -> None:
+        if color != self._badge:
+            self._badge = color
+            self.update()
+
+    def paintEvent(self, event: object) -> None:
+        super().paintEvent(event)  # type: ignore[arg-type]
+        if not self._badge:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(theme.color(theme.BG), 1.6))
+        p.setBrush(theme.color(self._badge))
+        p.drawEllipse(QPointF(self.width() - 8.5, 8.5), 3.6, 3.6)
+
+
+class PinButton(IconButton):
+    """Alfinete que fixa algo na pílula (um limite das IAs, uma métrica do Sistema)."""
+
+    def __init__(self, pinned_tip: str, free_tip: str, size: int = 24, icon_size: int = 13) -> None:
+        super().__init__("pin", free_tip, size, icon_size)
+        self._tips = (pinned_tip, free_tip)
+        self.pinned = False
+        self.set_pinned(False)
+
+    def set_pinned(self, pinned: bool) -> None:
+        self.pinned = pinned
+        self.set_icon("pin", theme.ACCENT if pinned else theme.STROKE_2)
+        self.setToolTip(self._tips[0] if pinned else self._tips[1])
+
+
 class ElidedLabel(QLabel):
     def __init__(self, text: str = "", name: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -344,6 +382,14 @@ class Sparkline(QWidget):
         """bounds fixa a escala (ex.: 0–100 para porcentagem); sem ela, usa o mínimo e o máximo."""
         self._values, self._color, self._bounds = list(values), color, bounds
         self.update()
+
+    def expand(self, height: int = 30) -> Sparkline:
+        """Ocupa a largura toda do card (o padrão é um mini-gráfico de 96 px)."""
+        self.setFixedHeight(height)
+        self.setMinimumWidth(60)
+        self.setMaximumWidth(16_777_215)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return self
 
     def paintEvent(self, _event: object) -> None:
         if len(self._values) < 2:

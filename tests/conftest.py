@@ -39,6 +39,40 @@ def store(tmp_home):
     s.close()
 
 
+@pytest.fixture
+def app_ctx(qapp, store, home):
+    """Contexto com IAs de mentira. Os serviços que mexem no sistema não são iniciados (sem start())."""
+    import time
+
+    from ventude.core.tasks import Tasks
+    from ventude.limits.model import Report, Window
+    from ventude.services.media import MediaService
+    from ventude.ui.context import AppContext
+
+    now = time.time()
+    fetchers = {
+        "claude": lambda c: Report("claude", "ok", [Window("session", "Sessão · 5h", 55, now + 3600)], "Pro"),
+        "antigravity": lambda c: Report("antigravity", "setup", message="Abra o Antigravity"),
+        "grok": lambda c: Report("grok", "error", message="Cookie recusado"),
+    }
+    ctx = AppContext(store, Tasks(), media=MediaService(), fetchers=fetchers, home=home)
+    store.save_settings(ctx.settings.copy(animation="rapida"))
+    ctx.settings = store.load_settings()
+    yield ctx
+    ctx.tasks.shutdown()
+
+
+@pytest.fixture
+def island(qapp, app_ctx):
+    from ventude.ui.island import Island
+
+    widget = Island(app_ctx)
+    widget.show()
+    yield widget
+    widget.hide()
+    widget.deleteLater()
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PySide6.QtWidgets import QApplication

@@ -27,6 +27,7 @@ from ventude.core.timefmt import (
     weekday_name,
 )
 from ventude.limits.model import Report, Window
+from ventude.services.lyrics import Lyrics, cache_key
 from ventude.services.media import MediaState, format_time
 from ventude.services.timer import countdown
 from ventude.services.weather import Forecast, Place, icon_for
@@ -475,11 +476,16 @@ class MediaCard(Card):
         self.play.clicked.connect(self.media.play_pause)
         self.next.clicked.connect(self.media.next)
         self.source = label("Tocando agora", "Caption")
+        self.lyric = ElidedLabel("", "")
+        self.lyric.setStyleSheet(f"color: {theme.ACCENT}; font-size: 12px; font-weight: 600;")
+        self.lyric.hide()
+        self.lyrics: Lyrics | None = None
+        self._lyrics_key = ""
         bar = hbox(self.pos, self.slider, self.dur, spacing=8)
         controls = hbox(self.prev, self.play, self.next, None, spacing=4)
         self.player = QWidget()
         self.player.setLayout(
-            vbox(None, self.source, self.title, self.artist, 8, bar, controls, None, spacing=3)
+            vbox(None, self.source, self.title, self.artist, self.lyric, 6, bar, controls, None, spacing=3)
         )
         self.empty = QWidget()
         self.empty_text = label("", "Muted", wrap=True)
@@ -490,6 +496,8 @@ class MediaCard(Card):
         self.tick = QTimer(self, interval=500, timeout=self._progress)
         self.media.state_changed.connect(self.set_state)
         self.media.thumbnail_changed.connect(self.set_art)
+        ctx.lyrics.ready.connect(self._lyrics_ready)
+        ctx.settings_changed.connect(lambda _s: self._lyrics_for(self.state, force=True))
         self.set_state(self.media.state)
         self.set_art(self.media.thumbnail)
 
@@ -520,11 +528,48 @@ class MediaCard(Card):
         self.slider.setEnabled(state.can_seek)
         self.slider.setRange(0, int(state.duration_s * 1000))
         self.dur.setText(format_time(state.duration_s) if state.duration_s else "—")
+        self._lyrics_for(state)
         self._progress()
         if state.is_playing and state.duration_s:
             self.tick.start()
         else:
             self.tick.stop()
+
+    # ---------- letra sincronizada ----------
+    def _lyrics_for(self, state: MediaState | None, force: bool = False) -> None:
+        key = cache_key(state.title, state.artist) if state else ""
+        if key == self._lyrics_key and not force:
+            return
+        self._lyrics_key = key
+        self.lyrics = None
+        if state is not None and self.ctx.settings.lyrics_enabled:
+            found = self.ctx.lyrics.lookup(state.title, state.artist, state.album, state.duration_s)
+            if found is not False:
+                self.lyrics = found  # type: ignore[assignment]
+        self._show_lyric()
+
+    def _lyrics_ready(self, key: str, found: Lyrics | None) -> None:
+        if key == self._lyrics_key and self.ctx.settings.lyrics_enabled:
+            self.lyrics = found
+            self._show_lyric()
+
+    def _show_lyric(self) -> None:
+        state = self.media.state or self.state
+        lyrics = self.lyrics if self.ctx.settings.lyrics_enabled else None
+        if not state or not lyrics or not (lyrics.synced or lyrics.instrumental):
+            self.lyric.hide()
+            if self.tick.interval() != 500:
+                self.tick.setInterval(500)
+            return
+        if lyrics.instrumental and not lyrics.synced:
+            current, upcoming = "♪ Instrumental", ""
+        else:
+            current, upcoming = lyrics.at(state.position_at())
+        self.lyric.setText(f"♪ {current}" if current else "♪ …")
+        self.lyric.setToolTip(f"A seguir: {upcoming}" if upcoming else "")
+        self.lyric.show()
+        if self.tick.interval() != 250:
+            self.tick.setInterval(250)  # verso troca no tempo certo
 
     def set_art(self, data: bytes) -> None:
         art = rounded_pixmap(data, self.ART, 16)
@@ -540,6 +585,8 @@ class MediaCard(Card):
         position = state.position_at()
         self.pos.setText(format_time(position))
         self.slider.setValue(int(position * 1000))
+        if self.lyrics is not None:
+            self._show_lyric()
 
     def _seek(self) -> None:
         self._seeking = False
