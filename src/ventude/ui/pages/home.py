@@ -336,7 +336,14 @@ def fill_ring(ring: Ring, report: Report, head: Window | None, *, compact: bool)
     used = head.used_at() if head else None
     color = theme.usage_color(report.provider, used)
     text = "" if compact else ("—" if used is None else f"{used:.0f}%")
-    ring.set_value(used, color, text, dim=report.state != "ok")
+    ring.set_value(
+        used,
+        color,
+        text,
+        dim=report.state != "ok",
+        base=theme.provider_color(report.provider),
+        marker=compact,
+    )
     tip = f"{report.name}: " + (
         f"{used:.0f}% usado em {head.label}. {resets_text(head.resets_at)}"
         if head and used is not None

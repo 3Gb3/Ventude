@@ -137,3 +137,25 @@ def is_hotkey_message(message: object) -> bool:
     except (TypeError, ValueError):
         return False
     return msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID
+
+
+VK_VOLUME_DOWN, VK_VOLUME_UP = 0xAE, 0xAF
+KEYEVENTF_KEYUP = 0x0002
+
+
+def volume_step(up: bool, steps: int = 1) -> bool:
+    """Sobe ou desce o volume do Windows (como as teclas de volume, com o aviso do sistema)."""
+    if sys.platform != "win32" or steps <= 0:
+        return False
+    import ctypes
+
+    key = VK_VOLUME_UP if up else VK_VOLUME_DOWN
+    try:
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        for _ in range(min(steps, 10)):
+            user32.keybd_event(key, 0, 0, 0)
+            user32.keybd_event(key, 0, KEYEVENTF_KEYUP, 0)
+    except (AttributeError, OSError):
+        log.debug("Não foi possível mudar o volume", exc_info=True)
+        return False
+    return True

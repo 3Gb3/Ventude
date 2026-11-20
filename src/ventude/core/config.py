@@ -52,6 +52,8 @@ class Settings:
     pinned_limits_json: str = ""  # {"provedor": "chave da janela"} mostrada no anel
     media_source: str = "spotify"  # spotify | any
     hover_delay_ms: int = 0
+    zone_open: bool = True  # passar o mouse nos anéis/clima abre direto nessas abas
+    pill_progress: bool = True  # linha de andamento da música na ilha fechada
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3

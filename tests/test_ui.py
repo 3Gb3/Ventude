@@ -315,3 +315,90 @@ def test_weather_located_by_ip_when_no_city(qapp, app_ctx, monkeypatch):
     assert Place.from_json(app_ctx.settings.weather_city_json) == found
     settle(qapp, 200)
     assert calls and calls[0] == found  # a cidade nova já dispara a busca do clima
+
+
+def _mouse(kind, pos, button):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    return QMouseEvent(kind, QPointF(pos), QPointF(pos), button, button, Qt.KeyboardModifier.NoModifier)
+
+
+def test_pill_zones_and_quick_media(qapp, island, app_ctx, monkeypatch):
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+
+    app_ctx.limits.refresh_all()
+    settle(qapp, 400)
+    pill = island.pill
+    center = pill.ring_box.geometry().center()
+    assert pill.zone_at(center) == "rings"
+    press, release = QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease
+    left = Qt.MouseButton.LeftButton
+    island.mousePressEvent(_mouse(press, center, left))
+    island.mouseReleaseEvent(_mouse(release, center, left))
+    assert island.expanded and island.panel.current == "limits"
+    island.collapse()
+    settle(qapp, 400)
+    island.mousePressEvent(_mouse(press, pill.date.geometry().center(), left))
+    island.mouseReleaseEvent(_mouse(release, pill.date.geometry().center(), left))
+    assert island.panel.current == "agenda"
+    island.collapse()
+    settle(qapp, 400)
+
+    calls = []
+    for name in ("play_pause", "next", "previous"):
+        monkeypatch.setattr(app_ctx.media, name, lambda n=name: calls.append(n))
+    monkeypatch.setattr("ventude.services.system.volume_step", lambda up, steps=1: calls.append(f"vol{up}"))
+    state = MediaState("Song", "Band", "", "playing", 10, 100, time.monotonic(), True, True, True, True)
+    app_ctx.media.state_changed.emit(state)
+    settle(qapp, 400)
+    art = pill.art.geometry().center()
+    assert pill.zone_at(art) == "media"
+    island.mousePressEvent(_mouse(press, art, left))
+    island.mouseReleaseEvent(_mouse(release, art, left))
+    middle = Qt.MouseButton.MiddleButton
+    island.mousePressEvent(_mouse(press, QPoint(5, 5), middle))
+    island.mouseReleaseEvent(_mouse(release, QPoint(5, 5), middle))
+    for delta, mods in (
+        (QPoint(0, 120), Qt.KeyboardModifier.NoModifier),
+        (QPoint(0, -120), Qt.KeyboardModifier.ShiftModifier),
+    ):
+        wheel = QWheelEvent(
+            QPointF(art),
+            QPointF(art),
+            QPoint(),
+            delta,
+            Qt.MouseButton.NoButton,
+            mods,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        island.wheelEvent(wheel)
+    assert calls == ["play_pause", "play_pause", "volTrue", "next"]
+    assert not island.expanded and island._media_hold  # mexer na música não abre o painel
+
+
+def test_compact_ring_keeps_provider_color_in_alert(qapp, island, app_ctx):
+    from ventude.limits.model import Report, Window
+    from ventude.ui import theme
+    from ventude.ui.pages.home import fill_ring
+    from ventude.ui.widgets import Ring
+
+    ring = Ring(16, 2.6)
+    report = Report("claude", "ok", [Window("session", "Sessão", 92, None)])
+    fill_ring(ring, report, report.windows[0], compact=True)
+    assert ring._color == theme.DANGER and ring._base == theme.provider_color("claude") and ring._marker
+
+
+def test_pill_width_follows_text(qapp, island, app_ctx):
+    settle(qapp, 300)
+    short = MediaState("Oi", "", "", "playing", 1, 100, time.monotonic(), True, True, True, True)
+    app_ctx.media.state_changed.emit(short)
+    narrow = island.pill.preferred_width()
+    long_title = "Uma música com um nome bem comprido de verdade"
+    app_ctx.media.state_changed.emit(
+        MediaState(long_title, "Banda", "", "playing", 1, 100, time.monotonic(), True, True, True, True)
+    )
+    wide = island.pill.preferred_width()
+    assert 150 <= narrow < wide <= 560

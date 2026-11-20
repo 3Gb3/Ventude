@@ -284,6 +284,14 @@ class SettingsPage(Page):
                 self.hover_delay,
             )
         )
+        self.zone_open = self._switch(s.zone_open, "zone_open")
+        body.addWidget(
+            setting_row(
+                "Abrir na aba apontada",
+                "Mouse nos anéis abre a aba IAs; no clima, a aba Clima. Clique na data abre a Agenda.",
+                self.zone_open,
+            )
+        )
         self.fullscreen = self._switch(s.hide_fullscreen, "hide_fullscreen")
         body.addWidget(
             setting_row(
@@ -313,6 +321,15 @@ class SettingsPage(Page):
                 "Música",
                 "Qual player a ilha mostra e controla. Só o Spotify: ignora vídeos e abas do navegador.",
                 self.media_source,
+            )
+        )
+        self.progress = self._switch(s.pill_progress, "pill_progress")
+        body.addWidget(
+            setting_row(
+                "Andamento da música na ilha",
+                "Linha fina na base da ilha fechada. Na ilha: clique do meio ou na capa toca/pausa, "
+                "a roda do mouse muda o volume e Shift + roda troca de faixa.",
+                self.progress,
             )
         )
         self.weather_pill = self._switch(s.pill_weather, "pill_weather")

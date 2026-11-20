@@ -13,6 +13,7 @@ from PySide6.QtCore import (
     QEvent,
     QParallelAnimationGroup,
     QPoint,
+    QPointF,
     QPropertyAnimation,
     QRect,
     QRectF,
@@ -88,6 +89,7 @@ HEADER_HEIGHT = 54
 TOP_MARGIN = 6
 BACK_HOME_AFTER = 5 * 60
 COLLAPSE_COOLDOWN = 0.6
+MEDIA_HOVER_DELAY = 650  # ms: sobre a música, espera um pouco para dar tempo da roda/clique
 
 
 def anchored_rect(area: QRect, width: int, height: int, anchor: QPoint) -> QRect:
@@ -110,6 +112,7 @@ class Pill(QWidget):
         super().__init__(parent)
         self.ctx = ctx
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.setMouseTracking(True)  # a ilha acompanha em qual parte da pílula o mouse está
         self.art = QLabel()
         self.art.setFixedSize(22, 22)
         self.date = label("", "")
@@ -174,6 +177,8 @@ class Pill(QWidget):
         now = datetime.now()
         self.time.setText(clock(now, self.ctx.settings.clock_24h))
         self.date.setText(f"{WEEKDAYS_SHORT[now.weekday()]} {now.day}")
+        if self.playing:
+            self.update()  # linha de andamento da música
 
     def set_media(self, state: MediaState | None) -> None:
         self.media = state
@@ -239,11 +244,72 @@ class Pill(QWidget):
         self.weather.setToolTip(tip)
         self.weather.show()
 
+    @staticmethod
+    def _text_width(widget: QLabel, text: str | None = None) -> int:
+        widget.ensurePolished()
+        return widget.fontMetrics().horizontalAdvance(widget.text() if text is None else text) + 2
+
     def preferred_width(self) -> int:
+        """Largura pelo texto de verdade (data, clima, hora, música e anéis), com limites."""
+        spacing = self.row.spacing()
+        parts: list[int] = []
+        if self.has_media:
+            title = self.title.full_text()
+            parts += [22, max(80, min(self._text_width(self.title, title), 250)), 14]
+        else:
+            parts.append(self._text_width(self.date))
+        if not self.weather.isHidden():
+            width = 16 + 4 + self._text_width(self.weather_temp)
+            if not self.weather_rain.isHidden():
+                width += 4 + self._text_width(self.weather_rain)
+            parts.append(width)
+        parts.append(self._text_width(self.time, self.time.text() or "00:00"))
         rings = self.visible_rings()
-        rings_w = rings * 16 + max(0, rings - 1) * 6 + (14 if rings else 0)
-        weather_w = 50 if not self.weather.isHidden() else 0
-        return (360 if self.has_media else 170) + rings_w + weather_w
+        if rings:
+            parts.append(4 + rings * 16 + (rings - 1) * 6)
+        margins = self.row.contentsMargins()
+        breathing = 10 if self.has_media else 34  # sem música, a hora fica mais ao centro
+        total = margins.left() + margins.right() + sum(parts) + spacing * (len(parts) - 1) + breathing
+        return max(150, min(total, 560))
+
+    def zone_at(self, pos: QPoint) -> str:
+        """Qual parte da pílula está sob o ponto: rings, weather, media, date, time ou ''."""
+
+        def hit(widget: QWidget, pad: int = 4) -> bool:
+            return widget.isVisibleTo(self) and widget.geometry().adjusted(-pad, -20, pad, 20).contains(pos)
+
+        if hit(self.ring_box):
+            return "rings"
+        if hit(self.weather):
+            return "weather"
+        if self.has_media and (hit(self.art) or hit(self.eq)):
+            return "media"
+        if self.has_media and hit(self.title, 0):
+            return "title"
+        if hit(self.date):
+            return "date"
+        if hit(self.time):
+            return "time"
+        return ""
+
+    def paintEvent(self, _event: object) -> None:
+        """Linha fina com o andamento da música, na base da pílula."""
+        state = self.media
+        if not state or state.duration_s <= 0 or not self.ctx.settings.pill_progress:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        left, right = 20.0, self.width() - 20.0
+        y = self.height() - 2.5
+        pen = QPen(theme.color(theme.STROKE_2, 0.9), 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.drawLine(QPointF(left, y), QPointF(right, y))
+        done = max(0.0, min(1.0, state.position_at() / state.duration_s))
+        if done > 0:
+            pen.setColor(theme.color(theme.ACCENT if state.is_playing else theme.TEXT_2, 0.9))
+            p.setPen(pen)
+            p.drawLine(QPointF(left, y), QPointF(left + (right - left) * done, y))
 
 
 class DropHint(QWidget):
@@ -463,6 +529,8 @@ class Island(QWidget):
         self.setAcceptDrops(True)  # arrastar apps, pastas e links para os Atalhos
         self.expanded = False
         self._drag_files = False
+        self._media_hold = False  # usou a roda/clique na música: não abre por hover
+        self._hover_zone = ""
         self._holds = 0
         self._press: QPoint | None = None
         self._origin = QPoint()
@@ -683,28 +751,67 @@ class Island(QWidget):
             self.collapse_timer.start(max(600, self.ctx.settings.collapse_delay_ms))
 
     # ---------- eventos ----------
+    # ---------- zonas da pílula ----------
+    def _zone(self) -> str:
+        if self.expanded:
+            return ""
+        return self.pill.zone_at(self.mapFromGlobal(QCursor.pos()))
+
+    def _zone_page(self, zone: str, *, click: bool) -> str | None:
+        """Aba que cada parte da pílula abre. No hover, só anéis e clima (intenção clara)."""
+        if not click and not self.ctx.settings.zone_open:
+            return None
+        pages = {"rings": "limits", "weather": "weather"}
+        if click:
+            pages |= {"date": "agenda", "time": "home", "title": "home"}
+        page = pages.get(zone)
+        return page if page and (page == "home" or self.ctx.settings.module_enabled(page)) else None
+
     def enterEvent(self, _event: object) -> None:
         self.collapse_timer.stop()
+        self._media_hold = False
+        self._hover_zone = self._zone()
         if self.expanded or self._dragging or not self.ctx.settings.hover_open:
             return
         if time.time() - self._collapsed_at < COLLAPSE_COOLDOWN:
             return  # o mouse ainda estava sobre o painel que acabou de fechar
+        self._schedule_hover(self._hover_zone)
+
+    def _schedule_hover(self, zone: str) -> None:
         delay = self.ctx.settings.hover_delay_ms
+        if zone in ("media", "title") and self.pill.has_media:
+            delay = max(delay, MEDIA_HOVER_DELAY)  # dá tempo de usar a roda ou o clique na música
         if delay <= 0:
             self._hover_expand()  # abre na hora
         else:
             self.hover_timer.start(delay)
 
     def _hover_expand(self) -> None:
-        if self.expanded or self._dragging or self._press is not None:
+        if self.expanded or self._dragging or self._press is not None or self._media_hold:
             return
         if self.geometry().contains(QCursor.pos()):
-            self.expand()
+            self.expand(self._zone_page(self._zone(), click=False))
 
     def leaveEvent(self, _event: object) -> None:
         self.hover_timer.stop()
+        self._media_hold = False
         if self.expanded and not self._dragging:
             self.collapse_timer.start(self.ctx.settings.collapse_delay_ms)
+
+    def wheelEvent(self, event: object) -> None:
+        """Roda sobre a pílula com música: volume. Shift ou roda lateral: troca de faixa."""
+        if self.expanded or not self.pill.has_media:
+            return
+        self.hover_timer.stop()
+        self._media_hold = True  # mexeu na música: não abre o painel por cima
+        delta = event.angleDelta()  # type: ignore[attr-defined]
+        shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)  # type: ignore[attr-defined]
+        horizontal = delta.x() if delta.x() else (delta.y() if shift else 0)
+        if horizontal:
+            (self.ctx.media.next if horizontal < 0 else self.ctx.media.previous)()
+        elif delta.y():
+            system.volume_step(delta.y() > 0, max(1, abs(delta.y()) // 120))
+        event.accept()  # type: ignore[attr-defined]
 
     # ---------- arrastar e soltar (Atalhos) ----------
     def _accepts_files(self, event: QDragEnterEvent | QDragMoveEvent | QDropEvent) -> bool:
@@ -770,6 +877,11 @@ class Island(QWidget):
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton and not self.expanded and self.pill.has_media:
+            self.hover_timer.stop()
+            self._media_hold = True
+            event.accept()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         if self.expanded and event.position().y() > HEADER_HEIGHT:
@@ -781,6 +893,12 @@ class Island(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._press is None:
+            if not self.expanded and self.hover_timer.isActive() and not self._media_hold:
+                zone = self.pill.zone_at(event.position().toPoint())
+                if zone != self._hover_zone:  # saiu da música para outra parte: abre na hora
+                    self._hover_zone = zone
+                    self.hover_timer.stop()
+                    self._schedule_hover(zone)
             return
         delta = event.globalPosition().toPoint() - self._press
         if not self._dragging and delta.manhattanLength() >= QApplication.startDragDistance():
@@ -792,6 +910,9 @@ class Island(QWidget):
             self.move(self._origin + delta)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton and not self.expanded and self.pill.has_media:
+            self.ctx.media.play_pause()  # clique do meio: tocar/pausar sem abrir
+            return
         if self._press is None or event.button() != Qt.MouseButton.LeftButton:
             return
         self._press = None
@@ -801,7 +922,12 @@ class Island(QWidget):
             self._save_position()
             self.reposition()
         elif not self.expanded:
-            self.expand()
+            zone = self.pill.zone_at(event.position().toPoint())
+            if zone == "media":  # capa ou equalizador: tocar/pausar
+                self._media_hold = True
+                self.ctx.media.play_pause()
+                return
+            self.expand(self._zone_page(zone, click=True))
 
     def _save_position(self) -> None:
         anchor = QPoint(self.x() + self.width() // 2, self.y())
@@ -847,10 +973,9 @@ class Island(QWidget):
                 self._animate(target)
 
     def _media_changed(self, state: MediaState | None) -> None:
-        was = self.pill.has_media
         self.pill.set_media(state)
-        if was != self.pill.has_media:
-            self._resize_compact()
+        self.pill.update()
+        self._resize_compact()
 
     def _rings_changed(self) -> None:
         before = self.pill.visible_rings()

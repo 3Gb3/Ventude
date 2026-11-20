@@ -191,6 +191,8 @@ class Ring(QWidget):
         self._target: float | None = None
         self._shown = 0.0
         self._color = theme.ACCENT
+        self._base = ""  # cor da IA: trilho e ponto central continuam com ela em alerta
+        self._marker = False
         self._text = ""
         self._dim = False
         self._anim = QVariantAnimation(self)
@@ -209,9 +211,18 @@ class Ring(QWidget):
             self.update()
 
     def set_value(
-        self, value: float | None, color: str, text: str = "", *, dim: bool = False, animate: bool = True
+        self,
+        value: float | None,
+        color: str,
+        text: str = "",
+        *,
+        dim: bool = False,
+        animate: bool = True,
+        base: str = "",
+        marker: bool = False,
     ) -> None:
         self._color, self._text, self._dim = color, text, dim
+        self._base, self._marker = base, marker
         target = float(max(0.0, min(100.0, float(value or 0.0))))
         changed = value != self._target
         self._target = value
@@ -229,7 +240,12 @@ class Ring(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         t = self._thickness
         rect = QRectF(self.rect()).adjusted(t / 2 + 0.5, t / 2 + 0.5, -t / 2 - 0.5, -t / 2 - 0.5)
-        track = theme.color(self._color, 0.16) if self._target is not None else theme.color(theme.STROKE_2)
+        if self._target is None:
+            track = theme.color(theme.STROKE_2)
+        elif self._base and self._base != self._color:
+            track = theme.color(self._base, 0.38)  # em alerta, o trilho mostra de qual IA é
+        else:
+            track = theme.color(self._color, 0.16)
         pen = QPen(track, t)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
@@ -238,6 +254,11 @@ class Ring(QWidget):
             pen.setColor(theme.color(self._color, 0.5 if self._dim else 1.0))
             p.setPen(pen)
             p.drawArc(rect, 90 * 16, int(-self._shown / 100 * 360 * 16))
+        if self._marker and self._base:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(theme.color(self._base, 0.6 if self._dim else 1.0))
+            radius = max(1.8, (self.width() - 2 * t) * 0.2)
+            p.drawEllipse(QRectF(self.rect()).center(), radius, radius)
         if self._text:
             p.setPen(theme.color(theme.TEXT_2 if self._dim else theme.TEXT))
             p.setFont(theme.font(max(10, int(self.width() * 0.24)), Semi))
