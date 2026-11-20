@@ -1,5 +1,30 @@
 # Progresso
 
+## Versão 1.1.0
+
+Ajustes pedidos depois da 1.0 (branch `new_version_1.1`). Ao entrar na `main`, o build publica a **1.1.0**.
+
+- [x] **Claude e Grok conectando**: o claude.ai e o grok.com respondiam com o desafio do Cloudflare ("Just a moment...") para o Python puro. Agora a conexão usa o `curl_cffi` (igual à do Chrome). Conferido: o mesmo pedido que antes recebia o desafio passa a receber a resposta da API.
+- [x] Claude Code: o token vencido (dura poucas horas) é renovado como o próprio Claude Code faz e gravado no mesmo arquivo, sem mexer no resto. Ajuste para desligar. Também procura o login no WSL quando a distro está aberta.
+- [x] claude.ai e grok.com aceitam o "Copiar como cURL" (bash, cmd ou PowerShell): vão juntos cookie, User-Agent e cabeçalhos extras. Mensagens claras para cookie vencido, cookie sem login e bloqueio do Cloudflare. Os Ajustes mostram se conectou.
+- [x] **Gemini**: cada modelo vira uma linha, agrupada por família (Gemini, Claude, GPT, Outros). Modelos diferentes não são mais somados numa linha só. Codinomes internos (ex.: argon) vão para "Outros" e nunca para o anel.
+- [x] O anel da ilha segue os modelos Gemini e o **alfinete** na aba IAs fixa qualquer limite no anel (de qualquer IA).
+- [x] **Arrastar para os Atalhos**: a ilha inteira aceita arquivos, pastas, apps e links, mesmo fechada; abre nos Atalhos, não fecha durante o arraste e funciona com a lista vazia.
+- [x] **Só o Spotify**: a mídia segue e controla só o Spotify (Ajustes > Música volta para qualquer player).
+- [x] Música **pausada continua na ilha**, com título e capa apagados.
+- [x] **Animação ao trocar de aba** (desliza do lado da aba clicada, com fade).
+- [x] **Abre na hora** ao passar o mouse (antes esperava 0,16 s; agora ajustável) e o conteúdo aparece junto com a animação de abertura.
+- [x] **Clima por dia**: clique num dia (na aba Clima ou no card do Início) para ver umidade, chuva, vento, UV, sensação, nascer e pôr do sol e o gráfico hora a hora com detalhes ao passar o mouse.
+- [x] Versão: o primeiro build de cada linha publica a versão do `pyproject.toml` (1.1.0), os seguintes sobem o último número.
+
+### A validar no seu PC
+
+- Claude via claude.ai e Grok via grok.com com a sua conta (o Cloudflare também olha o IP; se barrar, use o "Copiar como cURL").
+- Renovação do token do Claude Code com o Claude Code instalado.
+- Arrastar do Explorer, do menu Iniciar e do navegador para a ilha.
+- Spotify pausado e retomado; Spotify da loja e do site.
+- Primeiro build da `main` gerando a Release v1.1.0 (o log de teste deve mostrar "Conexão com claude.ai/grok.com: curl_cffi").
+
 ## Versão 1.0: completa
 
 Reformulação completa do Ventude (19/11/2026).

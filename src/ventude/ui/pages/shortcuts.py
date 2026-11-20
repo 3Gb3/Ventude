@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QFileInfo, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon
+from PySide6.QtCore import QFileInfo, QPoint, QSize, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QFileIconProvider,
@@ -30,7 +30,7 @@ TILE = QSize(108, 92)
 
 
 class ShortcutGrid(QListWidget):
-    files_dropped = Signal(list)
+    """Grade de atalhos. Arquivos soltos aqui sobem para a ilha, que trata todos os casos."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -50,26 +50,11 @@ class ShortcutGrid(QListWidget):
         self.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         self.setEditTriggers(QListWidget.EditTrigger.NoEditTriggers)
-        self.setAcceptDrops(True)
-        self.setDragDropMode(QListWidget.DragDropMode.DropOnly)
+        self.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
+        self.setAcceptDrops(False)
+        self.viewport().setAcceptDrops(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event: QDropEvent) -> None:
-        paths = [u.toLocalFile() or u.toString() for u in event.mimeData().urls()]
-        if paths:
-            self.files_dropped.emit(paths)
-            event.acceptProposedAction()
 
 
 class ShortcutsPage(Page):
@@ -106,13 +91,12 @@ class ShortcutsPage(Page):
 
         self.grid = ShortcutGrid()
         self.grid.itemClicked.connect(self._open)
-        self.grid.files_dropped.connect(self._add_paths)
         self.grid.itemChanged.connect(self._renamed)
         self.grid.customContextMenuRequested.connect(self._menu)
         self.empty = EmptyState(
             "apps",
             "Seus atalhos ficam aqui",
-            "Arraste apps, pastas ou arquivos para esta área, ou use os botões acima.",
+            "Arraste apps, pastas, arquivos ou links para a ilha (mesmo fechada), ou use os botões acima.",
         )
         self.root.addWidget(self.grid, 1)
         self.root.addWidget(self.empty, 1)
@@ -134,7 +118,7 @@ class ShortcutsPage(Page):
         self.empty.setVisible(not items)
         self.subtitle.setText(
             f"{len(items)} atalho{'s' if len(items) != 1 else ''} · clique para abrir, "
-            "botão direito para editar"
+            "botão direito para editar, arraste para a ilha para adicionar"
             if items
             else "Abra o que você mais usa com um clique"
         )
@@ -165,20 +149,39 @@ class ShortcutsPage(Page):
                 return system
         return icons.icon("folder" if shortcut.kind == "folder" else "file", theme.TEXT_2, 34)
 
-    def _add(self, kind: str, target: str, name: str = "") -> None:
+    def _add(self, kind: str, target: str, name: str = "") -> bool:
         if self.ctx.store.add_shortcut(kind, name or launcher.default_label(target, kind), target):
             self.status.setText("")
             self.ctx.data_changed.emit("shortcuts")
-        else:
-            self.status.setText("Esse atalho já existe.")
+            return True
+        self.status.setText("Esse atalho já existe.")
+        return False
 
-    def _add_paths(self, paths: list[str]) -> None:
+    def add_paths(self, paths: list[str]) -> int:
+        """Arquivos, pastas, apps e links soltos na ilha. Devolve quantos entraram."""
+        added = repeated = ignored = 0
         for raw in paths:
-            url = raw if raw.startswith(("http://", "https://")) else ""
-            if url:
-                self._add("url", url)
+            raw = (raw or "").strip()
+            if raw.startswith(("http://", "https://")):
+                ok = self._add("url", raw)
             elif raw and Path(raw).exists():
-                self._add(launcher.kind_for(raw), str(Path(raw)))
+                ok = self._add(launcher.kind_for(raw), str(Path(raw)))
+            else:
+                ignored += 1
+                continue
+            added += ok
+            repeated += not ok
+        parts = []
+        if added:
+            parts.append(f"{added} atalho{'s' if added != 1 else ''} adicionado{'s' if added != 1 else ''}")
+        if repeated:
+            parts.append(f"{repeated} já existia{'m' if repeated != 1 else ''}")
+        if ignored:
+            parts.append(f"{ignored} item{'s' if ignored != 1 else ''} do Windows sem caminho (ignorado)")
+        self.status.setText(" · ".join(parts))
+        return added
+
+    _add_paths = add_paths
 
     def _add_app(self) -> None:
         with self.ctx.keep_open():

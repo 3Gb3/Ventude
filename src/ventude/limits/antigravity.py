@@ -40,7 +40,7 @@ BODY = {
         "locale": "pt-BR",
     }
 }
-FAMILY_ORDER = ("gemini", "claude", "gpt")
+GROUPS = ("Gemini", "Claude", "GPT", "Outros", "Créditos")
 NOT_RUNNING = "Abra o Antigravity e faça login: as cotas aparecem enquanto ele está aberto."
 
 _PS_SCRIPT = r"""
@@ -159,30 +159,56 @@ def find_processes() -> list[ServerProcess]:
     return found
 
 
-def _family(label: str) -> int:
+_INTERNAL = re.compile(r"^[A-Za-z0-9]+([_.-][A-Za-z0-9]+)*$")
+
+
+def is_internal(label: str) -> bool:
+    """Codinomes internos (ex.: argon, MODEL_PLACEHOLDER_M7) em vez do nome do modelo."""
+    text = label.strip()
+    if not _INTERNAL.match(text):
+        return False
+    return text.islower() or text.upper().startswith(("MODEL_", "PLACEHOLDER"))
+
+
+def family(label: str) -> str:
     lowered = label.lower()
-    for index, family in enumerate(FAMILY_ORDER):
-        if family in lowered:
-            return index
-    return len(FAMILY_ORDER)
+    if is_internal(label):
+        return "Outros"
+    if "gemini" in lowered:
+        return "Gemini"
+    if any(name in lowered for name in ("claude", "sonnet", "opus", "haiku")):
+        return "Claude"
+    if "gpt" in lowered or "oss" in lowered:
+        return "GPT"
+    return "Outros"
 
 
-def merge_labels(labels: list[str]) -> str:
-    unique = list(dict.fromkeys(labels))
-    if len(unique) == 1:
-        return unique[0]
-    bases = list(dict.fromkeys(label.split(" (")[0].strip() for label in unique))
-    if len(bases) == 1:
-        return bases[0]
-    families = {label.split()[0] for label in unique if label.split()}
-    if len(families) == 1:
-        return f"{families.pop()} · {len(unique)} modelos"
-    return f"{unique[0]} +{len(unique) - 1}"
+def pretty_label(label: str) -> str:
+    if not is_internal(label):
+        return label
+    text = re.sub(r"^(model_)?(placeholder_)?", "", label.strip(), flags=re.IGNORECASE)
+    text = re.sub(r"[_.-]+", " ", text).strip() or label
+    return text[:1].upper() + text[1:]
+
+
+def _base(label: str) -> str:
+    return label.split(" (")[0].strip()
+
+
+def _variant(label: str) -> str:
+    match = re.search(r"\(([^)]*)\)\s*$", label)
+    return match.group(1).strip() if match else label
 
 
 def extract(data: Any) -> tuple[list[Window], str, str]:
-    """Extrai cotas de qualquer formato conhecido (GetUserStatus ou resumo novo)."""
-    entries: list[tuple[str, float, float | None]] = []
+    """Extrai a cota de cada modelo de qualquer formato conhecido (GetUserStatus ou resumo novo).
+
+    Cada modelo vira uma linha, agrupada pela família (Gemini, Claude, GPT, Outros).
+    Só variantes do mesmo modelo com a mesma cota, como "Gemini 3 Pro (High)" e
+    "(Low)", viram uma linha só. Modelos diferentes nunca são somados.
+    """
+    entries: dict[str, tuple[float, float | None]] = {}
+    internal: set[str] = set()
 
     def add(label: str, quota: dict[str, Any], node: dict[str, Any]) -> None:
         fraction = as_float(quota.get("remainingFraction"))
@@ -192,7 +218,10 @@ def extract(data: Any) -> tuple[list[Window], str, str]:
                 return
             fraction = 0.0  # proto3 omite zero: sem fração + com renovação = esgotado
         used = round(max(0.0, min(1.0, 1.0 - fraction)) * 100, 1)
-        entries.append((label or "Modelo", used, reset))
+        name = pretty_label(label or "Modelo")
+        if is_internal(label):
+            internal.add(name)
+        entries.setdefault(name, (used, reset))
 
     def visit(node: Any, inherited: str = "") -> None:
         if isinstance(node, dict):
@@ -218,13 +247,14 @@ def extract(data: Any) -> tuple[list[Window], str, str]:
                 visit(value, inherited)
 
     visit(data)
-    groups: dict[tuple[float, int], list[str]] = {}
-    for label, used, reset in entries:
-        groups.setdefault((used, int(reset // 60) if reset else 0), []).append(label)
+    merged: dict[tuple[str, float, int], list[str]] = {}
+    for label, (used, reset) in entries.items():
+        merged.setdefault((_base(label), used, int(reset // 60) if reset else 0), []).append(label)
     windows = []
-    for (used, reset_min), labels in groups.items():
-        name = merge_labels(labels)
-        detail = ", ".join(dict.fromkeys(labels)) if len(labels) > 1 else ""
+    for (base, used, reset_min), labels in merged.items():
+        name = labels[0] if len(labels) == 1 else base
+        detail = "" if len(labels) == 1 else "Variantes: " + ", ".join(_variant(x) for x in labels)
+        group = "Outros" if labels[0] in internal else family(name)
         windows.append(
             Window(
                 "model:" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-"),
@@ -232,16 +262,24 @@ def extract(data: Any) -> tuple[list[Window], str, str]:
                 used,
                 reset_min * 60 if reset_min else None,
                 detail,
+                group,
             )
         )
-    windows.sort(key=lambda w: (_family(w.label), w.label))
+    windows.sort(key=lambda w: (GROUPS.index(w.group) if w.group in GROUPS else 9, w.label.lower()))
 
     monthly = as_float(find_key(data, "monthlyPromptCredits"))
     available = as_float(find_key(data, "availablePromptCredits"))
     if monthly and monthly > 0 and available is not None and available >= 0:
         used = max(0.0, min(100.0, (1 - available / monthly) * 100))
         windows.append(
-            Window("credits", "Créditos de prompt", round(used, 1), None, f"{available:.0f} de {monthly:.0f}")
+            Window(
+                "credits",
+                "Créditos de prompt",
+                round(used, 1),
+                None,
+                f"{available:.0f} de {monthly:.0f}",
+                "Créditos",
+            )
         )
 
     plan = find_key(data, "planName", "tierName", "subscriptionTier")

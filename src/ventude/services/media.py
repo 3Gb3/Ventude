@@ -2,6 +2,9 @@
 
 O código WinRT roda num loop asyncio em thread própria; os resultados chegam à
 interface por sinais Qt. Fora do Windows o serviço simplesmente fica vazio.
+
+Por padrão só o Spotify é mostrado e controlado (vídeos e abas do navegador ficam
+de fora). Em Ajustes dá para voltar a seguir qualquer player.
 """
 
 from __future__ import annotations
@@ -121,6 +124,19 @@ async def default_manager() -> Any:  # pragma: no cover - só Windows
     return await Manager.request_async()
 
 
+SOURCES = {"spotify": "spotify", "any": ""}
+
+
+def app_id(session: Any) -> str:
+    return str(getattr(session, "source_app_user_model_id", "") or "")
+
+
+def matches(session: Any, source: str) -> bool:
+    """O player da sessão é o escolhido? (Spotify da loja ou do site: AUMID com 'spotify')."""
+    needle = SOURCES.get(source, "")
+    return session is not None and (not needle or needle in app_id(session).lower())
+
+
 class MediaService(QObject):
     state_changed = Signal(object)  # MediaState | None
     thumbnail_changed = Signal(bytes)
@@ -129,10 +145,13 @@ class MediaService(QObject):
         self,
         manager_factory: Callable[[], Awaitable[Any]] = default_manager,
         thumbnail_reader: Callable[[Any], Awaitable[bytes]] = read_thumbnail,
+        source: str = "spotify",
     ) -> None:
         super().__init__()
         self._manager_factory = manager_factory
         self._thumbnail_reader = thumbnail_reader
+        self._source = source if source in SOURCES else "spotify"
+        self._sessions_token: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._manager: Any = None
@@ -170,11 +189,30 @@ class MediaService(QObject):
 
     async def _detach_all(self) -> None:
         self._detach_session()
-        if self._manager is not None and self._manager_token is not None:
+        if self._manager is None:
+            return
+        for remove, token in (
+            ("remove_current_session_changed", self._manager_token),
+            ("remove_sessions_changed", self._sessions_token),
+        ):
+            if token is None:
+                continue
             try:
-                self._manager.remove_current_session_changed(self._manager_token)
+                getattr(self._manager, remove)(token)
             except Exception:  # noqa: BLE001
-                log.debug("remove_current_session_changed falhou", exc_info=True)
+                log.debug("%s falhou", remove, exc_info=True)
+
+    @property
+    def source(self) -> str:
+        return self._source
+
+    def set_source(self, source: str) -> None:
+        """Troca entre "spotify" e "any" (qualquer player) sem reiniciar nada."""
+        source = source if source in SOURCES else "spotify"
+        if source == self._source:
+            return
+        self._source = source
+        self._from_winrt("session")
 
     # ---------- eventos ----------
     async def connect(self) -> None:
@@ -187,7 +225,37 @@ class MediaService(QObject):
         self._manager_token = self._manager.add_current_session_changed(
             lambda *_: self._from_winrt("session")
         )
+        try:  # o Spotify pode não ser a sessão "atual": acompanha a lista inteira
+            self._sessions_token = self._manager.add_sessions_changed(lambda *_: self._from_winrt("session"))
+        except Exception:  # noqa: BLE001
+            log.debug("add_sessions_changed indisponível", exc_info=True)
         await self.refresh("session")
+
+    def _pick_session(self) -> Any:
+        if self._manager is None:
+            return None
+        current = self._manager.get_current_session()
+        if matches(current, self._source):
+            return current
+        if not SOURCES.get(self._source):
+            return current
+        try:
+            sessions = list(self._manager.get_sessions())
+        except Exception:  # noqa: BLE001
+            log.debug("get_sessions falhou", exc_info=True)
+            return None
+        return next((session for session in sessions if matches(session, self._source)), None)
+
+    def _same(self, session: Any) -> bool:
+        if session is self._session:
+            return True
+        # O WinRT devolve um objeto Python novo a cada consulta: compara pelo app.
+        return (
+            session is not None
+            and self._session is not None
+            and bool(SOURCES.get(self._source))
+            and app_id(session) == app_id(self._session)
+        )
 
     def _from_winrt(self, kind: str) -> None:
         if self._loop is not None and not self._loop.is_closed():
@@ -227,8 +295,8 @@ class MediaService(QObject):
     async def refresh(self, kind: str = "session") -> None:
         try:
             if kind == "session":
-                current = self._manager.get_current_session() if self._manager else None
-                if current is not self._session:
+                current = self._pick_session()
+                if not self._same(current):
                     self._detach_session()
                     self._track_key = None
                     if current is not None:

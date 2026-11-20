@@ -23,7 +23,7 @@ from ventude.services.news import FEEDS
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
 from ventude.ui.pages.base import Page, scroller
-from ventude.ui.widgets import Card, Switch, hbox, label, vbox
+from ventude.ui.widgets import Card, Switch, hbox, label, repolish, vbox
 
 DELAYS = [
     ("Na hora", 150),
@@ -32,7 +32,9 @@ DELAYS = [
     ("2 segundos", 2000),
     ("5 segundos", 5000),
 ]
+HOVER_DELAYS = [("Na hora", 0), ("Bem rápido (0,15 s)", 150), ("0,3 segundo", 300), ("0,6 segundo", 600)]
 ANIMATIONS = [("Rápida", "rapida"), ("Normal", "normal"), ("Suave", "suave")]
+MEDIA_SOURCES = [("Só o Spotify", "spotify"), ("Qualquer player", "any")]
 INTERVALS = [("2 min", 2), ("5 min", 5), ("10 min", 10), ("15 min", 15), ("30 min", 30)]
 CLAUDE_MODES = [
     ("Automático", "auto"),
@@ -82,7 +84,7 @@ def section(title: str, dot: str = "") -> tuple[Card, QVBoxLayout]:
 
 
 class SecretField(QWidget):
-    """Campo para colar um segredo (fica protegido pelo Windows)."""
+    """Campo para colar um segredo (fica protegido pelo Windows) e ver se conectou."""
 
     def __init__(self, ctx: AppContext, name: str, placeholder: str, provider: str) -> None:
         super().__init__()
@@ -99,8 +101,9 @@ class SecretField(QWidget):
         self.save.clicked.connect(self._save)
         self.clear.clicked.connect(self._clear)
         self.input.returnPressed.connect(self._save)
-        self.state = label("", "Faint")
+        self.state = label("", "Faint", wrap=True)
         self.setLayout(vbox(hbox(self.input, self.save, self.clear, spacing=8), self.state, spacing=4))
+        ctx.limits.changed.connect(lambda p: p == provider and self._status())
         self._sync()
 
     def _sync(self) -> None:
@@ -108,8 +111,25 @@ class SecretField(QWidget):
         self.input.clear()
         self.input.setPlaceholderText("Guardado com segurança. Cole outro para trocar." if has else self.hint)
         self.clear.setEnabled(has)
-        self.state.setText("Guardado e protegido pelo Windows (DPAPI)." if has else "")
-        self.state.setVisible(has)
+        self._status()
+
+    def _status(self) -> None:
+        has = bool(self.ctx.store.secret(self.name))
+        report = self.ctx.limits.report(self.provider)
+        text, style = "", "Faint"
+        if has:
+            text = "Guardado e protegido pelo Windows (DPAPI)."
+            if self.ctx.limits.busy(self.provider):
+                text += " Testando a conexão…"
+            elif report.state == "ok" and report.source in ("claude.ai", "grok.com"):
+                text += f" Conectado via {report.source}."
+            elif report.state in ("error", "stale") and report.message:
+                text, style = report.message, "Warn"
+        if self.state.objectName() != style:
+            self.state.setObjectName(style)
+            repolish(self.state)
+        self.state.setText(text)
+        self.state.setVisible(bool(text))
 
     def _save(self) -> None:
         value = self.input.text().strip()
@@ -157,6 +177,19 @@ class SettingsPage(Page):
         body.addWidget(
             setting_row("Abrir ao passar o mouse", "Desligado: abre só com clique ou atalho.", self.hover)
         )
+        self.hover_delay = combo(
+            HOVER_DELAYS, min(HOVER_DELAYS, key=lambda d: abs(d[1] - s.hover_delay_ms))[1]
+        )
+        self.hover_delay.currentIndexChanged.connect(
+            lambda: self._set(hover_delay_ms=self.hover_delay.currentData())
+        )
+        body.addWidget(
+            setting_row(
+                "Tempo para abrir",
+                "Quanto o mouse precisa ficar sobre a ilha. Um pouco de espera evita aberturas sem querer.",
+                self.hover_delay,
+            )
+        )
         self.fullscreen = self._switch(s.hide_fullscreen, "hide_fullscreen")
         body.addWidget(
             setting_row(
@@ -176,7 +209,18 @@ class SettingsPage(Page):
         body.addWidget(setting_row("Fechar o painel", "Depois que o mouse sai.", self.delay))
         self.anim = combo(ANIMATIONS, s.animation)
         self.anim.currentIndexChanged.connect(lambda: self._set(animation=self.anim.currentData()))
-        body.addWidget(setting_row("Animação", "", self.anim))
+        body.addWidget(setting_row("Animação", "Abrir, fechar e trocar de aba.", self.anim))
+        self.media_source = combo(MEDIA_SOURCES, s.media_source)
+        self.media_source.currentIndexChanged.connect(
+            lambda: self._set(media_source=self.media_source.currentData())
+        )
+        body.addWidget(
+            setting_row(
+                "Música",
+                "Qual player a ilha mostra e controla. Só o Spotify: ignora vídeos e abas do navegador.",
+                self.media_source,
+            )
+        )
         column.addWidget(card)
 
         # ---------- abas ----------
@@ -257,16 +301,33 @@ class SettingsPage(Page):
     def _provider_claude(self) -> Card:
         card, body = section("Claude", theme.provider_color("claude"))
         found = claude.read_credentials(self.ctx.limits.home) is not None
-        status = "Claude Code encontrado neste PC." if found else "Claude Code não encontrado neste PC."
+        status = (
+            "Claude Code encontrado neste PC."
+            if found
+            else "Claude Code não encontrado no Windows (no WSL ele é procurado com a distro aberta)."
+        )
         mode = combo(CLAUDE_MODES, self.ctx.settings.claude_mode)
         mode.currentIndexChanged.connect(lambda: self._provider_mode("claude", mode.currentData()))
         body.addWidget(setting_row("Fonte", status, mode))
-        body.addWidget(label("sessionKey do claude.ai (opcional, para quem usa só o site)", "Caption"))
-        body.addWidget(SecretField(self.ctx, "claude_session", "sk-ant-sid01-…", "claude"))
+        renew = self._switch(self.ctx.settings.claude_refresh_login, "claude_refresh_login")
+        renew.toggled.connect(lambda _c: self.ctx.limits.refresh("claude", force=True))
+        body.addWidget(
+            setting_row(
+                "Renovar o login do Claude Code",
+                "O token dura poucas horas. Quando vence, o Ventude renova do mesmo jeito que o "
+                "Claude Code faz, sem precisar abrir o terminal.",
+                renew,
+            )
+        )
+        body.addWidget(label("claude.ai (para quem usa o site ou o app do Claude)", "Caption"))
+        body.addWidget(
+            SecretField(self.ctx, "claude_session", "sessionKey (sk-ant-sid01-…) ou cURL copiado", "claude")
+        )
         body.addWidget(
             label(
-                "Como pegar: abra claude.ai logado, tecle F12 > Aplicativo > Cookies > "
-                "claude.ai e copie o valor de sessionKey.",
+                "Como pegar: abra claude.ai logado e tecle F12. Jeito rápido: Aplicativo > Cookies > "
+                "claude.ai > copie o valor de sessionKey. Se o Cloudflare barrar: aba Rede, clique "
+                "numa requisição para claude.ai, botão direito > Copiar > Copiar como cURL e cole aqui.",
                 "Faint",
                 wrap=True,
             )
@@ -280,7 +341,8 @@ class SettingsPage(Page):
         body.addWidget(
             setting_row(
                 "Fonte",
-                "Lê as cotas de cada modelo direto do Antigravity aberto. Nada sai do seu PC.",
+                "Lê a cota de cada modelo (Gemini, Claude, GPT...) direto do Antigravity aberto. "
+                "O anel da ilha segue os modelos Gemini; use o alfinete na aba IAs para fixar outro.",
                 mode,
             )
         )
@@ -293,12 +355,15 @@ class SettingsPage(Page):
         mode = combo(GROK_MODES, self.ctx.settings.grok_mode)
         mode.currentIndexChanged.connect(lambda: self._provider_mode("grok", mode.currentData()))
         body.addWidget(setting_row("Fonte", status, mode))
-        body.addWidget(label("Cookie do grok.com (para quem usa o site ou o app)", "Caption"))
-        body.addWidget(SecretField(self.ctx, "grok_cookie", "sso=…; sso-rw=…", "grok"))
+        body.addWidget(label("grok.com (para quem usa o site ou o app)", "Caption"))
+        body.addWidget(
+            SecretField(self.ctx, "grok_cookie", "cURL copiado ou cookie (sso=…; sso-rw=…)", "grok")
+        )
         body.addWidget(
             label(
-                "Como pegar: abra grok.com logado, tecle F12 > Rede, clique em qualquer "
-                "requisição para grok.com e copie o valor inteiro do cabeçalho Cookie.",
+                "Como pegar: abra grok.com logado, tecle F12 > Rede e atualize a página. Clique com o "
+                "botão direito numa requisição para grok.com (ex.: rate-limits) > Copiar > "
+                "Copiar como cURL e cole aqui. Assim vão juntos o cookie e o navegador usado.",
                 "Faint",
                 wrap=True,
             )

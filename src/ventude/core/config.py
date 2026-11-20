@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
@@ -39,8 +40,12 @@ class Settings:
     limits_notify: bool = True
     limits_interval_min: int = 5
     claude_mode: str = "auto"  # auto | code | web | off
+    claude_refresh_login: bool = True  # renova o token vencido do Claude Code
     antigravity_mode: str = "auto"  # auto | off
     grok_mode: str = "auto"  # auto | cli | web | off
+    pinned_limits_json: str = ""  # {"provedor": "chave da janela"} mostrada no anel
+    media_source: str = "spotify"  # spotify | any
+    hover_delay_ms: int = 0
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3
@@ -57,6 +62,25 @@ class Settings:
 
     def provider_mode(self, provider: str) -> str:
         return str(getattr(self, f"{provider}_mode", "off"))
+
+    def pinned_limits(self) -> dict[str, str]:
+        try:
+            data = json.loads(self.pinned_limits_json) if self.pinned_limits_json else {}
+        except ValueError:
+            return {}
+        return {str(k): str(v) for k, v in data.items() if v} if isinstance(data, dict) else {}
+
+    def pinned_limit(self, provider: str) -> str:
+        return self.pinned_limits().get(provider, "")
+
+    def with_pinned(self, provider: str, key: str) -> str:
+        """JSON novo de pinned_limits_json com a janela fixada (ou solta, se key vazio)."""
+        pins = self.pinned_limits()
+        if key:
+            pins[provider] = key
+        else:
+            pins.pop(provider, None)
+        return json.dumps(pins, sort_keys=True) if pins else ""
 
     def copy(self, **changes: Any) -> Settings:
         data = self.to_dict()
@@ -83,6 +107,9 @@ class Settings:
         s.monitor_index = max(0, s.monitor_index)
         s.collapse_delay_ms = max(0, min(s.collapse_delay_ms, 10_000))
         s.limits_interval_min = max(2, min(s.limits_interval_min, 60))
+        s.hover_delay_ms = max(0, min(s.hover_delay_ms, 2000))
+        if s.media_source not in ("spotify", "any"):
+            s.media_source = "spotify"
         if s.animation not in ANIMATION_SPEEDS:
             s.animation = "normal"
         if s.claude_mode not in ("auto", "code", "web", "off"):

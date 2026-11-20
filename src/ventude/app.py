@@ -10,7 +10,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from ventude import __version__
-from ventude.core import updates
+from ventude.core import net, updates
 from ventude.core.logs import setup_logging
 from ventude.core.paths import app_data_dir
 from ventude.core.store import Store
@@ -113,6 +113,7 @@ def run() -> int:
     tray.show()
     island.show()
     log.info("Ventude %s iniciado", __version__)
+    tasks.run(net.browser_transport, done=lambda name: log.info("Conexão com claude.ai/grok.com: %s", name))
     if updates.enabled():
         QTimer.singleShot(3000, lambda: _check_for_update(tasks, app))
     code = app.exec()

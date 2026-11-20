@@ -409,9 +409,15 @@ class Equalizer(QWidget):
         self.setFixedSize(14, 14)
         self._color = color
         self._playing = False
+        self._dim = False
         self._timer = QTimer(self)
         self._timer.setInterval(90)
         self._timer.timeout.connect(self.update)
+
+    def set_dim(self, dim: bool) -> None:
+        """Pausado: barrinhas paradas e apagadas."""
+        self._dim = dim
+        self.update()
 
     def set_playing(self, playing: bool) -> None:
         self._playing = playing
@@ -433,7 +439,7 @@ class Equalizer(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.color(self._color))
+        p.setBrush(theme.color(theme.TEXT_2 if self._dim else self._color, 0.7 if self._dim else 1.0))
         t = time.monotonic()
         for i in range(3):
             if self._playing:

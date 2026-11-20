@@ -11,6 +11,7 @@ from datetime import datetime
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
+    QParallelAnimationGroup,
     QPoint,
     QPropertyAnimation,
     QRect,
@@ -22,6 +23,10 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QCursor,
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDragMoveEvent,
+    QDropEvent,
     QGuiApplication,
     QKeyEvent,
     QLinearGradient,
@@ -29,6 +34,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QRegion,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -141,6 +147,11 @@ class Pill(QWidget):
     def playing(self) -> bool:
         return self.media is not None and self.media.is_playing
 
+    @property
+    def has_media(self) -> bool:
+        """Tem música (tocando ou pausada): a ilha mostra capa e título."""
+        return self.media is not None
+
     def refresh_clock(self) -> None:
         now = datetime.now()
         self.time.setText(clock(now, self.ctx.settings.clock_24h))
@@ -148,16 +159,26 @@ class Pill(QWidget):
 
     def set_media(self, state: MediaState | None) -> None:
         self.media = state
-        playing = self.playing
-        self.art.setVisible(playing)
-        self.title.setVisible(playing)
-        self.eq.setVisible(playing)
+        shown, playing = self.has_media, self.playing
+        self.art.setVisible(shown)
+        self.title.setVisible(shown)
+        self.eq.setVisible(shown)
         self.eq.set_playing(playing)
-        self.date.setVisible(not playing)
+        self.eq.set_dim(not playing)
+        self.date.setVisible(not shown)
         for index in self._gaps:  # com música, o título ocupa o espaço livre
-            self.row.setStretch(index, 0 if playing else 1)
-        if playing and state:
+            self.row.setStretch(index, 0 if shown else 1)
+        if state:
+            color = theme.TEXT if playing else theme.TEXT_2
+            self.title.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {color};")
             self.title.setText(f"{state.title}  ·  {state.artist}" if state.artist else state.title)
+            self.art.setGraphicsEffect(None if playing else self._dim_effect())
+            self.setToolTip("" if playing else "Pausado")
+
+    def _dim_effect(self) -> QGraphicsOpacityEffect:
+        effect = QGraphicsOpacityEffect(self.art)
+        effect.setOpacity(0.55)
+        return effect
 
     def set_art(self, data: bytes) -> None:
         art = rounded_pixmap(data, 22, 6)
@@ -174,13 +195,48 @@ class Pill(QWidget):
             report = self.ctx.limits.report(provider)
             ring.setVisible(enabled and report.state != "off")
             if ring.isVisibleTo(self):
-                fill_ring(ring, report, compact=True)
+                fill_ring(ring, report, self.ctx.limits.headline(report), compact=True)
         self.ring_box.setVisible(self.visible_rings() > 0)
 
     def preferred_width(self) -> int:
         rings = self.visible_rings()
         rings_w = rings * 16 + max(0, rings - 1) * 6 + (14 if rings else 0)
-        return (360 if self.playing else 170) + rings_w
+        return (360 if self.has_media else 170) + rings_w
+
+
+class DropHint(QWidget):
+    """Moldura que aparece enquanto um arquivo é arrastado sobre a ilha."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def paintEvent(self, _event: object) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setBrush(theme.color(theme.BG, 0.72))
+        pen = QPen(theme.color(theme.ACCENT), 1.6, Qt.PenStyle.DashLine)
+        p.setPen(pen)
+        p.drawRoundedRect(rect, theme.ISLAND_RADIUS - 6, theme.ISLAND_RADIUS - 6)
+        icon = icons.pixmap("plus", theme.ACCENT, 34)
+        center = rect.center()
+        p.drawPixmap(int(center.x() - 17), int(center.y() - 46), icon)
+        p.setPen(theme.color(theme.TEXT))
+        p.setFont(theme.font(16, theme.SEMI))
+        p.drawText(
+            QRectF(rect.left(), center.y() - 4, rect.width(), 24),
+            Qt.AlignmentFlag.AlignCenter,
+            "Solte para adicionar aos atalhos",
+        )
+        p.setPen(theme.color(theme.TEXT_2))
+        p.setFont(theme.font(12))
+        p.drawText(
+            QRectF(rect.left(), center.y() + 22, rect.width(), 20),
+            Qt.AlignmentFlag.AlignCenter,
+            "Apps, pastas, arquivos e links",
+        )
 
 
 class Panel(QWidget):
@@ -219,6 +275,8 @@ class Panel(QWidget):
         self.tabs: dict[str, QPushButton] = {}
         self.pages: dict[str, Page] = {}
         self.current = "home"
+        self._transition: tuple[QParallelAnimationGroup, QWidget] | None = None
+        self.drop_hint = DropHint(self)
         self.rebuild_tabs()
 
     def _pin_changed(self, pinned: bool) -> None:
@@ -277,8 +335,14 @@ class Panel(QWidget):
         page = self.page(key)
         if page is None:
             return
+        keys = list(self.tabs)
+        previous = self.current
+        changed = self.stack.currentWidget() is not page
         self.current = key
         self.stack.setCurrentWidget(page)
+        # Sem animação de aba enquanto o painel ainda está aparecendo (fade da abertura).
+        if changed and previous in keys and self.isVisible() and self.graphicsEffect() is None:
+            self._slide_in(page, 1 if keys.index(key) >= keys.index(previous) else -1)
         for tab_key, button in self.tabs.items():
             active = tab_key == key
             button.setChecked(active)
@@ -290,6 +354,47 @@ class Panel(QWidget):
             page.on_show()
         except Exception:  # noqa: BLE001
             log.exception("Falha ao atualizar a aba %s", key)
+
+    # ---------- animação entre abas ----------
+    def _slide_in(self, page: QWidget, direction: int) -> None:
+        """A aba nova entra deslizando do lado da aba clicada, com um fade curto."""
+        self._end_transition()
+        duration = int(self.ctx.settings.animation_ms * 0.85)
+        if duration <= 0:
+            return
+        page.setGeometry(self.stack.contentsRect())
+        end = page.pos()
+        effect = QGraphicsOpacityEffect(page)
+        effect.setOpacity(0.0)
+        page.setGraphicsEffect(effect)
+        group = QParallelAnimationGroup(self)
+        slide = QPropertyAnimation(page, b"pos", group)
+        slide.setDuration(duration)
+        slide.setStartValue(end + QPoint(28 * direction, 0))
+        slide.setEndValue(end)
+        slide.setEasingCurve(QEasingCurve.Type.OutCubic)
+        fade = QPropertyAnimation(effect, b"opacity", group)
+        fade.setDuration(int(duration * 0.8))
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.Type.OutQuad)
+        group.finished.connect(self._end_transition)
+        self._transition = (group, page)
+        group.start()
+
+    def _end_transition(self) -> None:
+        if not self._transition:
+            return
+        group, page = self._transition
+        self._transition = None
+        group.stop()
+        page.setGraphicsEffect(None)
+        page.setGeometry(self.stack.contentsRect())
+        group.deleteLater()
+
+    def resizeEvent(self, event: object) -> None:
+        super().resizeEvent(event)
+        self.drop_hint.setGeometry(self.rect().adjusted(6, 6, -6, -6))
 
     def select_index(self, index: int) -> None:
         keys = list(self.tabs)
@@ -313,7 +418,9 @@ class Island(QWidget):
         self.setWindowTitle("Ventude")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)  # arrastar apps, pastas e links para os Atalhos
         self.expanded = False
+        self._drag_files = False
         self._holds = 0
         self._press: QPoint | None = None
         self._origin = QPoint()
@@ -329,7 +436,7 @@ class Island(QWidget):
         self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.anim.finished.connect(self._settled)
         self.fade = QPropertyAnimation(self)
-        self.hover_timer = QTimer(self, singleShot=True, interval=160)
+        self.hover_timer = QTimer(self, singleShot=True, interval=0)
         self.hover_timer.timeout.connect(self._hover_expand)
         self.collapse_timer = QTimer(self, singleShot=True)
         self.collapse_timer.timeout.connect(self._try_collapse)
@@ -398,7 +505,31 @@ class Island(QWidget):
     def resizeEvent(self, event: object) -> None:
         super().resizeEvent(event)
         self.pill.setGeometry(self.rect())
-        self.panel.setGeometry(self.rect())
+        self._layout_panel()
+
+    def moveEvent(self, event: object) -> None:
+        super().moveEvent(event)
+        if self._revealing():
+            self._layout_panel()
+
+    def _revealing(self) -> bool:
+        return self.expanded and self.anim.state() == QPropertyAnimation.State.Running
+
+    def _layout_panel(self) -> None:
+        """Abrindo: o painel já fica no tamanho final e a ilha crescendo o revela."""
+        if not self._revealing():
+            self.panel.clearMask()
+            self.panel.setGeometry(self.rect())
+            return
+        target = self.anim.endValue()
+        offset = target.topLeft() - self.pos()
+        self.panel.setGeometry(QRect(offset, target.size()))
+        radius = min(theme.ISLAND_RADIUS, self.height() / 2)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), radius, radius)
+        region = QRegion(path.toFillPolygon().toPolygon())
+        region.translate(-offset)
+        self.panel.setMask(region)
 
     # ---------- abrir e fechar ----------
     def expand(self, page: str | None = None) -> None:
@@ -416,9 +547,11 @@ class Island(QWidget):
             return
         self.expanded = True
         self.pill.hide()
-        self.panel.hide()
         self.panel.refresh_clock()
         self._animate(self.target_rect(True))
+        if self._revealing():  # o conteúdo aparece junto com a animação, sem esperar ela acabar
+            self._layout_panel()
+            self._fade_in(self.panel, max(120, int(self.ctx.settings.animation_ms * 0.9)))
 
     def collapse(self) -> None:
         if not self.expanded:
@@ -446,6 +579,7 @@ class Island(QWidget):
     def _settled(self) -> None:
         if self.anim.state() == QPropertyAnimation.State.Running:
             return
+        self._layout_panel()
         if self.expanded:
             if not self.panel.isVisible():
                 self._fade_in(self.panel)
@@ -453,20 +587,22 @@ class Island(QWidget):
             self.pill.show()
         self.update()
 
-    def _fade_in(self, widget: QWidget) -> None:
+    def _fade_in(self, widget: QWidget, duration: int = 140) -> None:
+        self.fade.stop()
         effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0.0)
         widget.setGraphicsEffect(effect)
         widget.show()
-        self.fade.stop()
         self.fade = QPropertyAnimation(effect, b"opacity", self)
-        self.fade.setDuration(140)
+        self.fade.setDuration(duration)
         self.fade.setStartValue(0.0)
         self.fade.setEndValue(1.0)
+        self.fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
         self.fade.finished.connect(lambda: widget.setGraphicsEffect(None))
         self.fade.start()
 
     def _keep_open(self) -> bool:
-        if self.panel.pin.isChecked() or self._holds > 0 or self._dragging:
+        if self.panel.pin.isChecked() or self._holds > 0 or self._dragging or self._drag_files:
             return True
         if QApplication.activePopupWidget() or QApplication.activeModalWidget():
             return True
@@ -502,7 +638,11 @@ class Island(QWidget):
             return
         if time.time() - self._collapsed_at < COLLAPSE_COOLDOWN:
             return  # o mouse ainda estava sobre o painel que acabou de fechar
-        self.hover_timer.start()
+        delay = self.ctx.settings.hover_delay_ms
+        if delay <= 0:
+            self._hover_expand()  # abre na hora
+        else:
+            self.hover_timer.start(delay)
 
     def _hover_expand(self) -> None:
         if self.expanded or self._dragging or self._press is not None:
@@ -514,6 +654,52 @@ class Island(QWidget):
         self.hover_timer.stop()
         if self.expanded and not self._dragging:
             self.collapse_timer.start(self.ctx.settings.collapse_delay_ms)
+
+    # ---------- arrastar e soltar (Atalhos) ----------
+    def _accepts_files(self, event: QDragEnterEvent | QDragMoveEvent | QDropEvent) -> bool:
+        return event.mimeData().hasUrls() and self.ctx.settings.module_enabled("shortcuts")
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if not self._accepts_files(event):
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._drag_files = True
+        self.hover_timer.stop()
+        self.collapse_timer.stop()
+        if not self.expanded:
+            self.expand("shortcuts")
+        elif self.panel.current != "shortcuts":
+            self.panel.select("shortcuts")
+        self.panel.drop_hint.show()
+        self.panel.drop_hint.raise_()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if self._accepts_files(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self._drag_files = False
+        self.panel.drop_hint.hide()
+        if self.expanded:
+            self.collapse_timer.start(max(800, self.ctx.settings.collapse_delay_ms))
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._drag_files = False
+        self.panel.drop_hint.hide()
+        if not self._accepts_files(event):
+            event.ignore()
+            return
+        paths = [u.toLocalFile() or u.toString() for u in event.mimeData().urls()]
+        page = self.panel.page("shortcuts")
+        if page is not None and paths:
+            self.panel.select("shortcuts")
+            page.add_paths(paths)  # type: ignore[attr-defined]
+            event.acceptProposedAction()
+        # Depois de soltar, o Windows nem sempre avisa que o mouse saiu: confere sozinho.
+        self.collapse_timer.start(max(1500, self.ctx.settings.collapse_delay_ms))
 
     def changeEvent(self, event: QEvent) -> None:
         super().changeEvent(event)
@@ -610,9 +796,9 @@ class Island(QWidget):
                 self._animate(target)
 
     def _media_changed(self, state: MediaState | None) -> None:
-        was = self.pill.playing
+        was = self.pill.has_media
         self.pill.set_media(state)
-        if was != self.pill.playing:
+        if was != self.pill.has_media:
             self._resize_compact()
 
     def _rings_changed(self) -> None:

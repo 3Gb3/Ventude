@@ -16,7 +16,7 @@ from ventude.core.store import Store
 from ventude.core.tasks import Tasks
 from ventude.core.timefmt import resets_text
 from ventude.limits import antigravity, claude, grok
-from ventude.limits.model import FetchContext, ProviderError, Report
+from ventude.limits.model import FetchContext, ProviderError, Report, Window
 
 log = logging.getLogger(__name__)
 
@@ -94,10 +94,14 @@ class LimitsManager(QObject):
     def visible_reports(self) -> list[Report]:
         return [r for r in (self.report(p) for p in self.fetchers) if r.state != "off"]
 
+    def headline(self, report: Report) -> Window | None:
+        """A janela do anel: a que o usuário fixou ou a mais apertada."""
+        return report.headline(pinned=self.settings().pinned_limit(report.provider))
+
     def summary(self) -> str:
         parts = []
         for report in self.visible_reports():
-            head = report.headline()
+            head = self.headline(report)
             parts.append(f"{report.name} {head.used_at():.0f}%" if head else f"{report.name} —")
         return " · ".join(parts) if parts else "Nenhuma IA ativa"
 
@@ -137,7 +141,13 @@ class LimitsManager(QObject):
             return
         self._busy.add(provider)
         self._last_attempt[provider] = now
-        ctx = FetchContext(mode, self.home, self.store.secret, self.reports.get(provider))
+        ctx = FetchContext(
+            mode,
+            self.home,
+            self.store.secret,
+            self.reports.get(provider),
+            {"claude_refresh": settings.claude_refresh_login},
+        )
         self.changed.emit(provider)
         self.tasks.run(
             self._fetch,

@@ -1,5 +1,6 @@
 # A cada push na main: testa, gera o Ventude.exe e o instalador num Windows real
-# e publica uma Release (vX.Y.N). O app instalado só se atualiza a partir delas.
+# e publica uma Release. A primeira de cada linha X.Y é a versão do pyproject
+# (ex.: 1.1.0); as seguintes sobem só o último número (1.1.1, 1.1.2...).
 name: Release
 
 on:
@@ -40,7 +41,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $version = (uv run python scripts/stamp_version.py ${{ github.run_number }} ${{ github.sha }}).Trim()
+          $version = (uv run python scripts/stamp_version.py ${{ github.sha }}).Trim()
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Versão $version"
 
@@ -60,6 +61,9 @@ jobs:
           Stop-Process -Id $p.Id -Force
           if (-not (Select-String -Path $log -Pattern "iniciado" -Quiet)) { throw "O log não registrou a inicialização" }
           if (Select-String -Path $log -Pattern "Traceback" -Quiet) { throw "Erro no log do Ventude" }
+          if (-not (Select-String -Path $log -Pattern "claude.ai/grok.com: curl_cffi" -Quiet)) {
+            Write-Host "::warning::O curl_cffi não carregou no executável: claude.ai e grok.com podem ser barrados pelo Cloudflare"
+          }
 
       - name: Instalador
         shell: pwsh
