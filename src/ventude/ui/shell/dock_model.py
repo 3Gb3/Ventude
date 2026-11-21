@@ -7,16 +7,16 @@ from dataclasses import dataclass
 from ventude.services.taskbar import Rect
 from ventude.ui.shell.items import TaskItem
 
-DOCK_H = 52
-DOCK_RADIUS = 26
+DOCK_H = 46
+DOCK_RADIUS = 23
 BOTTOM_MARGIN = 10
 LABEL_BAND = 48
-WINDOW_H = LABEL_BAND + DOCK_H + BOTTOM_MARGIN  # 110
-RESERVE_H = 64
+WINDOW_H = LABEL_BAND + DOCK_H + BOTTOM_MARGIN  # 104
+RESERVE_H = 58
 
 PAD_X = 12
-ICON_MAX = 44
-ICON_MIN = 36
+ICON_MAX = 38
+ICON_MIN = 30
 GAP = 4
 DIVIDER_W = 13
 UNPIN_DRAG_OFFSET = 48

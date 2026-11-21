@@ -89,6 +89,7 @@ class ShellController(QObject):
         self._unpinned_order: list[str] = self._load_unpinned_order()
         self.launcher: LauncherWindow | None = None
         self.thumbs: ThumbnailPopup | None = None
+        self._thumbs_dock: Dock | None = None  # Doca dona das prévias abertas
         self.failed = False
         self._wanted = False
         self._busy = False
@@ -717,6 +718,7 @@ class ShellController(QObject):
             self.thumbs = ThumbnailPopup(self.ctx, self)
         for d in self.docks:
             d.suppress_hover_label = d is dock
+        self._thumbs_dock = dock
         self.thumbs.show_for(item, anchor_rect, dock.dock_top_global(), dock.screen_rect())
 
     # ---------- abrir apps ----------
@@ -769,6 +771,8 @@ class ShellController(QObject):
         if self.launcher is not None and self.launcher.isVisible() and not self.launcher.closing:
             self.launcher.raise_()
             self.launcher._keep_on_top()
+            if self.thumbs is not None and self.thumbs.isVisible():
+                self.thumbs._bring_to_front()
 
     def _suspend_island_hover(self, on: bool) -> None:
         if self.island is not None and hasattr(self.island, "suspend_hover"):
@@ -902,6 +906,10 @@ class ShellController(QObject):
         launcher_open = self.menus_open()
         for dock in self.docks:
             dock.suppress_hover_label = thumbs_open or launcher_open
+        # As prévias só seguram a Doca de onde vieram: as dos outros monitores seguem recuando
+        thumbs_dock = self._thumbs_dock if thumbs_open else None
+        if thumbs_dock is not None and thumbs_dock not in self.docks:
+            thumbs_dock = self.docks[0] if len(self.docks) == 1 else None
         mode = getattr(self.ctx.settings, "dock_mode", "esquivar")  # type: ignore[attr-defined]
         fg = taskbar_service.foreground_rect()
         fg_rect, fg_mon = fg if fg is not None else (None, None)
@@ -925,10 +933,11 @@ class ShellController(QObject):
                 self._last_inside.pop(dock_id, None)
             cap = dock.capsule_rect_on_screen()
             inside = dock.isVisible() and not dock.slid and cap.adjusted(-12, -16, 12, 16).contains(pos)
+            thumbs_here = thumbs_dock is dock
             if at_edge:
                 self._last_inside[dock_id] = now
                 self._edge_revealed[dock_id] = True
-            elif inside or dock.menu_open or thumbs_open or dock.dragging:
+            elif inside or dock.menu_open or thumbs_here or dock.dragging:
                 self._last_inside[dock_id] = now
 
             last_inside = self._last_inside.get(dock_id, now - 10.0)
@@ -957,7 +966,7 @@ class ShellController(QObject):
                 local_fg,
                 mode,
                 menu_open=dock.menu_open or launcher_on_dock,
-                thumb_open=thumbs_open,
+                thumb_open=thumbs_here,
                 dragging=dock.dragging,
                 hover_reveal=hover_reveal,
                 fullscreen=fullscreen,

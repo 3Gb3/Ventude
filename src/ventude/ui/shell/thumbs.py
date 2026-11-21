@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QFont, QImage, QMouseEvent, QPainter
+from PySide6.QtWidgets import QApplication
 
-from ventude.services import dwm, taskbar
+from ventude.services import dwm, taskbar, winutil
 from ventude.services.taskbar import WindowInfo
 from ventude.ui import icons, motion, theme
 from ventude.ui.shell.common import ShellWindow, app_pixmap, draw_pixmap, shell_font
@@ -62,8 +63,16 @@ class ThumbnailPopup(ShellWindow):
         self._target_pos = rect.topLeft()
         self.setWindowOpacity(1.0)
         self.show()
-        self.raise_()
+        self._bring_to_front()
         self.shown.emit()
+
+    def _bring_to_front(self) -> None:
+        """Acima de tudo, inclusive do Lançador aberto em tela cheia (que também é topmost)."""
+        self.raise_()
+        app = QApplication.instance()
+        if app is not None and app.platformName().lower() == "offscreen":
+            return
+        winutil.keep_topmost(int(self.winId()))
 
     def _panel_rect(self) -> QRectF:
         return QRectF(
@@ -102,6 +111,7 @@ class ThumbnailPopup(ShellWindow):
         self._unregister()
         if self.isVisible() and not self._closing:
             self.setGeometry(rect)
+            self._bring_to_front()
             QTimer.singleShot(0, self._register)
         else:
             self.open_at(rect, QPoint(0, 10))

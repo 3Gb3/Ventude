@@ -391,7 +391,7 @@ def test_shell_dock_hides_windows_bar_dodge_and_always_restores(qapp, app_ctx, i
 
     app_ctx.update_settings(replace_taskbar=True)
     assert shell.hider.hidden and ("show", SW_HIDE) in log
-    # Modo padrão "esquivar" libera a tela toda (sem reserva de 64 px)
+    # Modo padrão "esquivar" libera a tela toda (sem reserva de 58 px)
     assert ("area", (0, 0, 1920, 1080)) in log
     dock = shell.docks[0]
     assert dock.isVisible() and island.panel.power_btn.isHidden()
@@ -399,9 +399,9 @@ def test_shell_dock_hides_windows_bar_dodge_and_always_restores(qapp, app_ctx, i
     explorer, editor = dock.items
     assert explorer.pinned and not explorer.windows and editor.windows[0].hwnd == 10
 
-    # Modo "sempre" reserva 64 px (80 px em 125%)
+    # Modo "sempre" reserva 58 px (72 px em 125%)
     app_ctx.update_settings(dock_mode="sempre")
-    assert ("area", (0, 0, 1920, 1000)) in log
+    assert ("area", (0, 0, 1920, 1008)) in log
 
     shell.item_clicked(editor, dock.slot_screen_rect(editor.key), dock)
     assert ("minimize", 10) in log

@@ -553,8 +553,8 @@ class Dock(QWidget):
             p.setBrush(color)
             p.drawRoundedRect(rect.adjusted(1, 2, -1, -2), theme.R_ITEM, theme.R_ITEM)
 
-        # 32 px é o tamanho nativo dos ícones do Windows: fica nítido, sem reescala borrada
-        icon_base = 32 if slot.w >= 42 else max(20, round(slot.w * 0.74))
+        # 26 px: perto dos 24 px da barra do Windows (o cache carrega em 2x, então fica nítido)
+        icon_base = 26 if slot.w >= 36 else max(18, round(slot.w * 0.72))
         icon_size = icon_base * scale
         cx, cy = rect.center().x(), rect.center().y() - 2.0 - lift
         awake = bool(item.windows) or hovered or pressed or (slot.key in self._launching_until)
