@@ -2181,6 +2181,8 @@ class Island(QWidget):
         app = QApplication.instance()
         if app is not None and app.platformName().lower() == "offscreen":
             return
+        if QApplication.activePopupWidget() is not None:
+            return  # um menu aberto (ex.: botão direito num app em segundo plano) fica por cima da ilha
         winutil.keep_topmost(int(self.winId()))
 
     def _check_fullscreen(self) -> None:

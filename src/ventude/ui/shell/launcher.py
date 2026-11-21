@@ -674,6 +674,7 @@ class LauncherWindow(ShellWindow):
         self._recent_files: list[apps.RecentFile] = []
         self._loading_recent = False
         self._expanded_pins = False
+        self._active_height = False
         self._reveal_target = QPoint()
         self._reveal_offset = 14
 
@@ -803,15 +804,39 @@ class LauncherWindow(ShellWindow):
         brand.paint_ink(p, rect, theme.R_SHEET, bg=self.bg, alpha=self.alpha)
 
     def target_geometry(self, screen_rect: QRect, *, active: bool) -> QRect:
-        body_h = HEIGHT_ACTIVE if active else HEIGHT_EMPTY
+        """Retângulo do Lançador, sempre com a borda de baixo acima da Doca.
+
+        A altura considera o mínimo que o conteúdo pede: com duas linhas de fixados, quatro itens em
+        "continuar" e a dica, ele passa da altura padrão, e o Qt esticaria a janela para baixo, por cima
+        da Doca. Por isso o cálculo parte da altura real e ancora pela borda de baixo.
+        """
+        body_h = (HEIGHT_ACTIVE if active else HEIGHT_EMPTY) + SHADOW_PAD * 2
         dock_clear = 80
         top_clear = 56
         w = min(LAUNCHER_WIDTH + SHADOW_PAD * 2, max(360, screen_rect.width() - 16))
         max_h = max(320, screen_rect.height() - top_clear - dock_clear)
-        h = min(body_h + SHADOW_PAD * 2, max_h)
+        layout = self.layout()
+        need = 0
+        if layout is not None:
+            layout.activate()
+            need = layout.totalMinimumSize().height()
+        h = max(min(body_h, max_h), need)
         x = screen_rect.left() + (screen_rect.width() - w) // 2
-        y = max(screen_rect.top() + top_clear, screen_rect.bottom() - dock_clear - h + 1)
+        bottom_y = screen_rect.bottom() - dock_clear - h + 1
+        top_y = screen_rect.top() + top_clear
+        y = max(top_y, bottom_y) if bottom_y >= top_y else max(screen_rect.top() + 4, bottom_y)
         return QRect(x, y, w, h)
+
+    def refit(self) -> None:
+        """Reajusta depois que o conteúdo muda com o Lançador aberto (fixados e recentes chegam depois)."""
+        if self.isVisible() and not self._closing:
+            self._sync_height(self._active_height)
+
+    def resizeEvent(self, event: object) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # O Qt estica a janela para baixo quando o conteúdo cresce depois de aberta; reancora pela base.
+        if self.isVisible() and not self._closing:
+            QTimer.singleShot(0, self.refit)
 
     def _keep_on_top(self) -> None:
         app = QApplication.instance()
@@ -820,6 +845,7 @@ class LauncherWindow(ShellWindow):
         winutil.keep_topmost(int(self.winId()))
 
     def _sync_height(self, active: bool) -> None:
+        self._active_height = active
         if self._anchor_screen_rect.isNull():
             screen = QApplication.primaryScreen()
             self._anchor_screen_rect = screen.geometry() if screen else QRect(0, 0, 1920, 1080)
@@ -962,6 +988,7 @@ class LauncherWindow(ShellWindow):
         self.pinned.set_tiles(tiles)
         self.more_pins_btn.setVisible(len(tiles) > 16)
         self.more_pins_btn.set_icon("chevron-up" if self._expanded_pins else "chevron-down", theme.TEXT_2)
+        self.refit()
 
     def _toggle_more_pins(self) -> None:
         self._expanded_pins = not self._expanded_pins
@@ -1021,6 +1048,7 @@ class LauncherWindow(ShellWindow):
             )
         tiles.sort(key=lambda t: t.ts, reverse=True)
         self.continue_list.set_tiles(tiles[:4])
+        self.refit()
 
     def _forget_recent(self, tile: Tile) -> None:
         store = getattr(self.ctx, "store", None)

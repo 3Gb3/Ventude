@@ -116,8 +116,11 @@ class DayRow(QWidget):
         glyph = label()
         glyph.setFixedWidth(22)
         glyph.setPixmap(icons.pixmap(icon_for(day["code"]), _tint(icon_for(day["code"])), 20))
-        rain = label(f"{day['rain']}%" if day.get("rain", 0) >= 20 else "", "")
-        rain.setStyleSheet(f"color: {theme.SKY}; font-size: 11px; font-weight: 600;")
+        chance = int(day.get("rain") or 0)
+        rain = label(f"{chance}%", "")  # sempre visível; chance baixa fica mais apagada
+        rain_color = theme.SKY if chance >= 20 else theme.MUTED
+        rain.setStyleSheet(f"color: {rain_color}; font-size: 11px; font-weight: 600;")
+        rain.setToolTip(f"Chance de chuva: {chance}%")
         rain.setFixedWidth(34)
         desc = ElidedLabel(describe(day["code"]), "Faint")
         lo = label(f"{day['min']:.0f}°", "Muted")

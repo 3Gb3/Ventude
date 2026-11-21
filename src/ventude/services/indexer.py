@@ -2,8 +2,8 @@
 
 - Apps: atalhos .lnk/.appref-ms do menu Iniciar (do usuário e de todos) e apps da Loja (Get-StartApps).
 - Pastas: todas as pastas de todos os discos, sem limite de profundidade (das mais rasas para as mais
-  fundas), pulando só o que é do sistema ou lixo de build (Windows, AppData, node_modules, .git...).
-  Program Files entra até 3 níveis, para achar a pasta dos jogos e programas.
+  fundas), pulando lixo de build e cache (node_modules, .git, Temp...). Pastas do sistema (AppData,
+  Program Files, ProgramData, Windows) e ocultas (.minecraft) entram só alguns níveis, sem arquivos.
 - Arquivos: nas pastas do usuário (Área de Trabalho, Downloads, Documentos...) entram todos; no resto
   dos discos entram imagens, vídeos, músicas, documentos e compactados.
 
@@ -64,15 +64,10 @@ IGNORED = {
     ".mypy_cache",
     ".ruff_cache",
     ".tox",
-    "appdata",
     "application data",
     "$recycle.bin",
     "system volume information",
-    "windows",
     "windows.old",
-    "program files",
-    "program files (x86)",
-    "programdata",
     "recovery",
     "perflogs",
     "msocache",
@@ -109,6 +104,16 @@ IGNORED = {
     "templates",
     "winsxs",
 }
+# Pastas do sistema que aparecem na busca (e alguns níveis dentro delas), mas sem descer até o fim:
+# por dentro são milhares de pastas de cache. Só pastas, nenhum arquivo.
+SHALLOW: dict[str, int] = {
+    "appdata": 3,  # AppData > Roaming > Discord > ...
+    "programdata": 2,
+    "program files": 3,
+    "program files (x86)": 3,
+    "windows": 1,
+}
+DOT_DEPTH = 2  # pastas ocultas do tipo .minecraft, .ssh, .config
 KIND_BONUS = {"app": 25, "uwp": 25, "folder": 8, "file": 0}
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_CONSOLE = 0x00000010
@@ -442,16 +447,25 @@ def file_roots(home: Path) -> list[tuple[Path, int, bool]]:
                     roots.append((root, DEEP, False))
             except OSError:
                 continue
-        for var in ("ProgramFiles", "ProgramFiles(x86)"):
-            base = os.environ.get(var)
-            if base and Path(base).is_dir():
-                roots.append((Path(base), 3, False))
     return roots
 
 
 def skip_dir(name: str) -> bool:
     lowered = name.lower()
-    return lowered in IGNORED or lowered.startswith((".", "$", "~"))
+    return lowered in IGNORED or lowered.startswith(("$", "~"))
+
+
+def shallow_depth(name: str) -> int | None:
+    """Quantos níveis descer numa pasta do sistema ou oculta (None: pasta comum, sem limite)."""
+    lowered = name.lower()
+    if lowered in SHALLOW:
+        return SHALLOW[lowered]
+    if lowered.startswith("."):
+        return DOT_DEPTH
+    return None
+
+
+FILES_ALL, FILES_MEDIA, FILES_NONE = 2, 1, 0
 
 
 def scan_index(
@@ -474,9 +488,10 @@ def scan_index(
     for root in roots:
         path, depth = root[0], root[1]
         all_files = bool(root[2]) if len(root) > 2 else True  # type: ignore[misc]
-        queue: deque[tuple[str, int, int]] = deque([(str(path), depth, -1)])
+        root_mode = FILES_ALL if all_files else FILES_MEDIA
+        queue: deque[tuple[str, int, int, int]] = deque([(str(path), depth, -1, root_mode)])
         while queue:
-            folder, level, own = queue.popleft()
+            folder, level, own, mode = queue.popleft()
             marker = hash(folder.lower())
             if marker in scanned:
                 continue
@@ -519,10 +534,16 @@ def scan_index(
                                 pass
                         child_index = index.add(child.path, child.name, True, proj, br)
                         folders += 1
-                    if level > 1 and hash(child.path.lower()) not in scanned:
-                        queue.append((child.path, level - 1, child_index))
+                    next_level, next_mode = level - 1, mode
+                    limit = shallow_depth(child.name)
+                    if limit is not None:
+                        next_level, next_mode = min(next_level, limit), FILES_NONE
+                    if next_level >= 1 and hash(child.path.lower()) not in scanned:
+                        queue.append((child.path, next_level, child_index, next_mode))
                 elif files < file_limit:
-                    if not all_files and os.path.splitext(child.name)[1].lower() not in WIDE_EXT:
+                    if mode == FILES_NONE:
+                        continue
+                    if mode == FILES_MEDIA and os.path.splitext(child.name)[1].lower() not in WIDE_EXT:
                         continue
                     index.add(child.path, child.name, False)
                     files += 1

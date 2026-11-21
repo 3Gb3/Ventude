@@ -202,3 +202,17 @@ def test_ring_choice_settings():
     s = s.copy(ring_providers=s.with_ring("claude", False))
     assert not s.ring_enabled("claude") and s.provider_mode("claude") == "auto"
     assert Settings.from_dict({"codex_mode": "bogus"}).codex_mode == "off"
+
+
+def test_firefox_windows_curl_exe_is_parsed():
+    from ventude.limits.web import parse_pasted
+
+    pasted = parse_pasted(
+        'curl.exe "https://grok.com/monitoring" --compressed -X POST '
+        '-H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:160.0) Gecko/20100101 Firefox/160.0" '
+        '-H "Accept: */*" -H "Referer: https://grok.com/" '
+        '-H "Cookie: sso=abc; sso-rw=def; cf_clearance=x" --data-raw "{}"'
+    )
+    assert pasted.cookie_value("sso") == "abc" and pasted.cookie_value("sso-rw") == "def"
+    assert pasted.user_agent.endswith("Firefox/160.0")
+    assert "curl" not in pasted.cookie and pasted.headers["referer"] == "https://grok.com/"

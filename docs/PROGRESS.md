@@ -12,6 +12,12 @@
 - [x] **Filtros**: `img:`/`foto:`, `video:`, `musica:`/`audio:`, `doc:` e `pasta:` (ou `/i`, `/v`, `/m`, `/d`, `/p`).
 - [x] **Sites**: digitar "youtube", "gmail", "zap", "netflix"... oferece abrir o site no navegador (60 sites comuns, com apelidos), e endereços digitados ("terra.com.br", "localhost:3000") abrem direto.
 
+- [x] **Busca nas pastas do sistema**: AppData (Roaming, Local...), Program Files, ProgramData, Windows e pastas ocultas (.minecraft) aparecem na busca, alguns níveis dentro e sem arquivos; `%appdata%` e outras variáveis abrem direto.
+- [x] **Lançador acima da Doca**: com o Início cheio (duas linhas de fixados, quatro recentes e a dica) o conteúdo passava da altura padrão e o Qt esticava a janela para baixo, por cima da Doca. Agora a altura parte do que o conteúdo pede e a janela é ancorada pela base.
+- [x] **Grok pelo Firefox**: o "Copiar como cURL (Windows)" do Firefox começa com `curl.exe` e era lido como se fosse o cookie inteiro (grok.com: "No credentials presented"). Agora é reconhecido.
+- [x] **Controles repaginados**: 480 px, seção Som com o nome inteiro da saída e do microfone, teclas com nome e estado, ferramentas lado a lado, "Em segundo plano" com até 8 apps e altura que acompanha o conteúdo. O menu do botão direito não fica mais por baixo da ilha.
+- [x] **Clima**: a chance de chuva aparece em todos os dias (antes só a partir de 20%), mais apagada quando é baixa.
+
 ### A validar no seu PC
 
 - Jogos em tela cheia exclusiva e sem bordas, vídeo em F11 no navegador e apresentação: Doca, ilha e Eco somem; janela maximizada não.

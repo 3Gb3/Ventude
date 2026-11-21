@@ -217,6 +217,8 @@ def ink_menu(parent: QWidget | None = None) -> QMenu:
     """Menu flutuante no material Tinta (raio 14, itens 34 px com raio 10)."""
     menu = _InkMenu(parent)
     menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+    # A ilha, a Doca e o Lançador são "sempre no topo": sem isto o menu abria por baixo deles.
+    menu.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
     menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     menu.setStyleSheet(
         f"QMenu {{ background: {theme.INK_RAISED}; border: 1px solid {theme.STROKE_2}; "

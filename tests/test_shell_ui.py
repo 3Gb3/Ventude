@@ -773,3 +773,50 @@ def test_quit_closes_island_and_dock_and_restores_taskbar(qapp, app_ctx, island,
     assert shell.docks == []
     assert not shell.hider.hidden and not shell.hider.marker.exists()
     assert ("show", SW_SHOW) in shell.test_log
+
+
+def test_launcher_with_full_home_stays_above_dock(qapp, app_ctx, shell):
+    from ventude.services import apps
+
+    for n in range(13):  # duas linhas de fixados
+        app_ctx.store.add_pin("start", "app", f"App {n}", f"C:/Apps/app{n}.exe")
+    for n in range(4):
+        app_ctx.store.record_launch("app", f"Recente {n}", f"C:/Apps/r{n}.exe")
+    shell.open_search()
+    ln = shell.launcher
+    assert wait_for(qapp, ln.isVisible)
+    ln._recent_files = [apps.RecentFile(f"doc{n}.pdf", f"C:/d{n}.pdf", time.time(), False) for n in range(4)]
+    ln._apply_recent()
+    ln.tip_bar.show()
+    for screen in (QRect(0, 0, 1920, 1080), QRect(1920, 0, 1366, 768)):  # as telas do PC real
+        ln._anchor_screen_rect = screen
+        ln.refit()
+        settle(qapp, 300)
+        _assert_launcher_clears_dock(ln, screen)
+    ln.hide()
+
+
+def _assert_launcher_clears_dock(ln, screen):
+    from ventude.ui.shell.dock_model import BOTTOM_MARGIN, DOCK_H
+    from ventude.ui.shell.launcher import SHADOW_PAD
+
+    dock_top = screen.bottom() - BOTTOM_MARGIN - DOCK_H + 1
+    assert ln.geometry().bottom() - SHADOW_PAD < dock_top  # nunca por cima da Doca
+    assert ln.height() >= ln.layout().totalMinimumSize().height()
+
+
+def test_controls_fit_their_content_and_menus_stay_on_top(qapp, app_ctx, island):
+    from PySide6.QtCore import Qt as QtNs
+
+    from ventude.services import apps
+    from ventude.ui import brand
+
+    controls = island.controls
+    controls.set_tray_apps([apps.TrayApp(f"App {n}", rf"C:\Apps\a{n}.exe", b"") for n in range(12)])
+    layout = controls.layout()
+    layout.activate()
+    assert controls.preferred_height() >= layout.totalMinimumSize().height()  # nada espremido
+    assert controls.tray_title.text() == "Em segundo plano · 12"
+    menu = brand.ink_menu(controls)
+    assert menu.windowFlags() & QtNs.WindowType.WindowStaysOnTopHint
+    menu.deleteLater()
