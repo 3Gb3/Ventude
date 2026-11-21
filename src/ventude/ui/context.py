@@ -130,9 +130,12 @@ class AppContext(QObject):
         if version < 8:
             from ventude.ui.shell.items import dedupe_pins
 
-            changes["hide_fullscreen"] = False
             dedupe_pins(self.store, "start")
             dedupe_pins(self.store, "taskbar")
+        if version < 9:
+            # A detecção agora ignora janelas maximizadas: dá para sumir só em jogos e vídeos de verdade.
+            # Passar o mouse abre o Início (antes, entrar pela zona do clima abria sempre o Clima).
+            changes.update(hide_fullscreen=True, zone_open=False)
         self.update_settings(**changes)
         if version < 4:
             self.detect_providers()

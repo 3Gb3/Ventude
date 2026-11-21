@@ -31,6 +31,11 @@ def describe(command: Command) -> str:
         return command.monitor_tag or "Janela aberta"
     if command.kind == "project":
         return f"Projeto · {command.branch}" if command.branch else "Projeto"
+    if command.kind == "file":
+        from ventude.services.indexer import category_of
+        from ventude.ui.command import FILE_LOOK
+
+        return FILE_LOOK.get(category_of(command.target or command.path), FILE_LOOK["file"])[2]
     if command.kind in KIND_LABELS:
         return KIND_LABELS[command.kind]
     return command.subtitle or "Ventude"

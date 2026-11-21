@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ventude.core.config import MODULES
-from ventude.services import apps, calc, indexer, launcher, power, taskbar
+from ventude.services import apps, calc, indexer, launcher, power, sites, taskbar
 from ventude.services.timer import countdown, parse_duration
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
@@ -60,6 +60,15 @@ TAB_WORDS = {
     "settings": ("ajustes", "configurações", "configuracoes", "settings"),
 }
 CAFFEINE_WORDS = ("cafeina", "cafeína", "caffeine", "acordado")
+REAL_ICON_GLYPHS = ("apps", "external", "folder", "file", "image", "play", "music", "document")
+FILE_LOOK = {  # categoria -> (ícone, seção, rótulo)
+    "image": ("image", "Imagens", "Imagem"),
+    "video": ("play", "Vídeos", "Vídeo"),
+    "audio": ("music", "Músicas", "Música"),
+    "document": ("document", "Documentos", "Documento"),
+    "archive": ("file", "Arquivos", "Compactado"),
+    "file": ("file", "Arquivos", "Arquivo"),
+}
 KIND_LABELS = {
     "window": "Janela",
     "project": "Projeto",
@@ -69,6 +78,10 @@ KIND_LABELS = {
     "file": "Arquivo",
     "system": "Sistema",
     "url": "Site",
+    "image": "Imagem",
+    "video": "Vídeo",
+    "audio": "Música",
+    "document": "Documento",
     "web": "Web",
     "action": "Ação",
 }
@@ -76,9 +89,14 @@ SECTION_ORDER = (
     "Janelas",
     "Fixados",
     "Apps",
+    "Sites",
     "Projetos",
     "Configurações",
     "Pastas",
+    "Imagens",
+    "Vídeos",
+    "Músicas",
+    "Documentos",
     "Arquivos",
     "Atalhos",
     "Ventude",
@@ -293,11 +311,18 @@ class CommandEngine(QObject):
         for shortcut in self.ctx.store.shortcuts():
             if lowered in shortcut.label.lower() or lowered in shortcut.target.lower():
                 out.append(self._shortcut_command(shortcut))
+        url = sites.as_url(text)
+        if url:
+            out.insert(0, self._url_command(text, url))  # "terra.com.br" abre direto
         if len(text) >= 2:
-            entries = self.ctx.indexer.search(text, max(limit, MAX_RESULTS))
+            query, kind_filter = indexer.parse_filter(text)
+            wanted = max(limit * 2, MAX_RESULTS) if shell else max(limit, MAX_RESULTS)
+            entries = self.ctx.indexer.search(text, wanted)
             found = [self._entry_command(e) for e in entries]
             app_titles = {c.title.lower() for c in found if c.kind in ("app", "uwp")}
             out += [c for c in found if c.kind in ("app", "uwp")]
+            if not kind_filter and not url:
+                out += [self._site_command(site) for site in sites.match(query, limit=2 if shell else 1)]
             if shell:
                 out += [c for c in found if c.kind == "project"]
             if shell or start_mode:
@@ -410,9 +435,10 @@ class CommandEngine(QObject):
                 direct = self._direct_path_commands(query, limit)
                 if direct:
                     return direct[:limit]
-            entries = indexer.search(self.ctx.indexer.files, query, max(limit * 2, 16)) if query else []
-            if not query:
-                entries = (self.ctx.indexer.projects + self.ctx.indexer.files)[:limit]
+            sub, kind_filter = indexer.parse_filter(query)
+            entries = self.ctx.indexer.search_files(sub, max(limit * 2, 16), kind_filter) if sub else []
+            if not sub:
+                entries = self.ctx.indexer.projects[:limit]
             projs = [self._entry_command(e) for e in entries if e.is_project]
             rest = [self._entry_command(e) for e in entries if not e.is_project]
             return (projs + rest)[:limit]
@@ -626,22 +652,35 @@ class CommandEngine(QObject):
     def _entry_command(self, entry: indexer.Entry) -> Command:
         is_proj = entry.kind == "folder" and entry.is_project
         kind = "project" if is_proj else entry.kind
+        if kind == "file":
+            icon, section, _label = FILE_LOOK.get(entry.category, FILE_LOOK["file"])
+            command = Command(
+                icon,
+                entry.name,
+                str(Path(entry.path).parent),
+                lambda e=entry: self._launch(e),
+                path=entry.path,
+                kind="file",
+                target=entry.path,
+                section=section,
+            )
+            command.ctrl = lambda f=entry.path: self._reveal(f)
+            command.actions = [("folder-open", "Mostrar na pasta (Ctrl + Enter)", command.ctrl)]
+            return command
         subtitle = {
             "app": "Aplicativo",
             "uwp": "Aplicativo",
             "project": f"{entry.branch} · {entry.path}" if entry.branch else entry.path,
             "folder": entry.path,
-            "file": entry.path,
         }[kind]
         section = {
             "app": "Apps",
             "uwp": "Apps",
             "project": "Projetos",
             "folder": "Pastas",
-            "file": "Arquivos",
         }[kind]
         command = Command(
-            {"app": "apps", "uwp": "apps", "project": "folder", "folder": "folder", "file": "file"}[kind],
+            {"app": "apps", "uwp": "apps", "project": "folder", "folder": "folder"}[kind],
             entry.name,
             subtitle,
             lambda e=entry: self._launch(e),
@@ -664,6 +703,28 @@ class CommandEngine(QObject):
             kind="system",
             target=item.target,
             section="Configurações",
+        )
+
+    def _site_command(self, site: sites.Site) -> Command:
+        return Command(
+            "globe",
+            site.name,
+            f"{site.host} · Abrir no navegador",
+            lambda s=site: self._open_url(s.name, s.url),
+            kind="url",
+            target=site.url,
+            section="Sites",
+        )
+
+    def _url_command(self, text: str, url: str) -> Command:
+        return Command(
+            "globe",
+            f"Abrir {text.strip()}",
+            "Site · Abre no navegador",
+            lambda t=text.strip(), u=url: self._open_url(t, u),
+            kind="url",
+            target=url,
+            section="Sites",
         )
 
     def _web_command(self, text: str) -> Command:
@@ -771,6 +832,16 @@ class CommandEngine(QObject):
             self._remember("system", item.title, item.target)
         return f"Abrindo {item.title}" if ok else f"Não deu para abrir: {error}"
 
+    def _open_url(self, name: str, url: str) -> str:
+        ok, error = launcher.open_target("url", url)
+        if ok:
+            self._remember("url", name, url)
+        return f"Abrindo {name}" if ok else f"Não deu para abrir: {error}"
+
+    def _reveal(self, path: str) -> str:
+        ok, error = indexer.reveal(path)
+        return "Mostrando na pasta" if ok else f"Não deu para abrir a pasta: {error}"
+
     def _web(self, text: str) -> str:
         webbrowser.open(f"https://www.google.com/search?q={quote_plus(text)}")
         return "Abrindo o navegador"
@@ -877,7 +948,7 @@ class CommandBar(QFrame):
         )
         self.input = QLineEdit()
         self.input.setPlaceholderText(
-            "Buscar apps, pastas e arquivos · t: tarefa · 2^10 · qr link · cafeina 1h…"
+            "Buscar apps, sites, pastas e fotos · t: tarefa · 2^10 · qr link · cafeina 1h…"
         )
         self.input.addAction(icons.icon("search", theme.TEXT_2, 15), QLineEdit.ActionPosition.LeadingPosition)
         self.input.textChanged.connect(self._refresh)
@@ -952,7 +1023,7 @@ class CommandBar(QFrame):
         return self.engine.commands(text, self.start_mode)
 
     def _icon(self, command: Command) -> QIcon:
-        if command.path and command.icon in ("apps", "external", "folder", "file"):
+        if command.path and command.icon in REAL_ICON_GLYPHS:
             if command.path not in self._icon_cache:
                 if self._file_icons is None:
                     self._file_icons = QFileIconProvider()

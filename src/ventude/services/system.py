@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 from pathlib import Path
@@ -88,21 +89,91 @@ GWL_STYLE = -16
 WS_CAPTION = 0x00C00000
 
 
+QUNS_RUNNING_D3D_FULL_SCREEN = 3
+QUNS_PRESENTATION_MODE = 4
+
+
 def is_fullscreen_window(
     rect: tuple[int, int, int, int],
     monitor: tuple[int, int, int, int],
     zoomed: bool,
     style: int,
+    client: tuple[int, int, int, int] | None = None,
 ) -> bool:
-    """True apenas para tela cheia real (sem barra de título e não apenas maximizada)."""
-    if zoomed or (style & WS_CAPTION) == WS_CAPTION:
+    """True apenas para tela cheia real (jogos, vídeos, F11), nunca para janela só maximizada.
+
+    Sem a barra do Windows, uma janela maximizada ocupa a tela toda, então o tamanho sozinho não
+    basta: janela maximizada (`IsZoomed`) nunca conta. Fora isso, conta se a área cliente (sem
+    bordas) cobre o monitor inteiro, ou se a janela não tem barra de título e cobre o monitor.
+    """
+    if zoomed:
         return False
-    return (
-        rect[0] <= monitor[0]
-        and rect[1] <= monitor[1]
-        and rect[2] >= monitor[2]
-        and rect[3] >= monitor[3]
-    )
+
+    def covers(r: tuple[int, int, int, int]) -> bool:
+        return r[0] <= monitor[0] and r[1] <= monitor[1] and r[2] >= monitor[2] and r[3] >= monitor[3]
+
+    if client is not None and covers(client):
+        return True
+    if (style & WS_CAPTION) == WS_CAPTION:
+        return False
+    return covers(rect)
+
+
+def notification_state() -> int:
+    """SHQueryUserNotificationState: 3 = jogo em tela cheia exclusiva (D3D), 4 = modo apresentação."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        import ctypes
+
+        state = ctypes.c_int(0)
+        if ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state)) == 0:
+            return int(state.value)
+    except (OSError, AttributeError):
+        pass
+    return 0
+
+
+def window_fullscreen(hwnd: int, monitor: tuple[int, int, int, int]) -> bool:
+    """A janela `hwnd` está em tela cheia real no monitor `monitor` (pixels físicos)?"""
+    if sys.platform != "win32" or not hwnd:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        handle = wintypes.HWND(hwnd)
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(handle, ctypes.byref(rect)):
+            return False
+        cx, cy = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
+        if not (monitor[0] <= cx < monitor[2] and monitor[1] <= cy < monitor[3]):
+            return False
+        if notification_state() in (QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE):
+            return True
+        client: tuple[int, int, int, int] | None = None
+        client_rect = wintypes.RECT()
+        if user32.GetClientRect(handle, ctypes.byref(client_rect)):
+            origin = wintypes.POINT(0, 0)
+            user32.ClientToScreen(handle, ctypes.byref(origin))
+            client = (
+                origin.x,
+                origin.y,
+                origin.x + client_rect.right - client_rect.left,
+                origin.y + client_rect.bottom - client_rect.top,
+            )
+        get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        get_long.argtypes = [wintypes.HWND, ctypes.c_int]
+        get_long.restype = ctypes.c_ssize_t
+        style = int(get_long(handle, GWL_STYLE))
+        zoomed = bool(user32.IsZoomed(handle))
+        return is_fullscreen_window(
+            (rect.left, rect.top, rect.right, rect.bottom), monitor, zoomed, style, client
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("Checagem de tela cheia falhou", exc_info=True)
+        return False
 
 
 def fullscreen_app_over(own_hwnd: int) -> bool:
@@ -126,37 +197,27 @@ def fullscreen_app_over(own_hwnd: int) -> bool:
         user32.MonitorFromWindow.restype = wintypes.HMONITOR
         user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
         user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MonitorInfo)]
-        user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
         user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-        user32.IsZoomed.argtypes = [wintypes.HWND]
-        get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
-        get_long.argtypes = [wintypes.HWND, ctypes.c_int]
-        get_long.restype = ctypes.c_ssize_t
         hwnd = user32.GetForegroundWindow()
         if not hwnd or int(hwnd) == int(own_hwnd):
             return False
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == os.getpid():
+            return False  # Lançador, Doca, prévias: janelas do próprio Ventude
         name = ctypes.create_unicode_buffer(64)
         user32.GetClassNameW(hwnd, name, 64)
         if name.value in ("Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"):
             return False
         monitor = user32.MonitorFromWindow(hwnd, 2)
-        if monitor != user32.MonitorFromWindow(own_hwnd, 2):
+        if monitor != user32.MonitorFromWindow(wintypes.HWND(int(own_hwnd)), 2):
             return False
         info = MonitorInfo()
         info.cbSize = ctypes.sizeof(MonitorInfo)
-        rect = wintypes.RECT()
         if not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
             return False
-        user32.GetWindowRect(hwnd, ctypes.byref(rect))
         m = info.rcMonitor
-        zoomed = bool(user32.IsZoomed(hwnd))
-        style = int(get_long(hwnd, GWL_STYLE))
-        return is_fullscreen_window(
-            (rect.left, rect.top, rect.right, rect.bottom),
-            (m.left, m.top, m.right, m.bottom),
-            zoomed,
-            style,
-        )
+        return window_fullscreen(int(hwnd), (m.left, m.top, m.right, m.bottom))
     except Exception:  # noqa: BLE001
         log.debug("Checagem de tela cheia falhou", exc_info=True)
         return False

@@ -42,7 +42,8 @@ src/ventude/
     qr.py              gerador de QR Code (ISO 18004) em Python puro
     lyrics.py          letra sincronizada do lrclib.net, com cache
     calc.py            calculadora segura da busca (ast, sem eval)
-    indexer.py         índice de apps, pastas e arquivos + abrir no Terminal/editor
+    indexer.py         índice de apps, de todas as pastas do PC e de mídia/documentos (busca por str.find) + Terminal/editor
+    sites.py           sites comuns da busca ("youtube" -> abrir no navegador) e endereços digitados
     power.py           Central de Energia e atualização do Windows pendente
     taskbar.py         esconder/restaurar a barra do Windows (com espaço reservado), janelas e AppUserModelID
     apps.py            catálogo do Shell: categorias, Configurações do Windows, recentes, conta, bandeja
@@ -76,7 +77,7 @@ src/ventude/
 ## Ventude Shell (2.0)
 
 - **Ligar/desligar**: `replace_taskbar` (barra) e `replace_start_menu` (tecla Windows). A primeira abertura da 2.0 (layout 6) liga os dois e tira data e clima da ilha. O `ShellController` só existe no app (os testes passam uma barra do Windows de mentira e uma energia falsa).
-- **Espaço da barra**: o `TaskbarHider` esconde `Shell_TrayWnd`/`Shell_SecondaryTrayWnd` e define a área útil de cada monitor como a tela menos a altura da barra do Ventude (48 px × escala do monitor). Com "ocultar automaticamente", a área útil é a tela toda e a barra desce até o mouse encostar embaixo. Em tela cheia (jogos, vídeos), a barra some.
+- **Espaço da barra**: o `TaskbarHider` esconde `Shell_TrayWnd`/`Shell_SecondaryTrayWnd` e define a área útil de cada monitor como a tela menos a altura da barra do Ventude (48 px × escala do monitor). Com "ocultar automaticamente", a área útil é a tela toda e a barra desce até o mouse encostar embaixo. Em tela cheia (jogos, vídeos), a barra some de vez e não volta ao encostar o mouse embaixo. Tela cheia = janela não maximizada cuja área cliente cobre o monitor (ou sem barra de título cobrindo o monitor), ou Direct3D exclusivo/apresentação pelo `SHQueryUserNotificationState`.
 - **Agrupamento**: janela e fixado casam pelo AppUserModelID (`SHGetPropertyStoreForWindow`), pela família do pacote da Loja (`WindowsApps\Nome_versão__editor`) ou pelo .exe (atalhos .lnk resolvidos). Apps da Loja usam o ícone de `shell:AppsFolder\AppID`.
 - **Fixados e histórico**: tabelas `pins` (lugar `taskbar`/`start`) e `launches` (Pesquisas recentes) no SQLite. Na primeira abertura, a barra começa com os fixados da barra do Windows e o Iniciar com apps conhecidos que estiverem instalados.
 - **Tecla Windows**: `WinKeyLogic` (o mesmo da 1.2) num hook `WH_KEYBOARD_LL`; Win sozinha abre/fecha a Pesquisa e Win + S abre. Teclas injetadas (Visão de tarefas, Win + D, Win + P enviados pela barra) passam direto.

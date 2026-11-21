@@ -1081,7 +1081,7 @@ class Island(QWidget):
         self.clock_timer = QTimer(self, interval=1000)
         self.clock_timer.timeout.connect(self._tick)
         self.clock_timer.start()
-        self.fullscreen_timer = QTimer(self, interval=1500)
+        self.fullscreen_timer = QTimer(self, interval=700)
         self.fullscreen_timer.timeout.connect(self._check_fullscreen)
         if system.autostart_supported():
             self.fullscreen_timer.start()
@@ -2184,23 +2184,17 @@ class Island(QWidget):
         winutil.keep_topmost(int(self.winId()))
 
     def _check_fullscreen(self) -> None:
-        if not self.ctx.settings.hide_fullscreen or self.open_body:
-            if self._auto_hidden:
-                self._auto_hidden = False
-                self.show()
-            if self.isVisible() and not self._user_hidden:
-                self._keep_on_top()
+        covered = False if self.open_body else system.fullscreen_app_over(int(self.winId()))
+        if covered and self.ctx.settings.hide_fullscreen:
+            if self.isVisible():
+                self._auto_hidden = True
+                self.hide()
             return
-        covered = system.fullscreen_app_over(int(self.winId()))
-        if covered and self.isVisible():
-            self._auto_hidden = True
-            self.hide()
-        elif not covered:
-            if self._auto_hidden:
-                self._auto_hidden = False
-                self.show()
-            if self.isVisible() and not self._user_hidden:
-                self._keep_on_top()
+        if self._auto_hidden:
+            self._auto_hidden = False
+            self.show()
+        if self.isVisible() and not self._user_hidden and not covered:
+            self._keep_on_top()  # nunca se reafirma por cima de um jogo em tela cheia
 
     # ---------- atalho global (Windows) ----------
     def _update_hotkey(self) -> None:

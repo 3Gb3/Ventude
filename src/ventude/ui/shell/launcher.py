@@ -112,7 +112,7 @@ class LauncherField(QWidget):
         super().__init__(parent)
         self.setFixedHeight(44)
         self.input = QLineEdit(self)
-        self.input.setPlaceholderText("Buscar apps, / pastas, @ janelas, > comandos…")
+        self.input.setPlaceholderText("Buscar apps, sites, pastas, fotos, vídeos, músicas…")
         self.input.setFixedHeight(40)
         self.input.addAction(
             icons.icon("search", theme.ACCENT, 15), QLineEdit.ActionPosition.LeadingPosition
@@ -730,7 +730,7 @@ class LauncherWindow(ShellWindow):
         self.tip_bar = QWidget()
         tip_row = QHBoxLayout(self.tip_bar)
         tip_row.setContentsMargins(10, 4, 6, 4)
-        tip_lbl = QLabel("dica: digite >, @, /, =, ? ou ! · arraste fixados para a Doca")
+        tip_lbl = QLabel("dica: img:, video:, musica:, doc:, pasta: filtram · >, @, /, =, ?, ! trocam o modo")
         tip_lbl.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 11px;")
         tip_close = HoverButton("close", "", "Dispensar dica", QSize(20, 20), 11, 10)
         tip_close.clicked.connect(self._dismiss_tips)

@@ -31,7 +31,7 @@ WINDOWS_FAST_MS = 500
 WINDOWS_SLOW_MS = 1500
 DODGE_MS = 120
 STATUS_MS = 5000
-HOVER_MS = 400
+HOVER_MS = 260
 PEEK_MS = 12_000
 GREET_UPTIME = 240
 TASKBAR_SEED = "shell_taskbar_seeded"
@@ -917,10 +917,12 @@ class ShellController(QObject):
             dock_id = id(dock)
             mon_phys = physical_rect(dock.screen_)
             fullscreen = taskbar_service.covering_window(mon_phys, fullscreen_only=True)
-            dock.fullscreen = fullscreen
             sgeom = dock.screen_rect()
             screen_rect = (sgeom.left(), sgeom.top(), sgeom.right() + 1, sgeom.bottom() + 1)
-            at_edge = dock_model.edge_reveal(pos.x(), pos.y(), screen_rect)
+            at_edge = not fullscreen and dock_model.edge_reveal(pos.x(), pos.y(), screen_rect)
+            if fullscreen:
+                self._edge_revealed[dock_id] = False
+                self._last_inside.pop(dock_id, None)
             cap = dock.capsule_rect_on_screen()
             inside = dock.isVisible() and not dock.slid and cap.adjusted(-12, -16, 12, 16).contains(pos)
             if at_edge:
@@ -962,6 +964,10 @@ class ShellController(QObject):
             )
             if hide != dock.slid:
                 dock.slide(hide)
+            dock.sync_fullscreen(fullscreen)
+            for echo in self.echos:
+                if getattr(echo, "screen_", None) is dock.screen_:
+                    echo.set_covered(fullscreen)  # type: ignore[attr-defined]
 
 
 __all__ = ["ShellController", "physical_rect"]

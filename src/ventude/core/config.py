@@ -21,7 +21,7 @@ MODULES: list[tuple[str, str, str]] = [
 ]
 ALWAYS_ON = {"home", "settings"}
 DEFAULT_MODULES = "limits,hardware,audio,shortcuts,shelf,agenda,tasks,weather,market,news"
-LAYOUT_VERSION = 8  # 5: Sistema/Áudio · 6: Shell 2.0 · 7: Shell 3.0 · 8: Ilha sempre visível por padrão
+LAYOUT_VERSION = 9  # 5: Sistema/Áudio · 6: Shell 2.0 · 7: Shell 3.0 · 8: dedupe · 9: some em tela cheia
 DEFAULT_SYMBOLS = "^BVSP:Ibovespa,BRL=X:Dólar,BTC-USD:Bitcoin,PETR4.SA:Petrobras,VALE3.SA:Vale,AAPL:Apple"
 DEFAULT_NEWS = "G1,BBC Brasil,Tecnoblog"
 ANIMATION_SPEEDS = {"nenhuma": 0, "rapida": 170, "normal": 260, "suave": 380}
@@ -40,7 +40,7 @@ class Settings:
     start_with_windows: bool = False
     hotkey_enabled: bool = True
     hover_open: bool = True
-    hide_fullscreen: bool = False
+    hide_fullscreen: bool = True  # some em jogos/vídeos em tela cheia (janela maximizada não conta)
     modules: str = DEFAULT_MODULES
     pill_rings: bool = True
     limits_notify: bool = True
@@ -58,7 +58,7 @@ class Settings:
     pinned_limits_json: str = ""  # {"provedor": "chave da janela"} mostrada no anel
     media_source: str = "spotify"  # spotify | any
     hover_delay_ms: int = 0
-    zone_open: bool = True  # passar o mouse nos anéis/clima abre direto nessas abas
+    zone_open: bool = False  # passar o mouse nos anéis/clima abre direto nessas abas (clique sempre abre)
     pill_progress: bool = True  # linha de andamento da música na ilha fechada
     island_toasts: bool = True  # avisos na própria ilha (senão, na bandeja)
     toast_music: bool = True  # mostra a música nova quando a faixa troca com a ilha fechada

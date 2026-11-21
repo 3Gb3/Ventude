@@ -227,11 +227,17 @@ def should_dodge(
     hover_reveal: bool = False,
     fullscreen: bool = False,
 ) -> bool:
-    """Decide se a Doca deve recuar para baixo neste instante."""
-    if menu_open or thumb_open or dragging or hover_reveal:
+    """Decide se a Doca deve recuar para baixo neste instante.
+
+    Em tela cheia (jogos, vídeos) encostar o mouse embaixo não traz a Doca: só o Lançador
+    (tecla Windows) ou um arraste a chamam de volta.
+    """
+    if menu_open or dragging:
         return False
     if fullscreen:
         return True
+    if thumb_open or hover_reveal:
+        return False
     if dock_mode == "sempre":
         return False
     if dock_mode == "oculta":

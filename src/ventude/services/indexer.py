@@ -1,9 +1,15 @@
-"""Índice instantâneo da busca universal: apps instalados, pastas e arquivos do usuário.
+"""Índice instantâneo da busca universal: apps instalados, todas as pastas do PC e os arquivos úteis.
 
 - Apps: atalhos .lnk/.appref-ms do menu Iniciar (do usuário e de todos) e apps da Loja (Get-StartApps).
-- Pastas e arquivos: Área de Trabalho, Downloads, Documentos, Imagens, Vídeos, Músicas, a pasta do
-  usuário e as raízes dos discos, até 3–4 níveis, pulando caches e builds (node_modules, .git, .venv,
-  AppData...). Fica em memória (no máximo 60 mil itens) e é refeito a cada 15 minutos.
+- Pastas: todas as pastas de todos os discos, sem limite de profundidade (das mais rasas para as mais
+  fundas), pulando só o que é do sistema ou lixo de build (Windows, AppData, node_modules, .git...).
+  Program Files entra até 3 níveis, para achar a pasta dos jogos e programas.
+- Arquivos: nas pastas do usuário (Área de Trabalho, Downloads, Documentos...) entram todos; no resto
+  dos discos entram imagens, vídeos, músicas, documentos e compactados.
+
+O índice fica em memória num formato enxuto (só o caminho e o nome em minúsculas de cada item) e a busca
+roda sobre um texto único com `str.find`, então continua instantânea com centenas de milhares de itens.
+É refeito a cada 30 minutos, numa thread do pool.
 
 Pastas abrem no Explorer (Enter), no Terminal (Ctrl + Enter) ou no Cursor/VS Code (Shift + Enter).
 """
@@ -18,8 +24,9 @@ import string
 import subprocess
 import sys
 import time
+from bisect import bisect_right
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,9 +34,11 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 log = logging.getLogger(__name__)
 
-REFRESH_MS = 15 * 60_000
-FILE_LIMIT = 60_000
-SCAN_BUDGET = 25.0  # segundos no máximo por varredura de arquivos
+REFRESH_MS = 30 * 60_000
+FOLDER_LIMIT = 200_000
+FILE_LIMIT = 200_000
+SCAN_BUDGET = 150.0  # segundos no máximo por varredura completa
+MAX_CANDIDATES = 4000  # itens pontuados por busca (os que começam com o termo vêm primeiro)
 APP_SUFFIXES = (".lnk", ".appref-ms")
 SKIP_APPS = (
     "uninstall",
@@ -91,13 +100,81 @@ IGNORED = {
     "tmp",
     "cache",
     "caches",
+    "cookies",
+    "local settings",
+    "nethood",
+    "printhood",
+    "sendto",
+    "start menu",
+    "templates",
+    "winsxs",
 }
 KIND_BONUS = {"app": 25, "uwp": 25, "folder": 8, "file": 0}
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_CONSOLE = 0x00000010
 
+# ---------- tipos de arquivo ----------
+IMAGE_EXT = frozenset(
+    ".jpg .jpeg .png .gif .webp .bmp .heic .heif .tif .tiff .svg .avif .ico .psd .raw .cr2 .nef .arw .dng"
+    .split()
+)
+VIDEO_EXT = frozenset(".mp4 .mkv .avi .mov .wmv .webm .flv .m4v .mpg .mpeg .3gp .m2ts".split())
+AUDIO_EXT = frozenset(".mp3 .wav .flac .aac .ogg .m4a .wma .opus .aiff .aif .mid .midi .amr".split())
+DOC_EXT = frozenset(
+    ".pdf .doc .docx .xls .xlsx .xlsm .ppt .pptx .odt .ods .odp .txt .md .rtf .csv .epub".split()
+)
+ARCHIVE_EXT = frozenset(".zip .rar .7z .tar .gz .tgz .bz2 .xz .iso".split())
+CATEGORIES: dict[str, frozenset[str]] = {
+    "image": IMAGE_EXT,
+    "video": VIDEO_EXT,
+    "audio": AUDIO_EXT,
+    "document": DOC_EXT,
+    "archive": ARCHIVE_EXT,
+}
+# Fora das pastas do usuário (resto dos discos) só estes tipos de arquivo entram no índice.
+WIDE_EXT = IMAGE_EXT | VIDEO_EXT | AUDIO_EXT | DOC_EXT | ARCHIVE_EXT
 
-@dataclass(frozen=True)
+# Filtros digitados na busca: "img: praia", "/v aniversário", "pasta: projetos"...
+FILTER_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("/p ", "folder"),
+    ("pasta:", "folder"),
+    ("pastas:", "folder"),
+    ("/i ", "image"),
+    ("img:", "image"),
+    ("imagem:", "image"),
+    ("imagens:", "image"),
+    ("foto:", "image"),
+    ("fotos:", "image"),
+    ("/v ", "video"),
+    ("video:", "video"),
+    ("vídeo:", "video"),
+    ("videos:", "video"),
+    ("vídeos:", "video"),
+    ("/m ", "audio"),
+    ("musica:", "audio"),
+    ("música:", "audio"),
+    ("musicas:", "audio"),
+    ("músicas:", "audio"),
+    ("audio:", "audio"),
+    ("áudio:", "audio"),
+    ("/d ", "document"),
+    ("doc:", "document"),
+    ("docs:", "document"),
+    ("documento:", "document"),
+    ("documentos:", "document"),
+)
+
+
+def category_of(path: str) -> str:
+    """image | video | audio | document | archive | file, pela extensão."""
+    ext = os.path.splitext(path)[1].lower()
+    for name, exts in CATEGORIES.items():
+        if ext in exts:
+            return name
+    return "file"
+
+
+@dataclass(frozen=True, slots=True)
 class Entry:
     name: str
     path: str  # caminho; nos apps da Loja, o AppID
@@ -109,6 +186,13 @@ class Entry:
     @property
     def is_folder(self) -> bool:
         return self.kind == "folder"
+
+    @property
+    def category(self) -> str:
+        """folder, app, image, video, audio, document, archive ou file."""
+        if self.kind == "file":
+            return category_of(self.path)
+        return "app" if self.kind in ("app", "uwp") else self.kind
 
 
 def entry(
@@ -148,6 +232,114 @@ def read_git_branch(folder: str | Path) -> str:
             return ref[len("refs/heads/") :]
         return ref.rsplit("/", 1)[-1]
     return head[:7] if len(head) >= 7 else head
+
+
+# ---------- índice enxuto ----------
+class FileIndex:
+    """Pastas e arquivos em listas paralelas (caminho, nome minúsculo, tipo) + texto único para buscar."""
+
+    __slots__ = ("paths", "keys", "folder", "projects", "priority_until", "_blob", "_offsets")
+
+    def __init__(self, entries: Iterable[Entry] = ()) -> None:
+        self.paths: list[str] = []
+        self.keys: list[str] = []
+        self.folder = bytearray()
+        self.projects: dict[int, str] = {}  # índice -> branch (pastas com .git)
+        self.priority_until = 0  # itens antes deste índice vieram das pastas do usuário
+        self._blob = ""
+        self._offsets: list[int] = []
+        for item in entries:
+            self.add(item.path, item.name, item.is_folder, item.is_project, item.branch)
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def add(self, path: str, name: str, is_folder: bool, is_project: bool = False, branch: str = "") -> int:
+        index = len(self.paths)
+        self.paths.append(path)
+        self.keys.append(name.lower().replace("\n", " "))
+        self.folder.append(1 if is_folder else 0)
+        if is_project:
+            self.projects[index] = branch
+        self._blob = ""
+        return index
+
+    def mark_project(self, index: int, branch: str) -> None:
+        self.projects[index] = branch
+
+    def count(self, folders: bool) -> int:
+        return self.folder.count(1 if folders else 0)
+
+    def finish(self) -> None:
+        """Monta o texto de busca (uma vez, no fim da varredura)."""
+        self._build()
+
+    def _build(self) -> None:
+        offsets: list[int] = []
+        pos = 0
+        for key in self.keys:
+            offsets.append(pos)
+            pos += len(key) + 1
+        self._offsets = offsets
+        self._blob = "\n".join(self.keys) + "\n"
+
+    def entry(self, index: int) -> Entry:
+        path = self.paths[index]
+        name = os.path.basename(path.rstrip("\\/")) or path
+        branch = self.projects.get(index)
+        return Entry(
+            name,
+            path,
+            "folder" if self.folder[index] else "file",
+            self.keys[index],
+            is_project=branch is not None,
+            branch=branch or "",
+        )
+
+    def __iter__(self) -> Iterator[Entry]:
+        for index in range(len(self.paths)):
+            yield self.entry(index)
+
+    def project_entries(self) -> list[Entry]:
+        return [self.entry(i) for i in sorted(self.projects)]
+
+    def candidates(self, word: str) -> list[int]:
+        """Índices cujo nome contém `word`: primeiro os que começam com ele, depois o resto."""
+        if not self.keys or not word:
+            return []
+        if not self._blob:
+            self._build()
+        blob, offsets = self._blob, self._offsets
+        found: list[int] = []
+        seen: set[int] = set()
+        # 1) nomes que começam com o termo (o texto começa cada nome logo depois de um "\n")
+        needle = "\n" + word
+        if blob.startswith(word):
+            found.append(0)
+            seen.add(0)
+        start = 0
+        while len(found) < MAX_CANDIDATES:
+            pos = blob.find(needle, start)
+            if pos < 0:
+                break
+            index = bisect_right(offsets, pos + 1) - 1
+            if index not in seen:
+                seen.add(index)
+                found.append(index)
+            start = pos + 1
+        # 2) nomes que contêm o termo no meio
+        start = 0
+        while len(found) < MAX_CANDIDATES:
+            pos = blob.find(word, start)
+            if pos < 0:
+                break
+            index = bisect_right(offsets, pos) - 1
+            if index not in seen:
+                seen.add(index)
+                found.append(index)
+            nxt = offsets[index + 1] if index + 1 < len(offsets) else len(blob)
+            start = max(pos + 1, nxt)
+        return found
 
 
 # ---------- varredura ----------
@@ -219,29 +411,41 @@ def store_entries(data: object, known: set[str]) -> list[Entry]:
     return out
 
 
-def file_roots(home: Path) -> list[tuple[Path, int]]:
-    """Onde procurar pastas e arquivos (e quantos níveis), do mais importante para o menos."""
-    roots = [
-        (home / "Desktop", 4),
-        (home / "Downloads", 3),
-        (home / "Documents", 4),
-        (home / "Pictures", 3),
-        (home / "Videos", 3),
-        (home / "Music", 2),
+Root = tuple[Path, int] | tuple[Path, int, bool]
+DEEP = 64  # "sem limite" de profundidade
+
+
+def file_roots(home: Path) -> list[tuple[Path, int, bool]]:
+    """Onde procurar (caminho, níveis, todos os arquivos?), do mais importante para o menos.
+
+    Pastas do usuário entram com todos os arquivos; o resto dos discos, com todas as pastas e só os
+    arquivos de mídia/documentos. Program Files entra raso, só para achar a pasta de cada programa.
+    """
+    roots: list[tuple[Path, int, bool]] = [
+        (home / "Desktop", DEEP, True),
+        (home / "Downloads", DEEP, True),
+        (home / "Documents", DEEP, True),
+        (home / "Pictures", DEEP, True),
+        (home / "Videos", DEEP, True),
+        (home / "Music", DEEP, True),
     ]
     onedrive = os.environ.get("OneDrive")
     if onedrive:
-        roots.append((Path(onedrive), 4))
-    roots.append((home, 2))
+        roots.append((Path(onedrive), DEEP, True))
+    roots.append((home, DEEP, False))
     if sys.platform == "win32":
         drives = os.listdrives() if hasattr(os, "listdrives") else [f"{c}:\\" for c in string.ascii_uppercase]
         for drive in drives:
             root = Path(drive)
             try:
                 if root.exists() and shutil.disk_usage(root).total > 0:
-                    roots.append((root, 3))
+                    roots.append((root, DEEP, False))
             except OSError:
                 continue
+        for var in ("ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(var)
+            if base and Path(base).is_dir():
+                roots.append((Path(base), 3, False))
     return roots
 
 
@@ -250,88 +454,119 @@ def skip_dir(name: str) -> bool:
     return lowered in IGNORED or lowered.startswith((".", "$", "~"))
 
 
-def scan_files(
-    roots: list[tuple[Path, int]], limit: int = FILE_LIMIT, budget: float = SCAN_BUDGET
-) -> list[Entry]:
+def scan_index(
+    roots: Iterable[Root],
+    folder_limit: int = FOLDER_LIMIT,
+    file_limit: int = FILE_LIMIT,
+    budget: float = SCAN_BUDGET,
+) -> FileIndex:
+    """Varre em largura (pastas rasas primeiro) e devolve o índice enxuto.
+
+    Cada pasta é lida uma vez só (as raízes se sobrepõem: a pasta do usuário contém a Área de Trabalho,
+    o disco C: contém a pasta do usuário), então nenhum item entra repetido.
+    """
     started = time.monotonic()
-    out: list[Entry] = []
-    seen: set[str] = set()
-    by_path: dict[str, int] = {}
-    scanned: set[str] = set()
-    for root, depth in roots:
-        queue: deque[tuple[str, int]] = deque([(str(root), depth)])
+    index = FileIndex()
+    folders = files = 0
+    scanned: set[int] = set()  # hash do caminho em minúsculas de cada pasta já lida
+    visited = 0
+    priority_open = True
+    for root in roots:
+        path, depth = root[0], root[1]
+        all_files = bool(root[2]) if len(root) > 2 else True  # type: ignore[misc]
+        queue: deque[tuple[str, int, int]] = deque([(str(path), depth, -1)])
         while queue:
-            folder, level = queue.popleft()
-            if folder.lower() in scanned:
+            folder, level, own = queue.popleft()
+            marker = hash(folder.lower())
+            if marker in scanned:
                 continue
-            scanned.add(folder.lower())
-            if len(out) >= limit or time.monotonic() - started > budget:
-                return out
+            scanned.add(marker)
+            if folders >= folder_limit and files >= file_limit:
+                index.finish()
+                return index
+            if time.monotonic() - started > budget:
+                log.info("Índice da busca parou pelo tempo: %d pastas, %d arquivos", folders, files)
+                index.finish()
+                return index
+            visited += 1
+            if visited % 400 == 0:
+                time.sleep(0.002)  # cede a vez para a interface durante varreduras grandes
             try:
                 with os.scandir(folder) as it:
                     children = list(it)
             except OSError:
                 continue
-            has_git = any(c.name.lower() == ".git" for c in children)
-            if has_git and folder.lower() in by_path:
-                idx = by_path[folder.lower()]
-                cur = out[idx]
-                out[idx] = Entry(
-                    cur.name,
-                    cur.path,
-                    cur.kind,
-                    cur.key,
-                    is_project=True,
-                    branch=read_git_branch(cur.path),
-                )
+            if own >= 0 and own not in index.projects and any(c.name.lower() == ".git" for c in children):
+                index.mark_project(own, read_git_branch(folder))
             for child in children:
                 try:
                     is_dir = child.is_dir(follow_symlinks=False)
                 except OSError:
                     continue
-                if is_dir and skip_dir(child.name):
-                    continue
-                key = child.path.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                proj = False
-                br = ""
-                if is_dir and level == 1:
-                    try:
-                        if os.path.exists(os.path.join(child.path, ".git")):
-                            proj = True
-                            br = read_git_branch(child.path)
-                    except OSError:
-                        pass
-                by_path[key] = len(out)
-                out.append(
-                    entry(
-                        child.name,
-                        child.path,
-                        "folder" if is_dir else "file",
-                        is_project=proj,
-                        branch=br,
-                    )
-                )
-                if is_dir and level > 1:
-                    queue.append((child.path, level - 1))
-    return out
+                if is_dir:
+                    if skip_dir(child.name):
+                        continue
+                    child_index = -1
+                    if folders < folder_limit:
+                        proj = False
+                        br = ""
+                        if level == 1:
+                            try:
+                                if os.path.exists(os.path.join(child.path, ".git")):
+                                    proj = True
+                                    br = read_git_branch(child.path)
+                            except OSError:
+                                pass
+                        child_index = index.add(child.path, child.name, True, proj, br)
+                        folders += 1
+                    if level > 1 and hash(child.path.lower()) not in scanned:
+                        queue.append((child.path, level - 1, child_index))
+                elif files < file_limit:
+                    if not all_files and os.path.splitext(child.name)[1].lower() not in WIDE_EXT:
+                        continue
+                    index.add(child.path, child.name, False)
+                    files += 1
+        if all_files and priority_open:
+            index.priority_until = len(index)  # as raízes do usuário vêm primeiro na lista
+        else:
+            priority_open = False
+    index.finish()
+    return index
+
+
+def scan_files(
+    roots: Iterable[Root],
+    limit: int = FILE_LIMIT,
+    budget: float = SCAN_BUDGET,
+) -> list[Entry]:
+    """Lista de entradas (para testes e listas pequenas). O app usa `scan_index`."""
+    return list(scan_index(roots, folder_limit=limit, file_limit=limit, budget=budget))
 
 
 # ---------- busca ----------
+def parse_filter(text: str) -> tuple[str, str]:
+    """'img: praia' -> ('praia', 'image'); '/p projetos' -> ('projetos', 'folder'); sem filtro: ''."""
+    stripped = text.strip()
+    lowered = stripped.lower() + " "
+    for prefix, kind in FILTER_PREFIXES:
+        if lowered.startswith(prefix):
+            return stripped[len(prefix) :].strip(), kind
+    return stripped, ""
+
+
 def parse_query(text: str) -> tuple[str, bool]:
     """'/p projetos' ou 'pasta: projetos' -> ('projetos', só pastas)."""
-    stripped = text.strip()
-    lowered = stripped.lower()
-    for prefix in ("/p ", "pasta:", "pastas:"):
-        if lowered.startswith(prefix):
-            return stripped[len(prefix) :].strip(), True
-    return stripped, False
+    query, kind = parse_filter(text)
+    if kind == "folder":
+        return query, True
+    return (text.strip(), False) if kind == "" else (query, False)
 
 
 def score(item: Entry, query: str, words: list[str]) -> float | None:
-    name = item.key
+    return _score_key(item.key, item.kind, query, words)
+
+
+def _score_key(name: str, kind: str, query: str, words: list[str]) -> float | None:
     if name == query:
         value = 100.0
     elif name.startswith(query):
@@ -344,26 +579,72 @@ def score(item: Entry, query: str, words: list[str]) -> float | None:
         value = 30.0
     else:
         return None
-    return value + KIND_BONUS.get(item.kind, 0) - len(name) / 100
+    if kind == "file":
+        stem = os.path.splitext(name)[0]
+        if stem == query:
+            value = max(value, 95.0)  # "foto.jpg" ao buscar "foto"
+    return value + KIND_BONUS.get(kind, 0) - len(name) / 100
 
 
-def search(items: list[Entry], text: str, limit: int = 6, folders_only: bool = False) -> list[Entry]:
+def _matches_filter(item: Entry, kind_filter: str) -> bool:
+    if not kind_filter:
+        return True
+    if kind_filter == "folder":
+        return item.is_folder
+    return item.kind == "file" and category_of(item.path) == kind_filter
+
+
+def search(
+    items: list[Entry],
+    text: str,
+    limit: int = 6,
+    folders_only: bool = False,
+    kind_filter: str = "",
+) -> list[Entry]:
     query = text.strip().lower()
     if not query:
         return []
+    if folders_only:
+        kind_filter = "folder"
     words = query.split()
     first = words[0]
     ranked: list[tuple[float, Entry]] = []
     for item in items:
-        if folders_only and not item.is_folder:
-            continue
         if first not in item.key:
             continue  # filtro barato antes da pontuação
+        if not _matches_filter(item, kind_filter):
+            continue
         value = score(item, query, words)
         if value is not None:
             ranked.append((value, item))
     ranked.sort(key=lambda pair: (-pair[0], pair[1].key))
     return [item for _, item in ranked[:limit]]
+
+
+def search_index(index: FileIndex, text: str, limit: int = 6, kind_filter: str = "") -> list[Entry]:
+    """Mesma pontuação de `search`, mas sobre o índice enxuto (centenas de milhares de itens)."""
+    query = text.strip().lower()
+    if not query or not len(index):
+        return []
+    words = query.split()
+    ranked: list[tuple[float, int]] = []
+    keys, folder = index.keys, index.folder
+    for i in index.candidates(words[0]):
+        is_folder = bool(folder[i])
+        if kind_filter == "folder" and not is_folder:
+            continue
+        if kind_filter and kind_filter != "folder":
+            if is_folder or category_of(keys[i]) != kind_filter:
+                continue
+        value = _score_key(keys[i], "folder" if is_folder else "file", query, words)
+        if value is not None:
+            if i in index.projects:
+                value += 4  # projetos (pastas com .git) um pouco na frente
+            if i < index.priority_until:
+                value += 6  # Área de Trabalho, Downloads, Documentos, Imagens... antes do resto do disco
+            ranked.append((value, i))
+    ranked.sort(key=lambda pair: (-pair[0], keys[pair[1]]))
+    return [index.entry(i) for _, i in ranked[:limit]]
 
 
 # ---------- ações ----------
@@ -375,6 +656,18 @@ def launch(item: Entry) -> tuple[bool, str]:
             os.startfile(item.path)  # type: ignore[attr-defined]
         else:  # pragma: no cover
             subprocess.Popen(["xdg-open", item.path])
+    except OSError as exc:
+        return False, str(exc)
+    return True, ""
+
+
+def reveal(path: str) -> tuple[bool, str]:
+    """Abre o Explorer na pasta do arquivo, com ele selecionado."""
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer.exe", f"/select,{path}"])
+        else:  # pragma: no cover
+            subprocess.Popen(["xdg-open", str(Path(path).parent)])
     except OSError as exc:
         return False, str(exc)
     return True, ""
@@ -456,10 +749,21 @@ class Indexer(QObject):
         self._run = run
         self.home = home or Path.home()
         self.apps: list[Entry] = []
-        self.files: list[Entry] = []
+        self.index = FileIndex()
         self._busy = False
         self.timer = QTimer(self, interval=REFRESH_MS)
         self.timer.timeout.connect(self.refresh)
+
+    # Compatível com quem atribui/lê uma lista de entradas (testes e telas antigas).
+    @property
+    def files(self) -> list[Entry]:
+        return list(self.index)
+
+    @files.setter
+    def files(self, items: list[Entry]) -> None:
+        index = FileIndex(items)
+        index.finish()
+        self.index = index
 
     def start(self) -> None:
         self.timer.start()
@@ -471,18 +775,27 @@ class Indexer(QObject):
         self._busy = True
         self._run(self._build, done=self._done, fail=self._failed, owner=self)
 
-    def _build(self) -> tuple[list[Entry], list[Entry]]:
+    def _build(self) -> tuple[list[Entry], FileIndex]:
         apps = scan_apps(start_menu_dirs())
         apps += scan_store_apps({a.key for a in apps})
         apps.sort(key=lambda a: a.key)
         self.apps = apps  # os apps aparecem na busca antes de terminar os arquivos
         self.apps_ready.emit(len(apps))  # sinal enfileirado: chega na thread da interface
-        return apps, scan_files(file_roots(self.home))
+        started = time.monotonic()
+        index = scan_index(file_roots(self.home))
+        log.info(
+            "Índice da busca: %d apps, %d pastas, %d arquivos em %.1f s",
+            len(apps),
+            index.count(True),
+            index.count(False),
+            time.monotonic() - started,
+        )
+        return apps, index
 
-    def _done(self, result: tuple[list[Entry], list[Entry]]) -> None:
+    def _done(self, result: tuple[list[Entry], FileIndex]) -> None:
         self._busy = False
-        self.apps, self.files = result
-        self.ready.emit(len(self.apps) + len(self.files))
+        self.apps, self.index = result
+        self.ready.emit(len(self.apps) + len(self.index))
 
     def _failed(self, error: BaseException) -> None:
         self._busy = False
@@ -490,10 +803,21 @@ class Indexer(QObject):
 
     @property
     def projects(self) -> list[Entry]:
-        return [item for item in self.files if item.is_project]
+        return self.index.project_entries()
+
+    def search_files(self, text: str, limit: int = 6, kind_filter: str = "") -> list[Entry]:
+        return search_index(self.index, text, limit, kind_filter)
 
     def search(self, text: str, limit: int = 6) -> list[Entry]:
-        query, folders_only = parse_query(text)
-        if folders_only:
-            return search(self.files, query, limit, folders_only=True)
-        return search(self.apps + self.files, query, limit)
+        query, kind_filter = parse_filter(text)
+        if kind_filter:
+            return self.search_files(query, limit, kind_filter)
+        apps = search(self.apps, query, limit)
+        files = self.search_files(query, limit * 2)
+        merged = [(score(e, query.lower(), query.lower().split()) or 0.0, n, e) for n, e in enumerate(apps)]
+        merged += [
+            ((score(e, query.lower(), query.lower().split()) or 0.0) + (4 if e.is_project else 0), 100 + n, e)
+            for n, e in enumerate(files)
+        ]
+        merged.sort(key=lambda t: (-t[0], t[1]))
+        return [e for _, _, e in merged[:limit]]
