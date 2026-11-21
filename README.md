@@ -1,184 +1,218 @@
+<div align="center">
+
+<img src="docs/icon.png" alt="Ícone do Ventude: um tornadinho" width="96">
+
 # Ventude
 
-Uma Dynamic Island e um **shell próprio** para Windows 10 e 11. No topo, uma pílula discreta mostra a hora, a música tocando e **quanto ainda resta dos seus limites no Claude, no Gemini (Antigravity), no Grok, no Codex (ChatGPT), no Cursor e no GitHub Copilot**; passe o mouse para abrir o painel completo. Embaixo, desde a 2.0, o **Ventude Shell** substitui a barra de tarefas, o Menu Iniciar e a Pesquisa do Windows.
+**Uma Dynamic Island e um shell completo para o Windows 10 e 11.**
 
-## Ventude Shell (2.0)
+Seus limites de IA, sua música, seu clima e sua agenda numa pílula discreta no topo da tela,
+e uma nova barra de tarefas, Menu Iniciar e Pesquisa embaixo.
 
-<p align="center">
-  <img src="docs/screens/shell-iniciar.webp" alt="Menu Iniciar do Ventude com fixados, recentes e a barra de tarefas" width="100%">
-</p>
-<p align="center">
-  <img src="docs/screens/shell-pesquisa.webp" alt="Pesquisa (tecla Windows) com as pesquisas recentes" width="49%">
-  <img src="docs/screens/shell-pesquisa-resultados.webp" alt="Resultados da Pesquisa com o painel de ações" width="49%">
-</p>
-<p align="center">
-  <img src="docs/screens/shell-iniciar-todos.webp" alt="Todos os apps por categoria" width="49%">
-  <img src="docs/screens/shell-painel-rapido.webp" alt="Painel rápido: rede, cafeína, microfone, ferramentas e volume" width="49%">
-</p>
-<p align="center">
-  <img src="docs/screens/shell-ate-logo.webp" alt="Animação de desligar: Até logo!" width="49%">
-  <img src="docs/screens/shell-despedidas.webp" alt="Reiniciar, suspender, bloquear e a saudação ao ligar" width="49%">
-</p>
+[![Última versão](https://img.shields.io/github/v/release/3Gb3/Ventude?label=vers%C3%A3o&color=7c5cff)](https://github.com/3Gb3/Ventude/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/3Gb3/Ventude/total?label=downloads&color=2ea44f)](https://github.com/3Gb3/Ventude/releases)
+![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?logo=windows)
+![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776ab?logo=python&logoColor=white)
+[![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-informational)](LICENSE)
 
-| Parte | O que faz |
-|-------|-----------|
-| **Doca flutuante** | Cápsula centrada em material **Tinta** (Ink), com fixados e apps abertos agrupados por AppUserModelID e separados por monitor. Ícones "dormindo" ficam levemente dessaturados e acendem no hover ou quando estão rodando; parar o mouse mostra o rótulo em mini-ilha e **prévias ao vivo** (DWM) acima da Doca. Arraste fixados para reordenar ou puxe acima da borda para desafixar (*Puf*). Três modos: **Esquivar janelas** (padrão), **Sempre visível** (reserva 64 px) e **Oculta** (revela ao encostar embaixo). Atalhos **Win + 1..9** alternam slots (com **Shift**, abre nova janela). |
-| **Ilha & Controles (`Win + A`)** | Hora, data, clima, métricas fixadas, anéis das IAs e estado de rede/áudio/bateria moram **exclusivamente** na Ilha para evitar duplicação. **Win + A** (ou botão direito na pílula) abre os **Controles** direto na Ilha: volume master e seletor inline de saída, microfone, Cafeína, Conta-gotas, OCR, Foco, **Silêncio**, Energia, Luz noturna, Ajustes e apps em segundo plano. A roda do mouse na pílula exibe uma pílula compacta de volume sobre ela. |
-| **Eco secundário** | Pílula passiva minimalista só com o relógio no topo dos monitores secundários. |
-| **Lançador (`Win` / `Win + S`)** | Uma única folha que une Início (**fixados** em 8 colunas + **continuar**), Pesquisa instantânea com escopos (`>` comandos, `@` janelas abertas, `/` projetos Git e arquivos, `=` calculadora, `?` web, `!` energia), lista de **Todos os apps** com chips de categoria e trilho A–Z, e tela integrada de **Energia** (`1–5`). Repositórios Git exibem a *branch* atual e ganham o verbo **“Agente aqui”** (`claude` por padrão). |
-| **Interruptor de energia** | Desligar, reiniciar, suspender, hibernar, bloquear e sair escurecem todas as telas: a Ilha passa o bastão para um grande Interruptor em Tinta com contagem no perímetro (**Esc** ou “Cancelar” cancelam). Ao ligar o PC: saudação com o Interruptor acendendo com mola e voltando à Ilha. |
+### [⬇ Baixar o Ventude para Windows](https://github.com/3Gb3/Ventude/releases/latest/download/Ventude-Setup.exe)
 
-Também no pacote: **Modo Silêncio** (filtra toasts informativos mantendo alertas críticos), redução de movimento (**Ajustes > Animação: Nenhuma** ou efeito do sistema desligado no Windows) e **notificações por CLI/IPC** via `ventude notify --title "..." --text "..."`.
+<sub>Grátis · instala sem administrador · atualiza sozinho</sub>
 
-**Segurança da barra do Windows**: ela volta ao desligar o Shell (Ajustes > Ventude Shell, menu da bandeja ou botão direito na Doca > "Modo da Doca" / "Mostrar barra do Windows por 12s"), ao fechar o Ventude, em qualquer erro e, se o Ventude for fechado à força, na próxima abertura. A tecla Windows também é sempre solta.
+<br>
+
+<img src="docs/screens/shell-iniciar.webp" alt="Ventude Shell: Lançador com fixados e recentes, a ilha no topo e a Doca embaixo" width="100%">
+
+</div>
+
+---
+
+## Por que o Ventude?
+
+Quem usa várias IAs no dia a dia vive abrindo abas só para descobrir quanto ainda sobra do limite. O Ventude junta tudo num lugar só, sempre à vista e sem atrapalhar:
+
+- 🤖 **Limites de 6 IAs em tempo real** — Claude, Gemini (Antigravity), Grok, Codex (ChatGPT), Cursor e GitHub Copilot, com previsão de quando o limite acaba.
+- 🏝️ **Dynamic Island no topo** — hora, música, clima, avisos e anéis de uso. Passe o mouse e ela vira um painel completo.
+- 🪟 **Ventude Shell** — substitui a barra de tarefas, o Menu Iniciar e a Pesquisa do Windows por uma Doca flutuante e um Lançador rápido.
+- 🔒 **Privado por padrão** — lê os limites direto das suas contas. Nada passa por servidores de terceiros e os segredos ficam protegidos pelo próprio Windows.
+- ⚡ **Leve e sem configuração** — detecta as IAs instaladas, abre com o Windows e se atualiza sozinho.
+
+## Instalação
+
+1. Baixe o **[`Ventude-Setup.exe`](https://github.com/3Gb3/Ventude/releases/latest/download/Ventude-Setup.exe)** da [última versão](https://github.com/3Gb3/Ventude/releases/latest).
+2. Abra o instalador. Ele não pede administrador, instala em `%LOCALAPPDATA%\Programs\Ventude`, cria os atalhos e já abre o Ventude.
+3. Pronto. As IAs que você já usa no PC são detectadas sozinhas; as outras se ligam em **Ajustes > Limites das IAs**.
+
+> [!NOTE]
+> Como o instalador ainda não é assinado digitalmente, o Windows pode mostrar "O Windows protegeu o PC". Clique em **Mais informações > Executar assim mesmo**.
+
+**Atualizações:** ao iniciar, o Ventude confere se há uma versão nova e pergunta se você quer atualizar. Se aceitar, ele baixa, confere o arquivo, instala em silêncio e reabre.
+
+---
 
 ## A ilha
 
 <p align="center">
-  <img src="docs/screens/ilha.png" alt="Ilha fechada com data, clima, hora e anéis de uso das IAs" height="60">
-  <img src="docs/screens/ilha-musica.png" alt="Ilha fechada tocando música" height="60">
-  <img src="docs/screens/ilha-pausada.png" alt="Ilha fechada com a música pausada" height="60">
+  <img src="docs/screens/ilha.webp" alt="Ilha fechada com data, clima, hora e anéis de uso das IAs" height="60">
+  <img src="docs/screens/ilha-musica.webp" alt="Ilha fechada tocando música" height="60">
 </p>
 <p align="center">
-  <img src="docs/screens/ilha-timer.png" alt="Ilha com música, estante, Pomodoro, clima e anéis" height="60">
-  <img src="docs/screens/aviso-na-ilha.png" alt="Aviso de limite na própria ilha" height="60">
+  <img src="docs/screens/ilha-timer.webp" alt="Ilha com música, Pomodoro, estante, clima e anéis" height="60">
+  <img src="docs/screens/aviso-na-ilha.webp" alt="Aviso de limite na própria ilha" height="60">
 </p>
 <p align="center">
-  <img src="docs/screens/inicio.png" alt="Painel Início" width="49%">
-  <img src="docs/screens/ias.png" alt="Limites das IAs" width="49%">
-</p>
-<p align="center">
-  <img src="docs/screens/agenda.png" alt="Agenda" width="32%">
-  <img src="docs/screens/clima.png" alt="Clima" width="32%">
-  <img src="docs/screens/mercado.png" alt="Mercado" width="32%">
-</p>
-<p align="center">
-  <img src="docs/screens/clima-dia.png" alt="Detalhes do clima de um dia, hora a hora" width="49%">
-  <img src="docs/screens/ajustes-ias.png" alt="Ajustes das IAs" width="49%">
-</p>
-<p align="center">
-  <img src="docs/screens/estante.png" alt="Estante temporária" width="32%">
-  <img src="docs/screens/soltar.png" alt="Soltar na estante ou nos atalhos" width="32%">
-  <img src="docs/screens/comandos.png" alt="Barra de comandos" width="32%">
+  <img src="docs/screens/inicio.webp" alt="Painel Início" width="49%">
+  <img src="docs/screens/ias.webp" alt="Limites das IAs" width="49%">
 </p>
 
-## O que tem
+Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta, vira um painel com abas:
 
 | Aba | O que faz |
 |-----|-----------|
 | **Início** | Relógio, semana, próximo compromisso, clima, anéis das IAs, player e tarefas pendentes. |
-| **IAs** | Limites de cada IA, janela por janela (no Gemini, modelo por modelo, agrupados por família), com porcentagem usada e quando renova. O alfinete escolhe qual limite vai no anel da ilha. |
-| **Sistema** | CPU (com os processos que mais usam), GPU (uso, VRAM, temperatura e consumo nas NVIDIA), RAM, rede (download, upload e ping), disco e bateria ao vivo, com gráfico do último minuto. O alfinete fixa a métrica na ilha fechada. |
-| **Áudio** | Troca a saída (fones, caixas, HDMI, Bluetooth) e o microfone padrão com 1 clique, volume master e do microfone e mixer por aplicativo, com o ícone de cada app. |
-| **Estante** | Guarda arquivos, imagens, links, textos e cores soltos na ilha e (com o histórico ligado) os últimos 20 que você copiou. Filtro Tudo/Copiados/Fixados, QR Code de textos e links e fixar para não sumir ao fechar. |
-| **Atalhos** | Apps, pastas, arquivos e sites a um clique. Arraste do Explorer para a ilha, mesmo fechada: ela abre nos Atalhos. |
-| **Agenda** | Calendário do mês e compromissos do dia (`14:00`, `14h`, `9-10`). Avisa na ilha 10 e 5 minutos antes. |
-| **Tarefas** | Listas rápidas: marque, edite com dois cliques e limpe as concluídas. |
-| **Clima** | Agora e próximos 7 dias, pelo Open-Meteo (sem chave). Clique num dia para ver umidade, chuva, vento, UV, nascer e pôr do sol e o gráfico hora a hora. |
-| **Mercado** | Sua lista de ações, índices, moedas e cripto, com gráfico do mês (Yahoo Finance). |
-| **Notícias** | G1, BBC Brasil e Tecnoblog, com filtro por fonte. |
-| **Ajustes** | Tudo salvo na hora. Desligue as abas que não usa: elas somem e param de rodar. Escolha quais IAs ficam ligadas, quais têm anel na ilha e qual limite cada anel mostra. |
+| **IAs** | Cada limite, janela por janela, com % usado, quando renova, mini-gráfico das últimas horas e previsão ("Acaba em ~1h 40min"). |
+| **Sistema** | CPU (com os processos que mais usam), GPU NVIDIA, RAM, rede, disco e bateria ao vivo. |
+| **Áudio** | Troca saída e microfone com 1 clique, volume master e mixer por aplicativo. |
+| **Estante** | Guarda arquivos, imagens, links, textos e cores soltos na ilha, além do histórico da área de transferência. |
+| **Atalhos** | Apps, pastas, arquivos e sites a um clique. Arraste do Explorer para a ilha, mesmo fechada. |
+| **Agenda e Tarefas** | Calendário, compromissos com aviso 10 e 5 minutos antes, e listas rápidas. |
+| **Clima** | Agora e próximos 7 dias, hora a hora, pelo Open-Meteo. |
+| **Mercado e Notícias** | Ações, índices, moedas e cripto com gráfico do mês; G1, BBC Brasil e Tecnoblog. |
+| **Ajustes** | Tudo salvo na hora. Abas desligadas somem e param de rodar. |
 
-Também tem:
+<p align="center">
+  <img src="docs/screens/sistema.webp" alt="Sistema: CPU, GPU, RAM, rede, disco e bateria ao vivo" width="49%">
+  <img src="docs/screens/audio.webp" alt="Áudio: saídas, microfone e mixer por aplicativo" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/agenda.webp" alt="Agenda" width="32%">
+  <img src="docs/screens/clima.webp" alt="Clima" width="32%">
+  <img src="docs/screens/mercado.webp" alt="Mercado" width="32%">
+</p>
+<p align="center">
+  <img src="docs/screens/estante.webp" alt="Estante temporária" width="32%">
+  <img src="docs/screens/comandos.webp" alt="Barra de comandos criando uma tarefa" width="32%">
+  <img src="docs/screens/clima-dia.webp" alt="Detalhes do clima de um dia, hora a hora" width="32%">
+</p>
 
-- Clima de agora (ícone e temperatura) na ilha fechada, com aviso de chuva na próxima hora. Sem cidade escolhida, ele estima pelo IP.
-- **Na ilha fechada**: clique nos anéis abre a aba IAs, no clima abre o Clima, na data abre a Agenda, nas métricas abre o Sistema. Clique do meio ou na capa toca/pausa, a roda do mouse muda o volume do Windows (e mostra o valor na ilha) e Shift + roda troca de faixa. Uma linha fina mostra o andamento da música.
-- **Avisos na própria ilha**: limites das IAs, música nova e lembretes da Agenda aparecem por alguns segundos e somem.
-- **Timer e Pomodoro** pelo Início ou pela barra de comandos, com a contagem na ilha e um pulso ao terminar.
-- **Barra de comandos** (atalho global, Ctrl + K ou começar a digitar): abre atalhos, cria tarefas (`t: revisar PR`), compromissos (`a: call 15h`, `a: dentista amanhã 9h-10h`) e timers (`timer 15m`, `pomodoro`).
-- **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows) no topo do painel.
-- **Busca universal**: apps instalados (inclusive da Loja), pastas e arquivos do usuário. Pasta: Enter abre no Explorer, Ctrl + Enter abre o Terminal nela e Shift + Enter abre no Cursor/VS Code. `/p nome` busca só pastas, `1450 * 5,85` calcula e copia, `qr texto` mostra um QR Code. No Shell, é a tela de Pesquisa; sem ele, a barra de comandos da ilha.
-- **Tecla Windows** (Ajustes > Ventude Shell): Win sozinha e Win + S abrem a Pesquisa do Ventude; os outros atalhos com Win continuam do Windows.
-- **Energia**: bloquear, suspender, hibernar, reiniciar, desligar, sair da sessão e, com atualização do Windows pendente, atualizar e reiniciar/desligar. No Shell, pelo Iniciar, sempre com a animação "Até logo!" (dá para cancelar); sem o Shell, no topo do painel.
-- **Modo Cafeína** (xícara no topo do painel ou `cafeina 2h`): o Windows não apaga a tela nem suspende.
-- **Privacidade na ilha**: ponto laranja com o microfone em uso, verde com a câmera, com o nome do app. Clique no laranja muta o microfone.
-- **Letra sincronizada** da música no Início (lrclib.net).
-- Player do Spotify com capa, avanço e controles; pausado, a música continua na ilha. Em **Ajustes > Música** dá para seguir qualquer player do Windows.
-- Abre na hora ao passar o mouse (o tempo é ajustável) e troca de aba com animação.
-- Avisos na bandeja quando uma IA chega a 80% e 95% e quando o limite renova.
-- Atalho global **Ctrl + Alt + Espaço** para abrir e fechar.
-- A ilha some sozinha em tela cheia (jogos, vídeos, apresentações).
-- Funciona em vários monitores: arraste a ilha para onde quiser.
-- Iniciar com o Windows e uma só instância aberta por vez.
+<details>
+<summary><b>Ver todos os recursos da ilha</b></summary>
+
+- **Na ilha fechada**: clique nos anéis abre as IAs, no clima abre o Clima, na data abre a Agenda. Clique do meio toca/pausa, a roda do mouse muda o volume e Shift + roda troca de faixa.
+- **Avisos na própria ilha**: limites das IAs, música nova e lembretes da Agenda aparecem por alguns segundos.
+- **Timer e Pomodoro**, com a contagem na ilha e um pulso ao terminar.
+- **Barra de comandos** (Ctrl + K ou começar a digitar): cria tarefas (`t: revisar PR`), compromissos (`a: dentista amanhã 9h-10h`) e timers (`timer 15m`, `pomodoro`).
+- **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows).
+- **Busca universal**: apps (inclusive da Loja), pastas e arquivos. `/p nome` busca pastas, `1450 * 5,85` calcula e copia, `qr texto` gera um QR Code.
+- **Modo Cafeína**: o Windows não apaga a tela nem suspende.
+- **Privacidade**: ponto laranja com o microfone em uso, verde com a câmera, com o nome do app.
+- **Letra sincronizada** da música (lrclib.net) e player do Spotify ou de qualquer player do Windows.
+- Some sozinha em tela cheia, funciona em vários monitores e abre com **Ctrl + Alt + Espaço**.
+
+</details>
+
+## Ventude Shell
+
+<p align="center">
+  <img src="docs/screens/shell-doca.webp" alt="Doca flutuante com fixados e apps abertos" width="70%">
+</p>
+<p align="center">
+  <img src="docs/screens/shell-pesquisa.webp" alt="Lançador: pesquisa com a melhor correspondência e ações" width="49%">
+  <img src="docs/screens/shell-projeto-git.webp" alt="Lançador: projeto Git com Terminal, Editor e Agente aqui" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/shell-iniciar-todos.webp" alt="Todos os apps por categoria com trilho A–Z" width="49%">
+  <img src="docs/screens/shell-previas.webp" alt="Prévias ao vivo das janelas acima da Doca" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/controles.webp" alt="Controles na ilha: som, rede, Cafeína, Foco, Silêncio e apps em segundo plano" width="32%">
+  <img src="docs/screens/shell-ate-logo.webp" alt="Interruptor de energia: Até logo!" width="66%">
+</p>
+
+| Parte | O que faz |
+|-------|-----------|
+| **Doca flutuante** | Fixados e apps abertos numa cápsula centralizada, com prévias ao vivo das janelas, arrastar para reordenar e **Win + 1..9** para alternar. Modos: esquivar janelas, sempre visível ou oculta. |
+| **Lançador (`Win` / `Win + S`)** | Início, Pesquisa instantânea e Todos os apps numa só folha. Escopos: `>` comandos, `@` janelas abertas, `/` projetos e arquivos, `=` calculadora, `?` web, `!` energia. |
+| **Controles (`Win + A`)** | Volume e saída de áudio, microfone, Cafeína, Conta-gotas, OCR, Foco, Silêncio, Luz noturna e apps em segundo plano, direto na ilha. |
+| **Energia** | Desligar, reiniciar, suspender e bloquear com a animação "Até logo!" em todas as telas (Esc cancela) e uma saudação ao ligar. |
+
+> [!TIP]
+> O Shell é opcional e seguro: a barra de tarefas do Windows volta ao desligá-lo, ao fechar o Ventude, em qualquer erro e até depois de um fechamento forçado.
 
 ## Limites das IAs
 
-O Ventude lê os limites direto das contas que você já usa. Nada passa por servidores de terceiros e ele nunca altera seus logins.
+O Ventude lê os limites direto das contas que você já usa e nunca altera seus logins.
 
-| IA | Como lê | O que você precisa fazer |
-|----|---------|--------------------------|
-| **Claude** | Usa o login do **Claude Code** (`%USERPROFILE%\.claude\.credentials.json`, ou o do WSL com a distro aberta) para ler a sessão de 5h, a semana e os limites por modelo, os mesmos números do `/usage`. O token dura poucas horas: quando vence, o Ventude renova do mesmo jeito que o Claude Code faz e grava no mesmo arquivo (dá para desligar em Ajustes). | Nada, se você usa o Claude Code logado. Se usa o **Claude Desktop** ou o site, cole a `sessionKey` (ou o "Copiar como cURL") do claude.ai em **Ajustes > Claude**: o app usa a mesma conta, então pegue no navegador logado nela. |
-| **Gemini (Antigravity)** | Conversa com o servidor local do **Antigravity** (127.0.0.1) e lê a cota de cada modelo (Gemini, Claude, GPT e os outros que ele oferecer), agrupados por família. O anel da ilha segue os modelos Gemini. | Deixe o Antigravity aberto e logado. Com ele fechado, a ilha mostra o último valor e já considera as renovações. |
-| **Codex (ChatGPT)** | Usa o login do **Codex** (`%USERPROFILE%\.codex\auth.json`) para ler a janela de 5h e a semanal do seu plano do ChatGPT. | Ligue em **Ajustes > Limites das IAs**. Sem o Codex instalado, cole o "Copiar como cURL" do chatgpt.com. |
-| **Cursor** | Lê o login que o **Cursor** instalado guarda no PC e mostra o uso incluído no plano por ciclo. Os modelos usados dentro do Cursor (Grok, Claude, GPT...) contam aqui. | Ligue em **Ajustes > Limites das IAs**. Sem o Cursor instalado, cole o cookie `WorkosCursorSessionToken` do cursor.com. |
-| **GitHub Copilot** | Lê o login da extensão do **Copilot** (VS Code, Visual Studio, JetBrains) e mostra as requisições premium, o chat e o autocompletar do mês. | Ligue em **Ajustes > Limites das IAs**. Sem a extensão, cole um token `ghu_…`/`gho_…`. |
-| **Grok** | Usa o login do **Grok CLI** (`%USERPROFILE%\.grok\auth.json`) para ler os créditos do ciclo, ou o cookie do **grok.com** para ler as consultas restantes de cada modo (Auto, Rápido, Expert). | Se usa o site, o app ou os bots, cole o "Copiar como cURL" (ou o cookie) do grok.com em **Ajustes > Grok**. O Grok usado dentro do Cursor conta no limite do Cursor, não no da conta Grok. |
+| IA | De onde lê | O que você precisa fazer |
+|----|-----------|--------------------------|
+| **Claude** | Login do **Claude Code**: sessão de 5h, semana e limites por modelo (os números do `/usage`). | Nada, se usa o Claude Code. Usando só o app ou o site, cole a `sessionKey` do claude.ai em **Ajustes > Claude**. |
+| **Gemini (Antigravity)** | Servidor local do **Antigravity**: cota de cada modelo, agrupada por família. | Deixar o Antigravity aberto e logado. |
+| **Codex (ChatGPT)** | Login do **Codex**: janela de 5h e semanal do plano. | Ligar em Ajustes. Sem o Codex, colar o cURL do chatgpt.com. |
+| **Cursor** | Login do **Cursor** instalado: uso incluído no ciclo. | Ligar em Ajustes. Sem o Cursor, colar o cookie do cursor.com. |
+| **GitHub Copilot** | Login da extensão do **Copilot**: requisições premium, chat e autocompletar do mês. | Ligar em Ajustes. Sem a extensão, colar um token `ghu_…`. |
+| **Grok** | Login do **Grok CLI** ou cookie do **grok.com**: o limite semanal do plano, o mesmo da tela **Utilização** do site. | Colar o "Copiar como cURL" (ou o cookie) do grok.com em **Ajustes > Grok**. |
 
-Na aba IAs, cada IA mostra um mini-gráfico do uso nas últimas horas e avisa quando, no ritmo atual, o limite vai acabar antes de renovar ("Acaba em ~1h 40min"). Codex, Cursor e Copilot já instalados são ligados sozinhos na primeira abertura da 1.2 (ou pelo botão **Detectar IAs instaladas**).
-
-Em **Ajustes > Limites das IAs**, uma tabela escolhe quais IAs ficam ligadas, quais ganham anel na ilha e no Início e **qual limite cada anel acompanha**: automático (o mais apertado), sessão de 5h, semana, um modelo específico... O alfinete na aba IAs faz o mesmo. Codex, Cursor e Copilot começam desligados.
-
-O claude.ai e o grok.com ficam atrás do Cloudflare, que barra programas em Python comuns. O Ventude conversa com eles com uma conexão igual à do Chrome (biblioteca `curl_cffi`), e o cartão de cada IA mostra o motivo quando algo é recusado.
-
-Como pegar os valores do navegador (F12):
+<details>
+<summary><b>Como copiar o cookie ou o cURL do navegador</b></summary>
 
 - **sessionKey do claude.ai**: F12 > Aplicativo (Application) > Cookies > `https://claude.ai` > copie o valor de `sessionKey`.
-- **"Copiar como cURL" (claude.ai ou grok.com)**: F12 > Rede (Network) > atualize a página > botão direito numa requisição para o site (no Grok, a `rate-limits`) > Copiar > **Copiar como cURL**. Vão juntos o cookie, o navegador usado e os cabeçalhos que o site pede. Funciona com as versões bash, cmd e PowerShell.
+- **"Copiar como cURL"** (claude.ai, grok.com, chatgpt.com): F12 > Rede (Network) > atualize a página > botão direito numa requisição para o site > Copiar > **Copiar como cURL**. Funciona com as versões bash, cmd e PowerShell.
 
-Esses segredos ficam protegidos pelo Windows (DPAPI): só a sua conta do Windows consegue lê-los.
+Esses valores ficam protegidos pelo Windows (DPAPI): só a sua conta do Windows consegue lê-los. Como o claude.ai e o grok.com ficam atrás do Cloudflare, o Ventude conversa com eles com uma conexão igual à do Chrome (`curl_cffi`).
 
+</details>
+
+> [!IMPORTANT]
 > Os endpoints de uso do Claude, do Antigravity e do grok.com não são APIs públicas documentadas. Se um deles mudar, o card daquela IA mostra o aviso e o último valor conhecido, e o resto do Ventude continua funcionando.
 
-## Instalar
+## Privacidade e dados
 
-Baixe o **`Ventude-Setup.exe`** da [última versão](https://github.com/3Gb3/Ventude_Notch/releases/latest) e abra. Ele instala sem pedir administrador (em `%LOCALAPPDATA%\Programs\Ventude`), cria o atalho na **área de trabalho** e no menu Iniciar e já abre o Ventude.
+- Nada é enviado para servidores do Ventude: não existem servidores do Ventude.
+- Tudo fica em `%APPDATA%\Ventude` (`ventude.db` com ajustes e segredos protegidos e `ventude.log`, rotativo de 1 MB).
+- Para remover, desinstale pelo Windows e apague essa pasta.
 
-> O Windows pode avisar "O Windows protegeu o PC" porque o instalador não é assinado: clique em **Mais informações > Executar assim mesmo**.
+## Atalhos úteis
 
-### Atualizações
+| Atalho | Ação |
+|--------|------|
+| `Ctrl + Alt + Espaço` | Abre e fecha a ilha |
+| `Win` / `Win + S` | Lançador e Pesquisa (com o Shell ligado) |
+| `Win + A` | Controles |
+| `Win + 1..9` | Alterna os apps da Doca |
+| `Ctrl + K` | Barra de comandos |
+| `Ctrl + 1..9` / `Ctrl + ,` | Troca de aba / Ajustes |
 
-Toda alteração na branch `main` gera uma versão nova automaticamente. A primeira de cada linha é a versão do `pyproject.toml` (hoje **2.0.0**); as seguintes sobem só o último número (2.0.1, 2.0.2...). Ao **iniciar**, o Ventude instalado confere se há uma versão mais nova e pergunta se você quer atualizar. Se aceitar, ele baixa, confere o arquivo, instala em silêncio e reabre sozinho. Ele não procura atualizações enquanto está aberto.
+---
 
-## Rodar pelo código-fonte
+## Para desenvolvedores
 
-Requer Python 3.12+ e [uv](https://docs.astral.sh/uv/).
+Requer **Python 3.12+** e [uv](https://docs.astral.sh/uv/).
 
 ```powershell
+git clone https://github.com/3Gb3/Ventude.git
+cd Ventude
 uv sync
 uv run ventude
 ```
 
-Rodando pelo código, o Ventude não se atualiza sozinho: use `git pull`.
-
-## Como usar
-
-- **Passe o mouse** na ilha para abrir (na hora, por padrão). Saiu com o mouse, ela fecha (os dois tempos são ajustáveis).
-- **Arraste** apps, pastas, arquivos ou links para a ilha: ela abre nos Atalhos e adiciona ao soltar.
-- **Clique** na ilha para abrir, mesmo com a abertura por mouse desligada.
-- **Arraste** a pílula ou o topo do painel para mover, inclusive para outro monitor.
-- **Esc** fecha. **Ctrl + 1…9** troca de aba e **Ctrl + 0** (ou **Ctrl + ,**) abre os Ajustes. O **alfinete** mantém o painel aberto.
-- **Bandeja**: clique para abrir e fechar. Clique com o botão direito para ocultar a ilha, trocar de monitor, atualizar os limites ou sair.
-
-## Dados
-
-Tudo fica em `%APPDATA%\Ventude`:
-
-| Arquivo | Conteúdo |
-|---------|----------|
-| `ventude.db` | Ajustes, atalhos, agenda, tarefas, cache e segredos protegidos |
-| `ventude.log` | Log rotativo (1 MB) |
-| `legado\` | Arquivos da versão anterior, já migrados. Pode apagar. |
-
-Na primeira execução, atalhos, compromissos e listas da versão antiga são migrados sozinhos. Os arquivos da IA antiga (`assistant.db`, `credentials.bin`) vão para `legado\` e não são mais usados.
-
-## Desenvolvimento
-
 ```powershell
-uv run ruff check
-uv run pytest
-uv run python scripts/preview.py preview
+uv run ruff check                          # lint
+uv run pytest                              # testes
+uv run python scripts/preview.py preview   # capturas de todas as telas com dados de demonstração
 ```
 
-O `preview.py` gera capturas de todas as telas com dados de demonstração, sem tocar nos seus dados. Com `--shell`, gera só as do Ventude Shell numa área de trabalho de 1920×1080 (inclusive a animação "Até logo!" em PNG animado).
+Toda alteração na `main` gera uma versão nova automaticamente pelo GitHub Actions. Mais detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/PACKAGING.md](docs/PACKAGING.md).
 
-Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/PACKAGING.md](docs/PACKAGING.md).
+## Contribuindo
+
+Encontrou um bug ou tem uma ideia? [Abra uma issue](https://github.com/3Gb3/Ventude/issues). Pull requests são bem-vindos.
+
+Se o Ventude te ajudou, deixe uma ⭐ no repositório e compartilhe com quem também vive de olho nos limites das IAs.
+
+## Licença
+
+Distribuído sob a [licença MIT](LICENSE): use, modifique e redistribua à vontade, mantendo o aviso de copyright.
+
+<div align="center">
+<sub>Feito no Brasil 🇧🇷 para o Windows.</sub>
+</div>

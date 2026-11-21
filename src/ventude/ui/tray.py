@@ -15,14 +15,7 @@ def app_icon() -> QIcon:
         pm = QPixmap(size, size)
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        s = size / 64.0
-        brand.paint_switch(
-            p,
-            QRectF(3 * s, 16 * s, 58 * s, 32 * s),
-            on=1.0,
-            border_color="#4A505B",
-        )
+        brand.paint_tornado(p, QRectF(0, 0, size, size))
         p.end()
         result.addPixmap(pm)
     return result

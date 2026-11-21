@@ -26,7 +26,7 @@ from ventude.core import net
 
 log = logging.getLogger(__name__)
 
-REPO = "3Gb3/Ventude_Notch"
+REPO = "3Gb3/Ventude"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 ASSET_NAME = "Ventude-Setup.exe"
 SETUP_ARGS = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]

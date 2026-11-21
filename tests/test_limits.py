@@ -409,7 +409,47 @@ def test_grok_fetch_cli(monkeypatch, home):
     assert report.source == "Grok CLI" and report.plan == "SuperGrok" and report.windows[0].used == 10
 
 
+# Resposta real de GetGrokCreditsConfig (3% usado, ciclo semanal, Grok Bot 3%).
+GROK_CREDITS = bytes.fromhex(
+    "00000000520a500d00004040220c08fc8381d8061080dad6fd012a0c08fcf8a5d8061080dad6fd013a07"
+    "08091500004040421e0802120c08fc8381d8061080dad6fd011a0c08fcf8a5d8061080dad6fd01580162"
+    "006801800000000f677270632d7374617475733a300d0a"
+)
+
+
+def _no_credits(monkeypatch):
+    def fail(method, url, **kw):
+        raise net.NetError("HTTP 404", 404)
+
+    monkeypatch.setattr(net, "browser_request", fail)
+
+
+def test_grok_parse_credits():
+    w = grok.parse_credits(GROK_CREDITS)
+    assert w.used == 3.0 and w.label == "Limite semanal" and w.detail == "Grok Bot 3%"
+    assert w.resets_at == 1795783804 and w.period == 7 * 86400
+    assert grok.parse_credits(b"") is None
+    assert grok.parse_credits(b"\x00\x00\x00\x00\x03\xff\xff\xff") is None
+
+
+def test_grok_fetch_web_credits(monkeypatch, home):
+    def fake_request(method, url, **kw):
+        assert url == grok.WEB_CREDITS and kw["headers"]["Cookie"] == "sso=abc"
+        assert kw["headers"]["Content-Type"] == "application/grpc-web+proto"
+        return GROK_CREDITS
+
+    def no_rate(*a, **kw):
+        raise AssertionError("não deveria cair nas cotas por modelo")
+
+    monkeypatch.setattr(net, "browser_request", fake_request)
+    monkeypatch.setattr(net, "browser_json", no_rate)
+    report = grok.fetch(ctx(home, "web", secrets={"grok_cookie": "Cookie: sso=abc"}))
+    assert [w.key for w in report.windows] == ["credits"] and report.windows[0].used == 3.0
+
+
 def test_grok_fetch_web_cookie(monkeypatch, home):
+    _no_credits(monkeypatch)
+
     def fake_browser(method, url, **kw):
         assert method == "POST" and kw["headers"]["Cookie"] == "sso=abc"
         if kw["json_body"]["modelName"] == "grok-4-heavy":
@@ -423,6 +463,7 @@ def test_grok_fetch_web_cookie(monkeypatch, home):
 
 
 def test_grok_web_from_curl_and_errors(monkeypatch, home):
+    _no_credits(monkeypatch)
     seen = []
     curl = (  # "Copiar como cURL (cmd)" do Chrome
         r'curl ^"https://grok.com/rest/rate-limits^" ^'
