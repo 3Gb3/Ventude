@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
@@ -151,7 +152,7 @@ def _already_running(name: str) -> bool:
     return False
 
 
-def _check_for_update(tasks: Tasks, app: QApplication) -> None:
+def _check_for_update(tasks: Tasks, quit_cb: Callable[[], None]) -> None:
     """Uma vez por inicialização: pergunta se quer atualizar quando a main tem versão nova."""
     from ventude.ui.update_dialog import ask_to_update
 
@@ -159,7 +160,7 @@ def _check_for_update(tasks: Tasks, app: QApplication) -> None:
         if update is None:
             return
         log.info("Atualização disponível: %s", update.version)
-        _windows.append(ask_to_update(update, tasks, app.quit))
+        _windows.append(ask_to_update(update, tasks, quit_cb))
 
     tasks.run(updates.check, __version__, done=found)
 
@@ -172,10 +173,13 @@ def _install_failsafes(app: QApplication, shell: object) -> None:
 
     def restore_shell() -> None:
         try:
-            if hider.hidden or hider.marker.exists():
-                hider.restore()  # só ctypes: funciona mesmo depois do Qt fechar
+            shell.restore()  # type: ignore[attr-defined]
         except Exception:  # noqa: BLE001
-            log.exception("Falha ao restaurar a barra de tarefas")
+            try:
+                if hider.hidden or hider.marker.exists():
+                    hider.restore()  # só ctypes: funciona mesmo depois do Qt fechar
+            except Exception:  # noqa: BLE001
+                log.exception("Falha ao restaurar a barra de tarefas")
         try:
             keys.remove()
         except Exception:  # noqa: BLE001
@@ -260,7 +264,30 @@ def run() -> int:
     for screen in app.screens():
         screen.availableGeometryChanged.connect(lambda *_: island.reposition())
     app.screenAdded.connect(lambda s: s.availableGeometryChanged.connect(lambda *_: island.reposition()))
-    ctx.quit_requested.connect(app.quit)
+
+    quitting = False
+
+    def quit_app() -> None:
+        nonlocal quitting
+        if quitting:
+            return
+        quitting = True
+        log.info("Encerrando Ventude")
+        try:
+            island.prepare_quit()
+        except Exception:  # noqa: BLE001
+            log.exception("Falha ao fechar a ilha")
+        try:
+            shell.shutdown()
+        except Exception:  # noqa: BLE001
+            log.exception("Falha ao restaurar o Shell")
+        try:
+            tray.hide()
+        except Exception:  # noqa: BLE001
+            log.exception("Falha ao esconder o ícone da bandeja")
+        app.quit()
+
+    ctx.quit_requested.connect(quit_app)
 
     ctx.media.start()
     ctx.limits.start()
@@ -271,7 +298,7 @@ def run() -> int:
     log.info("Ventude %s iniciado", __version__)
     tasks.run(net.browser_transport, done=lambda name: log.info("Conexão com claude.ai/grok.com: %s", name))
     if updates.enabled():
-        QTimer.singleShot(3000, lambda: _check_for_update(tasks, app))
+        QTimer.singleShot(3000, lambda: _check_for_update(tasks, quit_app))
     code = app.exec()
 
     shell.shutdown()

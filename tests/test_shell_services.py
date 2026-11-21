@@ -1090,3 +1090,127 @@ def test_indexer_git_projects_antigravity_and_rename_pin(tmp_path, store, monkey
     pin = store.add_pin("start", "app", "Velho Nome", r"C:\Apps\x.exe")
     store.rename_pin(pin.id, "Novo Nome")
     assert store.pins("start")[0].label == "Novo Nome"
+
+
+def test_fullscreen_detection_ignores_maximized_windows():
+    from ventude.services.system import WS_CAPTION, is_fullscreen_window
+
+    mon = (0, 0, 1920, 1080)
+    assert not is_fullscreen_window(mon, mon, zoomed=True, style=0x00CF0000)
+    assert not is_fullscreen_window(mon, mon, zoomed=True, style=0x80000000)
+    assert not is_fullscreen_window(mon, mon, zoomed=False, style=WS_CAPTION)
+    assert is_fullscreen_window(mon, mon, zoomed=False, style=0x80000000)
+    assert is_fullscreen_window(mon, mon, zoomed=False, style=0x80800000)  # WS_POPUP | WS_BORDER
+    assert not is_fullscreen_window((0, 0, 1280, 720), mon, zoomed=False, style=0x80000000)
+
+
+def test_stable_unpinned_dock_order_and_unpinned_drag_gap():
+    from ventude.core.store import Pin
+    from ventude.ui.shell.dock_model import SlotModel
+    from ventude.ui.shell.items import build_items
+
+    pins = [Pin(1, "taskbar", "app", "Explorer", r"C:\Windows\explorer.exe", 0)]
+    w_chrome = WindowInfo(10, "Navegador", 100, r"C:\Apps\chrome.exe", foreground=True)
+    w_code = WindowInfo(11, "Projeto", 101, r"C:\Apps\code.exe", foreground=False)
+    w_term = WindowInfo(12, "Terminal", 102, r"C:\Apps\wt.exe", foreground=False)
+
+    order = [r"exe:c:\apps\chrome.exe", r"exe:c:\apps\code.exe"]
+    first = build_items(pins, [w_chrome, w_code], order=order)
+    flipped = build_items(pins, [w_code, w_term, w_chrome], order=order)
+    assert [i.key for i in first] == ["pin:1", r"exe:c:\apps\chrome.exe", r"exe:c:\apps\code.exe"]
+    assert [i.key for i in flipped] == [
+        "pin:1",
+        r"exe:c:\apps\chrome.exe",
+        r"exe:c:\apps\code.exe",
+        r"exe:c:\apps\wt.exe",
+    ]
+
+    lay = SlotModel().layout(
+        flipped,
+        window_w=900,
+        drag_key=r"exe:c:\apps\chrome.exe",
+        insert_index=2,
+        insert_section="unpinned",
+    )
+    assert lay.separator_x is not None
+    unpinned_slots = [s for s in lay.slots if not s.item.pinned]
+    assert [s.key for s in unpinned_slots] == [r"exe:c:\apps\code.exe", r"exe:c:\apps\wt.exe"]
+    assert unpinned_slots[0].x > lay.separator_x
+    assert lay.capsule_w > SlotModel().layout(flipped[:3], window_w=900).capsule_w
+
+
+def test_find_matching_pin_and_dedupe_pins(store, monkeypatch):
+    from ventude.ui.shell.items import dedupe_pins, find_matching_pin
+
+    targets = {
+        r"c:\desktop\discord.lnk": r"C:\Users\u\AppData\Local\Discord\Update.exe",
+        r"c:\desktop\spotify.lnk": r"C:\Users\u\AppData\Local\Spotify\Update.exe",
+        r"c:\menu\spotify.lnk": r"C:\Users\u\AppData\Roaming\Spotify\Spotify.exe",
+        r"c:\desktop\code.lnk": r"C:\Apps\VSCode\Code.exe",
+    }
+    monkeypatch.setattr("ventude.services.winutil.lnk_target", lambda p: targets.get(str(p).lower(), ""))
+
+    p_exp = store.add_pin("start", "uwp", "Explorador de Arquivos", "Microsoft.Windows.Explorer")
+    p_disc = store.add_pin("start", "app", "Discord", r"C:\Desktop\Discord.lnk")
+    p_spot1 = store.add_pin("start", "app", "Spotify", r"C:\Desktop\Spotify.lnk")
+    p_spot2 = store.add_pin("start", "app", "Spotify", r"C:\Menu\Spotify.lnk")
+    p_claude = store.add_pin("start", "uwp", "Claude", "Claude_pzs8sxrjxfjjc!Claude")
+    assert all(p is not None for p in (p_exp, p_disc, p_spot1, p_spot2, p_claude))
+
+    pins = store.pins("start")
+    assert find_matching_pin(pins, "app", "Explorer", r"C:\Windows\explorer.exe") == p_exp
+    assert find_matching_pin(pins, "app", "Discord", r"C:\Apps\Discord\Discord.exe") == p_disc
+    # Squirrel Update.exe não confunde Discord.lnk com Spotify.lnk
+    assert find_matching_pin(pins, "app", "Spotify", r"C:\Menu\Spotify.lnk") == p_spot1
+    assert find_matching_pin([p_disc], "app", "Spotify", r"C:\Desktop\Spotify.lnk") is None
+    claude_exe = r"C:\Program Files\WindowsApps\Claude_6.6395.0.0_x64__pzs8sxrjxfjjc\app\claude.exe"
+    assert find_matching_pin(pins, "app", "Claude Desktop", claude_exe) == p_claude
+    assert find_matching_pin(pins, "app", "Outro", r"C:\Apps\Outro.exe") is None
+
+    removed = dedupe_pins(store, "start")
+    assert removed == 1
+    assert [p.id for p in store.pins("start")] == [p_exp.id, p_disc.id, p_spot1.id, p_claude.id]
+
+
+def test_close_background_app_rules():
+    from ventude.services.apps import close_background_app
+
+    assert close_background_app("")[0] is False
+    ok_prot, msg_prot = close_background_app(r"C:\Windows\explorer.exe", pids_fn=lambda _e: [123])
+    assert not ok_prot and "protegido" in msg_prot.lower()
+    assert close_background_app(r"C:\Apps\x.exe", pids_fn=lambda _e: []) == (
+        False,
+        "Aplicativo já está fechado.",
+    )
+
+    terminated_calls: list[list[int]] = []
+    close_calls: list[set[int]] = []
+    assert close_background_app(
+        r"C:\Apps\Discord.exe",
+        force=False,
+        pids_fn=lambda _e: [101, 102],
+        post_close_fn=lambda pids: close_calls.append(pids) or 1,
+        terminate_fn=lambda pids: terminated_calls.append(pids) or (2, 0),
+    ) == (True, "")
+    assert close_calls == [{101, 102}] and terminated_calls == []
+
+    # Sem janela visível: recorre ao TerminateProcess automaticamente
+    assert close_background_app(
+        r"C:\Apps\Tray.exe",
+        force=False,
+        pids_fn=lambda _e: [201],
+        post_close_fn=lambda _pids: 0,
+        terminate_fn=lambda pids: terminated_calls.append(pids) or (1, 0),
+    ) == (True, "")
+    assert terminated_calls == [[201]]
+
+    # Force=True pula WM_CLOSE e informa erro se acesso negado
+    close_calls.clear()
+    ok_err, msg_err = close_background_app(
+        r"C:\Apps\Elevado.exe",
+        force=True,
+        pids_fn=lambda _e: [301],
+        post_close_fn=lambda pids: close_calls.append(pids) or 1,
+        terminate_fn=lambda _pids: (0, 1),
+    )
+    assert not ok_err and close_calls == [] and "permissão" in msg_err.lower()

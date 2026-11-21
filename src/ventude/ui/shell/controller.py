@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 import time
@@ -10,6 +11,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QTimer
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QWidget
 
+from ventude.core.store import Pin
 from ventude.services import apps, hardware, indexer, launcher, shellhook, system
 from ventude.services import taskbar as taskbar_service
 from ventude.services.taskbar import TaskbarHider, WindowInfo
@@ -19,7 +21,7 @@ from ventude.ui.shell.common import app_pixmap
 from ventude.ui.shell.curtain import PowerFx, uptime_seconds
 from ventude.ui.shell.dock import Dock
 from ventude.ui.shell.fly import FlyingIcon
-from ventude.ui.shell.items import TaskItem, build_items, split_by_monitor, store_families
+from ventude.ui.shell.items import TaskItem, build_items, find_matching_pin, split_by_monitor, store_families
 from ventude.ui.shell.launcher import LauncherWindow
 from ventude.ui.shell.thumbs import ThumbnailPopup
 
@@ -34,6 +36,7 @@ PEEK_MS = 12_000
 GREET_UPTIME = 240
 TASKBAR_SEED = "shell_taskbar_seeded"
 START_SEED = "shell_start_seeded"
+UNPINNED_ORDER_KEY = "dock_unpinned_order"
 EXPLORER = r"C:\Windows\explorer.exe"
 
 
@@ -83,11 +86,14 @@ class ShellController(QObject):
         self.echos: list[object] = []
         self.items: list[TaskItem] = []
         self.windows: list[WindowInfo] = []
+        self._unpinned_order: list[str] = self._load_unpinned_order()
         self.launcher: LauncherWindow | None = None
         self.thumbs: ThumbnailPopup | None = None
         self.failed = False
         self._wanted = False
         self._busy = False
+        self._shut_down = False
+        self._launcher_screen: object | None = None
         self._hover_target: tuple[Dock, TaskItem, QRect] | None = None
         self._last_inside: dict[int, float] = {}
         self._edge_revealed: dict[int, bool] = {}
@@ -144,6 +150,7 @@ class ShellController(QObject):
             self.failed = False
             self._wanted = wanted
         if wanted and not self.failed:
+            self._shut_down = False
             self.seed_taskbar_pins()
             self._ensure_docks()
             self._sync_events(True)
@@ -157,6 +164,7 @@ class ShellController(QObject):
                 self.hider.apply_work_areas()
             for dock in self.docks:
                 dock.place()
+            self._check_dodge()
             self.windows_timer.setInterval(WINDOWS_SLOW_MS if self.events.active else WINDOWS_FAST_MS)
             for timer in (self.windows_timer, self.dodge_timer, self.reassert_timer, self.status_timer):
                 if not timer.isActive():
@@ -202,8 +210,12 @@ class ShellController(QObject):
 
     def _ensure_docks(self) -> None:
         screens = self._screens()
+        start_hidden = getattr(self.ctx.settings, "dock_mode", "esquivar") == "oculta"  # type: ignore[attr-defined]
         current = [d.screen_ for d in self.docks]
         if current == screens:
+            for dock in self.docks:
+                if not dock.isVisible():
+                    dock.start_bar(entrance=True, start_hidden=start_hidden)
             return
         for dock in self.docks:
             dock.stop_bar()
@@ -218,10 +230,11 @@ class ShellController(QObject):
                 lambda it, anchor, entered, d=dock: self.slot_hovered(d, it, anchor, entered)
             )
             dock.pin_reordered.connect(self._reorder_taskbar_pins)
+            dock.unpinned_reordered.connect(self._reorder_unpinned)
             dock.pin_unpinned.connect(self._unpin_taskbar_pin)
             dock.pin_dropped.connect(self._drop_pin_on_dock)
             self._apply_items_to_dock(dock)
-            dock.start_bar(entrance=True)
+            dock.start_bar(entrance=True, start_hidden=start_hidden)
             self.docks.append(dock)
 
     def sync_echos(self) -> None:
@@ -308,17 +321,40 @@ class ShellController(QObject):
             log.exception("Falha ao remover o atalho da tecla Windows")
 
     def shutdown(self) -> None:
-        self.keys.remove()
+        if self._shut_down:
+            return
+        self._shut_down = True
         self._sync_events(False)
         self.restore()
+        self.keys.remove()
         for dock in self.docks:
+            dock.close()
             dock.deleteLater()
         self.docks.clear()
         for echo in self.echos:
+            echo.close()  # type: ignore[attr-defined]
             echo.deleteLater()  # type: ignore[attr-defined]
         self.echos.clear()
+        if self.launcher is not None:
+            self.launcher._reveal.stop()
+            self.launcher._tween.stop()
+            self.launcher._closing = False
+            self.launcher.hide()
+            self.launcher.close()
+            self.launcher.deleteLater()
+            self.launcher = None
+        if self.thumbs is not None:
+            self.thumbs.close()
+            self.thumbs.deleteLater()
+            self.thumbs = None
 
     # ---------- fixados ----------
+    def find_pin(self, place: str, kind: str, label_text: str, target: str) -> Pin | None:
+        store = self.ctx.store  # type: ignore[attr-defined]
+        entries = list(getattr(getattr(self.ctx, "indexer", None), "apps", ()) or ())
+        families = store_families(entries)
+        return find_matching_pin(store.pins(place), kind, label_text, target, families)
+
     def seed_taskbar_pins(self) -> None:
         store = self.ctx.store  # type: ignore[attr-defined]
         if store.meta(TASKBAR_SEED):
@@ -327,8 +363,9 @@ class ShellController(QObject):
         for label_text, link in found:
             lowered = label_text.lower()
             if "explorer" in lowered or "explorador" in lowered:
-                store.add_pin("taskbar", "app", "Explorador de Arquivos", EXPLORER)
-            else:
+                if self.find_pin("taskbar", "app", "Explorador de Arquivos", EXPLORER) is None:
+                    store.add_pin("taskbar", "app", "Explorador de Arquivos", EXPLORER)
+            elif self.find_pin("taskbar", "app", label_text, link) is None:
                 store.add_pin("taskbar", "app", label_text, link)
         if not store.pins("taskbar"):
             store.add_pin("taskbar", "app", "Explorador de Arquivos", EXPLORER)
@@ -344,7 +381,8 @@ class ShellController(QObject):
         by_name = {e.name: e for e in entries}
         for name in apps.pick_start_seeds(by_name):
             entry = by_name[name]
-            store.add_pin("start", entry.kind, entry.name, entry.path)
+            if self.find_pin("start", entry.kind, entry.name, entry.path) is None:
+                store.add_pin("start", entry.kind, entry.name, entry.path)
         store.set_meta(START_SEED, "1")
         if self.launcher is not None and self.launcher.isVisible():
             self.launcher.refresh_pins()
@@ -360,17 +398,17 @@ class ShellController(QObject):
     ) -> str:
         store = self.ctx.store  # type: ignore[attr-defined]
         where = "no Lançador" if place == "start" else "na Doca"
-        pin = store.pinned(place, target)
+        norm_kind = kind if kind in ("app", "uwp", "folder", "file", "url", "system") else "app"
+        pin = self.find_pin(place, norm_kind, label_text, target)
         if pin is not None:
             store.remove_pin(pin.id)
             message = f"Desafixado {'do Lançador' if place == 'start' else 'da Doca'}"
             self.ctx.data_changed.emit("pins")  # type: ignore[attr-defined]
             return message
-        norm_kind = kind if kind in ("app", "uwp", "folder", "file", "url", "system") else "app"
         store.add_pin(place, norm_kind, label_text, target)
         self.ctx.data_changed.emit("pins")  # type: ignore[attr-defined]
         if place == "taskbar" and start_pos is not None and self.docks:
-            new_pin = store.pinned("taskbar", target)
+            new_pin = self.find_pin("taskbar", norm_kind, label_text, target)
             dock = self._dock_for()
             if new_pin is not None and dock is not None:
                 end_pos = dock.slot_screen_rect(f"pin:{new_pin.id}").center()
@@ -378,9 +416,38 @@ class ShellController(QObject):
                 FlyingIcon.fly(px, start_pos, end_pos, self.ctx.settings)  # type: ignore[attr-defined]
         return f"Fixado {where}"
 
+    def _load_unpinned_order(self) -> list[str]:
+        raw = self.ctx.store.meta(UNPINNED_ORDER_KEY)  # type: ignore[attr-defined]
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return []
+        if not isinstance(data, list):
+            return []
+        return list(dict.fromkeys(str(k) for k in data if isinstance(k, str) and k))
+
+    def _save_unpinned_order(self) -> None:
+        self.ctx.store.set_meta(UNPINNED_ORDER_KEY, json.dumps(self._unpinned_order))  # type: ignore[attr-defined]
+
     def _reorder_taskbar_pins(self, ids: list[int]) -> None:
         self.ctx.store.reorder_pins(ids)  # type: ignore[attr-defined]
         self.ctx.data_changed.emit("pins")  # type: ignore[attr-defined]
+
+    def _reorder_unpinned(self, keys: list[str]) -> None:
+        clean = list(dict.fromkeys(k for k in keys if k))
+        if not clean:
+            return
+        for key in clean:
+            if key not in self._unpinned_order:
+                self._unpinned_order.append(key)
+        subset = set(clean)
+        positions = [idx for idx, key in enumerate(self._unpinned_order) if key in subset]
+        for idx, key in zip(positions, clean, strict=True):
+            self._unpinned_order[idx] = key
+        self._save_unpinned_order()
+        self.apply_windows(self.windows)
 
     def _unpin_taskbar_pin(self, pin_id: int) -> None:
         self.ctx.store.remove_pin(pin_id)  # type: ignore[attr-defined]
@@ -389,10 +456,10 @@ class ShellController(QObject):
     def _drop_pin_on_dock(self, kind: str, label_text: str, target: str, insert_index: int) -> None:
         store = self.ctx.store  # type: ignore[attr-defined]
         norm_kind = kind if kind in ("app", "uwp", "folder", "file", "url", "system") else "app"
-        existing = store.pinned("taskbar", target)
+        existing = self.find_pin("taskbar", norm_kind, label_text, target)
         if existing is None:
             store.add_pin("taskbar", norm_kind, label_text, target)
-            existing = store.pinned("taskbar", target)
+            existing = self.find_pin("taskbar", norm_kind, label_text, target)
         if existing is not None:
             ids = [p.id for p in store.pins("taskbar") if p.id != existing.id]
             clamped = max(0, min(insert_index, len(ids)))
@@ -464,7 +531,22 @@ class ShellController(QObject):
         self.windows = list(windows)
         pins = self.ctx.store.pins("taskbar")  # type: ignore[attr-defined]
         families = store_families(self.ctx.indexer.apps)  # type: ignore[attr-defined]
-        self.items = build_items(pins, windows, families)
+        self.items = build_items(pins, windows, families, order=self._unpinned_order)
+        seen = set(self._unpinned_order)
+        added = False
+        for item in self.items:
+            if not item.pinned and item.key not in seen:
+                self._unpinned_order.append(item.key)
+                seen.add(item.key)
+                added = True
+        if len(self._unpinned_order) > 128:
+            active_keys = {i.key for i in self.items if not i.pinned}
+            kept = [k for k in self._unpinned_order if k in active_keys]
+            tail = [k for k in self._unpinned_order if k not in active_keys]
+            self._unpinned_order = (kept + tail[-max(0, 128 - len(kept)) :])[:128]
+            added = True
+        if added:
+            self._save_unpinned_order()
         for dock in self.docks:
             self._apply_items_to_dock(dock)
         if self.thumbs is not None and self.thumbs.isVisible() and self.thumbs.item is not None:
@@ -492,6 +574,8 @@ class ShellController(QObject):
             self.item_clicked(item, dock.slot_screen_rect(item.key), dock)
 
     def item_clicked(self, item: TaskItem, anchor_rect: QRect, dock: Dock | None = None) -> None:
+        if self.menus_open():
+            self.close_menus()
         windows = item.windows
         if not windows:
             self.launch_item(item, dock)
@@ -539,9 +623,9 @@ class ShellController(QObject):
                 "Desafixar da Doca" if pinned_bar else "Fixar na Doca",
                 lambda: self.toggle_pin("taskbar", item.kind, item.label, item.target),
             )
-            pinned_start = self.ctx.store.pinned("start", item.target) is not None  # type: ignore[attr-defined]
+            pinned_start = self.find_pin("start", item.kind, item.label, item.target) is not None
             menu.addAction(
-                icons.icon("pin", theme.TEXT_2, 15),
+                icons.icon("pin", theme.ACCENT if pinned_start else theme.TEXT_2, 15),
                 "Desafixar do Lançador" if pinned_start else "Fixar no Lançador",
                 lambda: self.toggle_pin("start", item.kind, item.label, item.target),
             )
@@ -583,7 +667,7 @@ class ShellController(QObject):
         for label_text, val in (
             ("Esquivar janelas", "esquivar"),
             ("Sempre visível", "sempre"),
-            ("Oculta", "oculta"),
+            ("Oculta (só com o mouse embaixo)", "oculta"),
         ):
             act = mode_menu.addAction(label_text)
             act.setCheckable(True)
@@ -673,8 +757,18 @@ class ShellController(QObject):
             self.launcher.set_person(apps.display_name(), apps.account_picture())
             self.launcher.set_power_badge(bool(self.ctx.power.pending))  # type: ignore[attr-defined]
             self.launcher.shown.connect(lambda: self._suspend_island_hover(True))
-            self.launcher.hidden_.connect(lambda: self._suspend_island_hover(False))
+            self.launcher.hidden_.connect(self._on_launcher_hidden)
         return self.launcher
+
+    def _on_launcher_hidden(self) -> None:
+        self._launcher_screen = None
+        self._suspend_island_hover(False)
+        self._check_dodge()
+
+    def raise_launcher_above_dock(self) -> None:
+        if self.launcher is not None and self.launcher.isVisible() and not self.launcher.closing:
+            self.launcher.raise_()
+            self.launcher._keep_on_top()
 
     def _suspend_island_hover(self, on: bool) -> None:
         if self.island is not None and hasattr(self.island, "suspend_hover"):
@@ -685,6 +779,12 @@ class ShellController(QObject):
             return
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         rect = screen.geometry() if screen else QRect(0, 0, 1920, 1080)
+        self._launcher_screen = screen
+        for dock in self.docks:
+            if dock.screen_ is screen or len(self.docks) == 1:
+                dock.suppress_hover_label = True
+                if dock.slid:
+                    dock.slide(False)
         self._launcher().open_launcher(rect, text=text)
 
     def toggle_start(self) -> None:
@@ -796,12 +896,12 @@ class ShellController(QObject):
 
     # ---------- dodge e borda inferior ----------
     def _check_dodge(self) -> None:
-        if self._peeking or not self.docks:
+        if self._peeking or self._shut_down or not self.docks:
             return
         thumbs_open = bool(self.thumbs is not None and self.thumbs.isVisible())
-        if not thumbs_open:
-            for dock in self.docks:
-                dock.suppress_hover_label = False
+        launcher_open = self.menus_open()
+        for dock in self.docks:
+            dock.suppress_hover_label = thumbs_open or launcher_open
         mode = getattr(self.ctx.settings, "dock_mode", "esquivar")  # type: ignore[attr-defined]
         fg = taskbar_service.foreground_rect()
         fg_rect, fg_mon = fg if fg is not None else (None, None)
@@ -821,7 +921,8 @@ class ShellController(QObject):
             sgeom = dock.screen_rect()
             screen_rect = (sgeom.left(), sgeom.top(), sgeom.right() + 1, sgeom.bottom() + 1)
             at_edge = dock_model.edge_reveal(pos.x(), pos.y(), screen_rect)
-            inside = dock.isVisible() and not dock.slid and dock.geometry().contains(pos)
+            cap = dock.capsule_rect_on_screen()
+            inside = dock.isVisible() and not dock.slid and cap.adjusted(-12, -16, 12, 16).contains(pos)
             if at_edge:
                 self._last_inside[dock_id] = now
                 self._edge_revealed[dock_id] = True
@@ -839,7 +940,6 @@ class ShellController(QObject):
                 hover_reveal = edge_revealed
 
             ratio = dock.screen_.devicePixelRatio()  # type: ignore[attr-defined]
-            cap = dock.capsule_rect_on_screen()
             phys_cap = (
                 sgeom.x() + round((cap.left() - sgeom.left()) * ratio),
                 sgeom.y() + round((cap.top() - sgeom.top()) * ratio),
@@ -847,11 +947,14 @@ class ShellController(QObject):
                 sgeom.y() + round((cap.bottom() + 1 - sgeom.top()) * ratio),
             )
             local_fg = fg_rect if (fg_mon == mon_phys or fg_mon == (0, 0, 0, 0)) else None
+            launcher_on_dock = launcher_open and (
+                self._launcher_screen is None or dock.screen_ is self._launcher_screen or len(self.docks) == 1
+            )
             hide = dock_model.should_dodge(
                 phys_cap,
                 local_fg,
                 mode,
-                menu_open=dock.menu_open or self.menus_open(),
+                menu_open=dock.menu_open or launcher_on_dock,
                 thumb_open=thumbs_open,
                 dragging=dock.dragging,
                 hover_reveal=hover_reveal,

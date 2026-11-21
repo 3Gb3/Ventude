@@ -14,6 +14,8 @@ log = logging.getLogger(__name__)
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_VM_READ = 0x0010
 SW_RESTORE, SW_SHOW = 9, 5
+HWND_TOPMOST = -1
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
 
 
 def is_windows() -> bool:
@@ -179,7 +181,37 @@ def _user32():  # noqa: ANN202
     u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
     u.SwitchToThisWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
     u.SwitchToThisWindow.restype = None
+    u.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
+    u.SetWindowPos.restype = wintypes.BOOL
     return u
+
+
+def keep_topmost(hwnd: int) -> bool:
+    """Reafirma HWND_TOPMOST sem roubar o foco da janela ativa."""
+    if not is_windows() or not hwnd:
+        return False
+    try:
+        return bool(
+            _user32().SetWindowPos(
+                hwnd,
+                ctypes.c_void_p(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        )
+    except (OSError, AttributeError):
+        return False
 
 
 def foreground_window() -> int:

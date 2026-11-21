@@ -21,7 +21,7 @@ MODULES: list[tuple[str, str, str]] = [
 ]
 ALWAYS_ON = {"home", "settings"}
 DEFAULT_MODULES = "limits,hardware,audio,shortcuts,shelf,agenda,tasks,weather,market,news"
-LAYOUT_VERSION = 7  # 5: abas Sistema e Áudio · 6: Shell 2.0 · 7: Shell 3.0 (Doca, Lançador, Controles)
+LAYOUT_VERSION = 8  # 5: Sistema/Áudio · 6: Shell 2.0 · 7: Shell 3.0 · 8: Ilha sempre visível por padrão
 DEFAULT_SYMBOLS = "^BVSP:Ibovespa,BRL=X:Dólar,BTC-USD:Bitcoin,PETR4.SA:Petrobras,VALE3.SA:Vale,AAPL:Apple"
 DEFAULT_NEWS = "G1,BBC Brasil,Tecnoblog"
 ANIMATION_SPEEDS = {"nenhuma": 0, "rapida": 170, "normal": 260, "suave": 380}
@@ -40,7 +40,7 @@ class Settings:
     start_with_windows: bool = False
     hotkey_enabled: bool = True
     hover_open: bool = True
-    hide_fullscreen: bool = True
+    hide_fullscreen: bool = False
     modules: str = DEFAULT_MODULES
     pill_rings: bool = True
     limits_notify: bool = True

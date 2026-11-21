@@ -57,7 +57,7 @@ from PySide6.QtWidgets import (
 
 from ventude.core.config import MODULES, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
-from ventude.services import apps, hardware, system
+from ventude.services import apps, hardware, system, winutil
 from ventude.services.hardware import Snapshot
 from ventude.services.media import MediaState
 from ventude.services.privacy import PrivacyState
@@ -1047,6 +1047,7 @@ class Island(QWidget):
         self._dragging = False
         self._auto_hidden = False
         self._user_hidden = False
+        self._quitting = False
         self._collapsed_at = time.time()
         self._hotkey = False
         self.pill = Pill(ctx, self)
@@ -1688,16 +1689,31 @@ class Island(QWidget):
             self.panel.select("shelf")
             event.acceptProposedAction()
         elif zone == "launcher" and paths:
+            from ventude.ui.shell.items import find_matching_pin
+
+            shell = getattr(self.ctx, "shell", None)
             added = 0
             for raw in paths:
                 raw = (raw or "").strip()
                 if raw.startswith(("http://", "https://")):
-                    if self.ctx.store.add_pin("start", "url", launcher.default_label(raw, "url"), raw):
+                    lbl = launcher.default_label(raw, "url")
+                    existing = (
+                        shell.find_pin("start", "url", lbl, raw)
+                        if shell is not None and hasattr(shell, "find_pin")
+                        else find_matching_pin(self.ctx.store.pins("start"), "url", lbl, raw)
+                    )
+                    if existing is None and self.ctx.store.add_pin("start", "url", lbl, raw):
                         added += 1
                 elif raw and Path(raw).exists():
                     kind = launcher.kind_for(raw)
                     p = str(Path(raw))
-                    if self.ctx.store.add_pin("start", kind, launcher.default_label(p, kind), p):
+                    lbl = launcher.default_label(p, kind)
+                    existing = (
+                        shell.find_pin("start", kind, lbl, p)
+                        if shell is not None and hasattr(shell, "find_pin")
+                        else find_matching_pin(self.ctx.store.pins("start"), kind, lbl, p)
+                    )
+                    if existing is None and self.ctx.store.add_pin("start", kind, lbl, p):
                         added += 1
             if added:
                 self.ctx.data_changed.emit("pins")
@@ -1868,7 +1884,30 @@ class Island(QWidget):
             p.setPen(QPen(theme.color(theme.ACCENT, 0.85 * glow), 2.2))
             p.drawPath(path)
 
+    def prepare_quit(self) -> None:
+        self._quitting = True
+        for timer in (
+            self.clock_timer,
+            self.fullscreen_timer,
+            self.hover_timer,
+            self.collapse_timer,
+            self.toast_timer,
+        ):
+            timer.stop()
+        for anim in (self.anim, self.fade, self.pulse):
+            anim.stop()
+        if self._hotkey:
+            try:
+                system.unregister_hotkey(int(self.winId()))
+            except Exception:  # noqa: BLE001
+                pass
+            self._hotkey = False
+        self.hide()
+
     def closeEvent(self, event: QEvent) -> None:
+        if self._quitting or not event.spontaneous():
+            event.accept()
+            return
         self.hide()
         event.ignore()
 
@@ -2138,19 +2177,30 @@ class Island(QWidget):
             if target.topLeft() != self.geometry().topLeft() or not self.open_body:
                 self._animate(target, opening=False)
 
+    def _keep_on_top(self) -> None:
+        app = QApplication.instance()
+        if app is not None and app.platformName().lower() == "offscreen":
+            return
+        winutil.keep_topmost(int(self.winId()))
+
     def _check_fullscreen(self) -> None:
         if not self.ctx.settings.hide_fullscreen or self.open_body:
             if self._auto_hidden:
                 self._auto_hidden = False
                 self.show()
+            if self.isVisible() and not self._user_hidden:
+                self._keep_on_top()
             return
         covered = system.fullscreen_app_over(int(self.winId()))
         if covered and self.isVisible():
             self._auto_hidden = True
             self.hide()
-        elif not covered and self._auto_hidden:
-            self._auto_hidden = False
-            self.show()
+        elif not covered:
+            if self._auto_hidden:
+                self._auto_hidden = False
+                self.show()
+            if self.isVisible() and not self._user_hidden:
+                self._keep_on_top()
 
     # ---------- atalho global (Windows) ----------
     def _update_hotkey(self) -> None:

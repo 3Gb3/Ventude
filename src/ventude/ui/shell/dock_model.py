@@ -63,14 +63,14 @@ class DockLayout:
         ox, oy, ow, oh = self.overflow_rect
         return ox <= x <= ox + ow and oy <= y <= oy + oh
 
-    def insert_index_at(self, x: float, pinned_count: int) -> int:
-        pinned_slots = [s for s in self.slots if s.item.pinned]
-        if not pinned_slots:
+    def insert_index_at(self, x: float, count: int, *, pinned: bool = True) -> int:
+        section_slots = [s for s in self.slots if s.item.pinned is pinned]
+        if not section_slots:
             return 0
-        for idx, slot in enumerate(pinned_slots):
+        for idx, slot in enumerate(section_slots):
             if x < slot.x + slot.w / 2:
                 return idx
-        return pinned_count
+        return count
 
 
 def _content_width(n_slots: int, slot_size: int, has_sep: bool, has_overflow: bool) -> float:
@@ -95,6 +95,7 @@ class SlotModel:
         drag_key: str = "",
         drag_outside: bool = False,
         insert_index: int | None = None,
+        insert_section: str = "pinned",
     ) -> DockLayout:
         limit = max(ICON_MIN + PAD_X * 2, max_w or (window_w - 32))
         visible_items = [
@@ -102,6 +103,8 @@ class SlotModel:
         ]
         # Quando drag_key está sendo arrastado dentro da doca, contamos um espaço vazio para o gap
         has_gap = insert_index is not None and not drag_outside
+        pinned_gap = has_gap and insert_section == "pinned"
+        unpinned_gap = has_gap and insert_section == "unpinned"
         if drag_key and drag_outside:
             visible_items = [it for it in items if it.key != drag_key]
 
@@ -111,7 +114,7 @@ class SlotModel:
         def split_counts(candidates: list[TaskItem]) -> tuple[int, bool]:
             pinned_n = sum(1 for it in candidates if it.pinned)
             unpinned_n = len(candidates) - pinned_n
-            has_sep = (pinned_n > 0 or has_gap) and unpinned_n > 0
+            has_sep = (pinned_n > 0 or pinned_gap) and (unpinned_n > 0 or unpinned_gap)
             return len(candidates) + (1 if has_gap else 0), has_sep
 
         n_units, has_sep = split_counts(visible_items)
@@ -145,7 +148,10 @@ class SlotModel:
 
         slots: list[SlotRect] = []
         cursor_x = capsule_x + PAD_X
-        gap_pos = max(0, min(insert_index, len(pinned))) if has_gap and insert_index is not None else -1
+        gap_pos = max(0, min(insert_index, len(pinned))) if pinned_gap and insert_index is not None else -1
+        unpinned_gap_pos = (
+            max(0, min(insert_index, len(unpinned))) if unpinned_gap and insert_index is not None else -1
+        )
 
         visual_idx = 0
         for idx, item in enumerate(pinned):
@@ -165,7 +171,7 @@ class SlotModel:
             cursor_x += slot_size + GAP
             visual_idx += 1
 
-        if gap_pos == len(pinned) and has_gap:
+        if gap_pos == len(pinned) and pinned_gap:
             cursor_x += slot_size + GAP
 
         separator_x: float | None = None
@@ -173,7 +179,9 @@ class SlotModel:
             separator_x = cursor_x - GAP + DIVIDER_W / 2.0
             cursor_x += DIVIDER_W - GAP
 
-        for item in unpinned:
+        for idx, item in enumerate(unpinned):
+            if idx == unpinned_gap_pos:
+                cursor_x += slot_size + GAP
             slots.append(
                 SlotRect(
                     key=item.key,
@@ -187,6 +195,9 @@ class SlotModel:
             )
             cursor_x += slot_size + GAP
             visual_idx += 1
+
+        if unpinned_gap_pos == len(unpinned) and unpinned_gap:
+            cursor_x += slot_size + GAP
 
         overflow_rect: tuple[float, float, float, float] | None = None
         if has_overflow:

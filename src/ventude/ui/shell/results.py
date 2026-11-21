@@ -17,7 +17,7 @@ from ventude.ui import icons, motion, theme
 from ventude.ui.command import KIND_LABELS, SECTION_ORDER, Command, CommandEngine
 from ventude.ui.shell.common import app_pixmap, draw_pixmap, shell_font
 from ventude.ui.shell.dock import MIME_VENTUDE_ITEM
-from ventude.ui.shell.items import provider_for_app
+from ventude.ui.shell.items import find_matching_pin, provider_for_app
 
 RESULT_LIMIT = 16
 ROW_HEADER = 28
@@ -111,8 +111,17 @@ def verbs_for(
     if command.kind in ("app", "file", "folder", "project") and target:
         actions.append(("folder-open", "Local", lambda t=target: msg(apps.open_location(t))))
     if command.pinnable and pin_cb is not None:
+        shell = getattr(ctx, "shell", None)
         store = getattr(ctx, "store", None)
-        dock_pinned = bool(store and store.pinned("taskbar", command.target))
+        if shell is not None and hasattr(shell, "find_pin"):
+            dock_pinned = shell.find_pin("taskbar", command.kind, command.title, command.target) is not None
+        elif store is not None:
+            dock_pinned = (
+                find_matching_pin(store.pins("taskbar"), command.kind, command.title, command.target)
+                is not None
+            )
+        else:
+            dock_pinned = False
         actions.append(
             (
                 "pin",

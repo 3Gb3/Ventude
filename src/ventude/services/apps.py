@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,6 +23,19 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 CREATE_NO_WINDOW = 0x08000000
+PROTECTED_EXES = frozenset(
+    {
+        "explorer.exe",
+        "csrss.exe",
+        "lsass.exe",
+        "services.exe",
+        "smss.exe",
+        "wininit.exe",
+        "winlogon.exe",
+        "dwm.exe",
+        "sihost.exe",
+    }
+)
 
 # ---------- categorias (Iniciar > Todos > Exibição: Categoria) ----------
 CATEGORIES: list[tuple[str, tuple[str, ...]]] = [
@@ -747,26 +760,122 @@ def _value(key: object, name: str) -> object:
         return None
 
 
-def running_exes() -> set[str]:
-    """Caminhos (em minúsculas) dos .exe abertos agora."""
+def _enum_process_paths(*, skip_own: bool = False) -> list[tuple[int, str]]:
     if sys.platform != "win32":
-        return set()
+        return []
     from ventude.services.winutil import process_path
 
     psapi_pids = (wintypes.DWORD * 4096)()
     needed = wintypes.DWORD()
     kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     if not kernel32.K32EnumProcesses(psapi_pids, ctypes.sizeof(psapi_pids), ctypes.byref(needed)):
-        return set()
+        return []
     count = needed.value // ctypes.sizeof(wintypes.DWORD)
-    found = set()
-    for pid in psapi_pids[:count]:
-        if pid in (0, 4):
+    own_pid = os.getpid() if skip_own else -1
+    out: list[tuple[int, str]] = []
+    for raw_pid in psapi_pids[:count]:
+        pid = int(raw_pid)
+        if pid in (0, 4) or pid == own_pid:
             continue
-        path = process_path(int(pid))
+        path = process_path(pid)
         if path:
-            found.add(path.lower())
-    return found
+            out.append((pid, path))
+    return out
+
+
+def running_exes() -> set[str]:
+    """Caminhos (em minúsculas) dos .exe abertos agora."""
+    return {path.lower() for _pid, path in _enum_process_paths()}
+
+
+def pids_for_exe(exe: str) -> list[int]:
+    """PIDs em execução cujo caminho do .exe corresponde a `exe` (exceto o próprio Ventude)."""
+    target = os.path.normcase(os.path.normpath(exe)) if exe else ""
+    if sys.platform != "win32" or not target:
+        return []
+    return [
+        pid
+        for pid, path in _enum_process_paths(skip_own=True)
+        if os.path.normcase(os.path.normpath(path)) == target
+    ]
+
+
+def _post_close_pids(pids: set[int]) -> int:
+    if sys.platform != "win32" or not pids:
+        return 0
+    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    handles: list[int] = []
+    proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    callback = proc(lambda hwnd, _data: handles.append(int(hwnd)) or True)
+    user32.EnumWindows.argtypes = [proc, wintypes.LPARAM]
+    user32.EnumWindows(callback, 0)
+    sent = 0
+    pid_buf = wintypes.DWORD()
+    for hwnd in handles:
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid_buf))
+        if int(pid_buf.value) in pids:
+            if user32.PostMessageW(hwnd, 0x0010, 0, 0):  # WM_CLOSE
+                sent += 1
+    return sent
+
+
+def _terminate_pids(pids: list[int]) -> tuple[int, int]:
+    if sys.platform != "win32" or not pids:
+        return 0, 0
+    from ventude.services.winutil import close_handle, open_process
+
+    process_terminate = 0x0001
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    terminated = 0
+    denied = 0
+    for pid in pids:
+        handle = open_process(pid, process_terminate)
+        if not handle:
+            denied += 1
+            continue
+        try:
+            if kernel32.TerminateProcess(handle, 0):
+                terminated += 1
+            else:
+                denied += 1
+        finally:
+            close_handle(handle)
+    return terminated, denied
+
+
+def close_background_app(
+    exe: str,
+    *,
+    force: bool = False,
+    pids_fn: Callable[[str], list[int]] | None = None,
+    post_close_fn: Callable[[set[int]], int] | None = None,
+    terminate_fn: Callable[[list[int]], tuple[int, int]] | None = None,
+) -> tuple[bool, str]:
+    """Fecha um app em segundo plano (WM_CLOSE gentil primeiro, TerminateProcess se force ou sem janela)."""
+    clean = (exe or "").strip()
+    if not clean:
+        return False, "Executável inválido."
+    if os.path.basename(clean).lower() in PROTECTED_EXES:
+        return False, "Processo do sistema protegido."
+    if pids_fn is None and sys.platform != "win32":
+        return False, "Só funciona no Windows."
+    pids = (pids_fn or pids_for_exe)(clean)
+    if not pids:
+        return False, "Aplicativo já está fechado."
+    if not force:
+        sent = (post_close_fn or _post_close_pids)(set(pids))
+        if sent > 0:
+            return True, ""
+    terminated, denied = (terminate_fn or _terminate_pids)(pids)
+    if terminated > 0:
+        return True, ""
+    if denied > 0:
+        return False, "Sem permissão para encerrar (processo elevado)."
+    return False, "Não foi possível encerrar o processo."
 
 
 # ---------- apps da Loja (pacotes MSIX) ----------

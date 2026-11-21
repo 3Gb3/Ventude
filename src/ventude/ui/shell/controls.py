@@ -6,11 +6,12 @@ from collections.abc import Callable
 from datetime import datetime
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QMouseEvent, QPainter, QPixmap
+from PySide6.QtGui import QColor, QContextMenuEvent, QFont, QIcon, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -117,11 +118,17 @@ class QuickTile(QWidget):
 class TrayIcon(QWidget):
     """Ícone de app rodando em segundo plano (linha 'em segundo plano' de Controles)."""
 
-    def __init__(self, app: apps.TrayApp, ctx: object, open_: Callable[[apps.TrayApp], None]) -> None:
+    def __init__(
+        self,
+        app: apps.TrayApp,
+        ctx: object,
+        open_: Callable[[apps.TrayApp], None],
+        menu_: Callable[[apps.TrayApp, QPoint], None] | None = None,
+    ) -> None:
         super().__init__()
-        self.app, self.ctx, self._open = app, ctx, open_
+        self.app, self.ctx, self._open, self._menu = app, ctx, open_, menu_
         self.setFixedSize(32, 32)
-        self.setToolTip(app.name)
+        self.setToolTip(f"{app.name}\nClique para abrir · botão direito para opções")
         self.setAccessibleName(app.name)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
@@ -145,9 +152,27 @@ class TrayIcon(QWidget):
     def leaveEvent(self, _event: object) -> None:
         self.update()
 
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.RightButton and self._menu is not None:
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+        if not self.rect().contains(event.position().toPoint()):
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
             self._open(self.app)
+        elif event.button() == Qt.MouseButton.RightButton and self._menu is not None:
+            self._menu(self.app, event.globalPosition().toPoint())
+            event.accept()
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        if self._menu is not None and event.reason() != QContextMenuEvent.Reason.Mouse:
+            self._menu(self.app, event.globalPos())
+            event.accept()
+            return
+        super().contextMenuEvent(event)
 
 
 def _capsule_btn(icon_name: str, text: str, tip: str = "") -> QPushButton:
@@ -421,7 +446,7 @@ class ControlsBody(QWidget):
         self._tray_widgets = []
         self.tray_empty.setVisible(not tray)
         for app in tray[:5]:
-            icon = TrayIcon(app, self.ctx, self._launch_tray_app)
+            icon = TrayIcon(app, self.ctx, self._launch_tray_app, self._tray_menu)
             self.tray_icons.addWidget(icon)
             self._tray_widgets.append(icon)
         extra = len(tray) - 5
@@ -439,6 +464,52 @@ class ControlsBody(QWidget):
             self.tray_icons.addWidget(more)
             self._tray_widgets.append(more)
 
+    def _populate_tray_actions(
+        self,
+        menu: QMenu,
+        app: apps.TrayApp,
+        *,
+        include_header: bool = True,
+    ) -> None:
+        if include_header:
+            header = menu.addAction(app.name)
+            header.setEnabled(False)
+            menu.addSeparator()
+        menu.addAction(
+            icons.icon("external", theme.TEXT_2, 15),
+            "Abrir",
+            lambda _c=False, a=app: self._launch_tray_app(a),
+        )
+        if app.exe:
+            menu.addAction(
+                icons.icon("folder-open", theme.TEXT_2, 15),
+                "Abrir local do arquivo",
+                lambda _c=False, p=app.exe: apps.open_location(p),
+            )
+        menu.addSeparator()
+        menu.addAction(
+            icons.icon("close", theme.TEXT, 15),
+            "Fechar aplicativo",
+            lambda _c=False, a=app: self._close_tray_app(a, force=False),
+        )
+        menu.addAction(
+            icons.icon("power", theme.DANGER, 15),
+            "Encerrar processo",
+            lambda _c=False, a=app: self._close_tray_app(a, force=True),
+        )
+
+    def _exec_menu(self, menu: QMenu, pos: QPoint) -> None:
+        if hasattr(self.ctx, "keep_open"):
+            with self.ctx.keep_open():  # type: ignore[attr-defined]
+                menu.exec(pos)
+        else:
+            menu.exec(pos)
+
+    def _tray_menu(self, app: apps.TrayApp, pos: QPoint) -> None:
+        menu = brand.ink_menu(self)
+        self._populate_tray_actions(menu, app, include_header=True)
+        self._exec_menu(menu, pos)
+
     def _show_more_tray(self, anchor: QWidget) -> None:
         menu = brand.ink_menu(self)
         for app in self._tray_apps[5:24]:
@@ -446,9 +517,31 @@ class ControlsBody(QWidget):
             if app.icon:
                 pm.loadFromData(app.icon)
             ico = QIcon(pm) if not pm.isNull() else icons.icon("apps", theme.TEXT_2, 14)
-            action = menu.addAction(ico, app.name)
-            action.triggered.connect(lambda _c=False, a=app: self._launch_tray_app(a))
-        menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height() + 4)))
+            sub = menu.addMenu(ico, app.name)
+            self._populate_tray_actions(sub, app, include_header=False)
+        self._exec_menu(menu, anchor.mapToGlobal(QPoint(0, anchor.height() + 4)))
+
+    def _close_tray_app(self, app: apps.TrayApp, *, force: bool = False) -> None:
+        def done(result: tuple[bool, str]) -> None:
+            ok, err = result
+            if not ok and err and hasattr(self.ctx, "tray_message"):
+                self.ctx.tray_message.emit("Não deu para fechar", f"{app.name}: {err}")  # type: ignore[attr-defined]
+            QTimer.singleShot(450, self._refresh_tray_apps)
+            if not force:
+                QTimer.singleShot(1200, self._refresh_tray_apps)
+
+        if hasattr(self.ctx, "run"):
+            self.ctx.run(  # type: ignore[attr-defined]
+                lambda e=app.exe, f=force: apps.close_background_app(e, force=f),
+                done=done,
+                owner=self,
+            )
+        else:
+            done(apps.close_background_app(app.exe, force=force))
+
+    def _refresh_tray_apps(self) -> None:
+        if self.isVisible() and hasattr(self.ctx, "run"):
+            self.ctx.run(apps.tray_apps, done=self.set_tray_apps, owner=self)  # type: ignore[attr-defined]
 
     def _launch_tray_app(self, app: apps.TrayApp) -> None:
         self.close_requested.emit()

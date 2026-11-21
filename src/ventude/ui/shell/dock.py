@@ -20,9 +20,9 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
-from ventude.services import dwm
+from ventude.services import dwm, winutil
 from ventude.ui import brand, motion, theme
 from ventude.ui.shell.common import app_pixmap, draw_pixmap, shell_font
 from ventude.ui.shell.dock_model import (
@@ -53,6 +53,7 @@ class Dock(QWidget):
     item_menu_requested = Signal(object, object)  # (TaskItem, global QPoint)
     slot_hovered = Signal(object, object, bool)  # (TaskItem | None, anchor QRect global, entrou?)
     pin_reordered = Signal(list)  # list[int] dos pin_ids na nova ordem
+    unpinned_reordered = Signal(list)  # list[str] das chaves dos apps abertos na nova ordem
     pin_unpinned = Signal(int)  # pin_id removido via Puf
     pin_dropped = Signal(str, str, str, int)  # (kind, label, target, insert_index)
 
@@ -102,6 +103,7 @@ class Dock(QWidget):
         self._drag_pos = QPointF()
         self._drag_outside = False
         self._drag_insert_idx: int | None = None
+        self._drag_section: str = "pinned"
         self._external_insert_idx: int | None = None
 
         # Animações de slide (Esquiva/Volta) e entrada (Maré)
@@ -178,13 +180,30 @@ class Dock(QWidget):
         area = self.screen_rect()
         return area.bottom() - EDGE_STRIP_PX + 1
 
-    def start_bar(self, entrance: bool = True) -> None:
-        self.slid = False
+    def _keep_on_top(self) -> None:
+        app = QApplication.instance()
+        if app is not None and app.platformName().lower() == "offscreen":
+            return
+        winutil.keep_topmost(int(self.winId()))
+
+    def start_bar(self, entrance: bool = True, *, start_hidden: bool = False) -> None:
+        self._slide_tween.stop()
+        self._entrance_tween.stop()
         rect = self.shown_rect()
         self.resize(rect.size())
         self._recompute_layout(snap=True)
         if self.winId():
             dwm.square_corners(int(self.winId()))
+        if start_hidden:
+            self.slid = True
+            self._slide_offset = 0.0
+            self._opacity = 1.0
+            self.move(rect.left(), self._hidden_top())
+            self.setWindowOpacity(1.0)
+            self.show()
+            self._ensure_tick()
+            return
+        self.slid = False
         dur = motion.ms("mare", getattr(self.ctx, "settings", None))
         if entrance and dur > 0:
             self._slide_offset = float(DOCK_H + BOTTOM_MARGIN + 8)
@@ -192,6 +211,8 @@ class Dock(QWidget):
             self.move(rect.left(), rect.top() + round(self._slide_offset))
             self.setWindowOpacity(0.0)
             self.show()
+            self.raise_()
+            self._keep_on_top()
             self._entrance_tween.play(dur, 0.0, 1.0, motion.out_cubic)
         else:
             self._slide_offset = 0.0
@@ -199,6 +220,8 @@ class Dock(QWidget):
             self.move(rect.topLeft())
             self.setWindowOpacity(1.0)
             self.show()
+            self.raise_()
+            self._keep_on_top()
         self._ensure_tick()
 
     def stop_bar(self) -> None:
@@ -206,20 +229,31 @@ class Dock(QWidget):
         self._hover_label_timer.stop()
         self._slide_tween.stop()
         self._entrance_tween.stop()
+        self.slid = False
         self.hide()
 
     def slide(self, hide: bool) -> None:
         if hide == self.slid:
             return
+        if self._entrance_tween.running:
+            self._entrance_tween.stop()
+            self._slide_offset = 0.0
+            self._opacity = 1.0
+            self.setWindowOpacity(1.0)
         self.slid = hide
         if hide:
             self._hovered_key = ""
             self._hovered_overflow = False
             self._show_hover_label = False
             self._hover_label_timer.stop()
+        else:
+            self.raise_()
+            self._keep_on_top()
+            if hasattr(self.shell, "raise_launcher_above_dock"):
+                self.shell.raise_launcher_above_dock()
         settings = getattr(self.ctx, "settings", None)
         dur = motion.ms("esquiva" if hide else "volta", settings)
-        curve = motion.in_cubic if hide else motion.out_back(1.1)
+        curve = motion.in_cubic if hide else motion.out_cubic
         start_y = float(self.y())
         end_y = float(self._hidden_top() if hide else self.shown_rect().top())
         if dur <= 0:
@@ -291,6 +325,7 @@ class Dock(QWidget):
             drag_key=drag_key,
             drag_outside=self._drag_outside,
             insert_index=insert_idx,
+            insert_section=self._drag_section if self._dragging_internal else "pinned",
         )
         reduced = motion.reduced_motion(getattr(self.ctx, "settings", None))
         for slot in self._layout.slots:
@@ -379,8 +414,17 @@ class Dock(QWidget):
         if dirty:
             self.update()
 
+    def _menus_open(self) -> bool:
+        fn = getattr(self.shell, "menus_open", None)
+        return bool(callable(fn) and fn())
+
     def _reveal_hover_label(self) -> None:
-        if self._hovered_key and not self.suppress_hover_label and not self._dragging_internal:
+        if (
+            self._hovered_key
+            and not self.suppress_hover_label
+            and not self._dragging_internal
+            and not self._menus_open()
+        ):
             self._show_hover_label = True
             self.update()
 
@@ -389,7 +433,8 @@ class Dock(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.slid and not self._slide_tween.running:
-            if not self.fullscreen:
+            mode = getattr(getattr(self.ctx, "settings", None), "dock_mode", "esquivar")
+            if not self.fullscreen and mode != "oculta":
                 alca = QRectF((self.width() - 28) / 2.0, 0.5, 28.0, 2.5)
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QColor(255, 255, 255, 95))
@@ -423,8 +468,13 @@ class Dock(QWidget):
             p.setFont(shell_font(11, tabular=True))
             p.drawText(or_rect, Qt.AlignmentFlag.AlignCenter, f"+{lay.overflow_count}")
 
-        # Mini-ilha acima do ícone com hover depois de 300ms (quando sem thumb strip visível)
-        if self._show_hover_label and self._hovered_key and not self.suppress_hover_label:
+        # Mini-ilha acima do ícone com hover depois de 300ms (quando sem thumb strip/lançador visível)
+        if (
+            self._show_hover_label
+            and self._hovered_key
+            and not self.suppress_hover_label
+            and not self._menus_open()
+        ):
             for slot in lay.slots:
                 if slot.key == self._hovered_key:
                     self._paint_hover_label(p, slot)
@@ -591,12 +641,15 @@ class Dock(QWidget):
                     self._set_hover(None, False)
             if self._dragging_internal:
                 self._drag_pos = pos
-                self._drag_outside = pos.y() < (self._layout.capsule_y - UNPIN_DRAG_OFFSET)
-                pinned_n = sum(1 for i in self.items if i.pinned and i.key != self._drag_slot.key)
+                is_pinned = self._drag_section == "pinned"
+                self._drag_outside = is_pinned and pos.y() < (self._layout.capsule_y - UNPIN_DRAG_OFFSET)
+                section_n = sum(
+                    1 for i in self.items if (i.pinned is is_pinned) and i.key != self._drag_slot.key
+                )
                 self._drag_insert_idx = (
                     None
                     if self._drag_outside
-                    else self._layout.insert_index_at(pos.x(), pinned_n)
+                    else self._layout.insert_index_at(pos.x(), section_n, pinned=is_pinned)
                 )
                 self._recompute_layout()
                 self._ensure_tick()
@@ -611,10 +664,10 @@ class Dock(QWidget):
         slot = self._layout.hit(pos.x(), pos.y())
         if event.button() == Qt.MouseButton.LeftButton and slot is not None:
             self._pressed_key = slot.key
-            if slot.item.pinned:
-                self._drag_start_pos = pos
-                self._drag_slot = slot
-                self._drag_pos = pos
+            self._drag_start_pos = pos
+            self._drag_slot = slot
+            self._drag_pos = pos
+            self._drag_section = "pinned" if slot.item.pinned else "unpinned"
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -625,18 +678,26 @@ class Dock(QWidget):
             dragged = self._drag_slot
             outside = self._drag_outside
             insert_idx = self._drag_insert_idx
+            section = self._drag_section
             self._drag_slot = None
             self._drag_start_pos = None
             self._dragging_internal = False
             self._drag_outside = False
             self._drag_insert_idx = None
-            if outside and dragged.item.pin_id:
-                self.pin_unpinned.emit(dragged.item.pin_id)
-            elif insert_idx is not None and dragged.item.pin_id:
-                order = [i.pin_id for i in self.items if i.pinned and i.pin_id != dragged.item.pin_id]
+            self._drag_section = "pinned"
+            if section == "pinned":
+                if outside and dragged.item.pin_id:
+                    self.pin_unpinned.emit(dragged.item.pin_id)
+                elif insert_idx is not None and dragged.item.pin_id:
+                    order = [i.pin_id for i in self.items if i.pinned and i.pin_id != dragged.item.pin_id]
+                    clamped = max(0, min(insert_idx, len(order)))
+                    order.insert(clamped, dragged.item.pin_id)
+                    self.pin_reordered.emit(order)
+            elif insert_idx is not None:
+                order = [i.key for i in self.items if not i.pinned and i.key != dragged.key]
                 clamped = max(0, min(insert_idx, len(order)))
-                order.insert(clamped, dragged.item.pin_id)
-                self.pin_reordered.emit(order)
+                order.insert(clamped, dragged.key)
+                self.unpinned_reordered.emit(order)
             self._recompute_layout(snap=True)
             self.update()
             return

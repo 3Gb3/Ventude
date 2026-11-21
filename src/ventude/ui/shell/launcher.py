@@ -14,7 +14,6 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPen,
-    QRegion,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -30,9 +29,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ventude.services import apps, power
+from ventude.services import apps, power, winutil
 from ventude.ui import brand, icons, motion, theme
 from ventude.ui.shell.common import Avatar, HoverButton, ShellWindow, app_pixmap, draw_pixmap, shell_font
+from ventude.ui.shell.items import find_matching_pin
 from ventude.ui.shell.results import SearchResults
 from ventude.ui.shell.tiles import AppList, Tile, TileGrid
 
@@ -674,6 +674,8 @@ class LauncherWindow(ShellWindow):
         self._recent_files: list[apps.RecentFile] = []
         self._loading_recent = False
         self._expanded_pins = False
+        self._reveal_target = QPoint()
+        self._reveal_offset = 14
 
         self._reveal = motion.Tween(self)
         self._reveal.progressed.connect(self._on_reveal_step)
@@ -802,19 +804,28 @@ class LauncherWindow(ShellWindow):
 
     def target_geometry(self, screen_rect: QRect, *, active: bool) -> QRect:
         body_h = HEIGHT_ACTIVE if active else HEIGHT_EMPTY
-        w = LAUNCHER_WIDTH + SHADOW_PAD * 2
-        h = body_h + SHADOW_PAD * 2
+        dock_clear = 80
+        top_clear = 56
+        w = min(LAUNCHER_WIDTH + SHADOW_PAD * 2, max(360, screen_rect.width() - 16))
+        max_h = max(320, screen_rect.height() - top_clear - dock_clear)
+        h = min(body_h + SHADOW_PAD * 2, max_h)
         x = screen_rect.left() + (screen_rect.width() - w) // 2
-        dock_clear = 76
-        y = max(screen_rect.top() + 56, screen_rect.bottom() - dock_clear - h)
+        y = max(screen_rect.top() + top_clear, screen_rect.bottom() - dock_clear - h + 1)
         return QRect(x, y, w, h)
+
+    def _keep_on_top(self) -> None:
+        app = QApplication.instance()
+        if app is not None and app.platformName().lower() == "offscreen":
+            return
+        winutil.keep_topmost(int(self.winId()))
 
     def _sync_height(self, active: bool) -> None:
         if self._anchor_screen_rect.isNull():
             screen = QApplication.primaryScreen()
             self._anchor_screen_rect = screen.geometry() if screen else QRect(0, 0, 1920, 1080)
         rect = self.target_geometry(self._anchor_screen_rect, active=active)
-        if self.size() != rect.size():
+        if self.size() != rect.size() or self.geometry() != rect:
+            self._reveal_target = rect.topLeft()
             self.setGeometry(rect)
 
     # ---------- abrir & fechar ----------
@@ -840,47 +851,47 @@ class LauncherWindow(ShellWindow):
             rect = self.target_geometry(screen_rect, active=False)
 
         self.refresh()
-        self.setGeometry(rect)
+        self._reveal_target = rect.topLeft()
         self.opened_at = time.monotonic()
 
         if dur <= 0:
-            self._content.clearMask()
+            self.setGeometry(rect)
             self.setWindowOpacity(1.0)
             self.show()
             self.shown.emit()
             self.raise_()
+            self._keep_on_top()
             self.activateWindow()
             self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
             return
 
-        self.setWindowOpacity(0.15)
+        self.setGeometry(rect)
+        self.move(rect.x(), rect.y() + self._reveal_offset)
+        self.setWindowOpacity(0.0)
         self.show()
         self.shown.emit()
         self.raise_()
+        self._keep_on_top()
         self.activateWindow()
         # Foco no frame 0
         self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
         self._reveal.play(dur, 0.0, 1.0, motion.out_cubic)
 
     def _on_reveal_step(self, t: float) -> None:
-        self.setWindowOpacity(0.15 + 0.85 * min(1.0, t * 1.15))
-        w = max(1, self._content.width())
-        h = max(1, self._content.height())
-        cur_w = max(60, round(w * (0.45 + 0.55 * t)))
-        cur_h = max(44, round(h * (0.25 + 0.75 * t)))
-        x0 = (w - cur_w) // 2
-        y0 = h - cur_h
-        self._content.setMask(QRegion(x0, y0, cur_w, cur_h))
+        self.setWindowOpacity(min(1.0, t * 1.15))
+        self.move(
+            self._reveal_target.x(),
+            self._reveal_target.y() + round(self._reveal_offset * (1.0 - t)),
+        )
 
     def _on_reveal_done(self) -> None:
-        self._content.clearMask()
+        self.move(self._reveal_target)
         self.setWindowOpacity(1.0)
 
     def dismiss(self) -> None:
         if not self.isVisible() or self._closing:
             return
         self._reveal.stop()
-        self._content.clearMask()
         self._last_closed_at = time.monotonic()
         self._closing = True
         settings = getattr(self.ctx, "settings", None)
@@ -1052,13 +1063,22 @@ class LauncherWindow(ShellWindow):
             )
         store = getattr(self.ctx, "store", None)
         if store is not None and tile.target:
-            dock_on = store.pinned("taskbar", tile.target)
+            shell_find = getattr(self.shell, "find_pin", None)
+            dock_on = (
+                shell_find("taskbar", tile.kind, tile.label, tile.target)
+                if callable(shell_find)
+                else find_matching_pin(store.pins("taskbar"), tile.kind, tile.label, tile.target)
+            )
             menu.addAction(
                 icons.icon("pin", theme.ACCENT if dock_on else theme.TEXT_2, 15),
                 "Desafixar da doca" if dock_on else "Fixar na doca",
                 lambda: self._toggle_pin("taskbar", tile),
             )
-            start_on = store.pinned("start", tile.target)
+            start_on = (
+                shell_find("start", tile.kind, tile.label, tile.target)
+                if callable(shell_find)
+                else find_matching_pin(store.pins("start"), tile.kind, tile.label, tile.target)
+            )
             menu.addAction(
                 icons.icon("pin", theme.ACCENT if start_on else theme.TEXT_2, 15),
                 "Desafixar do Lançador" if start_on else "Fixar no Lançador",
@@ -1111,7 +1131,16 @@ class LauncherWindow(ShellWindow):
         if path:
             p = Path(path)
             kind = "folder" if p.is_dir() else ("app" if p.suffix.lower() in (".exe", ".lnk") else "file")
-            self.ctx.store.add_pin("start", kind, p.stem or p.name, str(p), first=False)  # type: ignore[attr-defined]
+            label_text = p.stem or p.name
+            shell_find = getattr(self.shell, "find_pin", None)
+            existing = (
+                shell_find("start", kind, label_text, str(p))
+                if callable(shell_find)
+                else find_matching_pin(self.ctx.store.pins("start"), kind, label_text, str(p))  # type: ignore[attr-defined]
+            )
+            if existing is None:
+                self.ctx.store.add_pin("start", kind, label_text, str(p), first=False)  # type: ignore[attr-defined]
+                self.ctx.data_changed.emit("pins")  # type: ignore[attr-defined]
             self.refresh_pins()
 
     def _dismiss_tips(self) -> None:

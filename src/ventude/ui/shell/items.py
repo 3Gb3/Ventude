@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ventude.core.store import Pin
 from ventude.services import apps
 from ventude.services.taskbar import Rect, WindowInfo
+
+GENERIC_WRAPPERS = frozenset({"update.exe", "launcher.exe", "bootstrap.exe"})
+EXPLORER_APP_IDS = frozenset({"microsoft.windows.explorer"})
 
 AI_APPS: dict[str, tuple[str, ...]] = {
     "claude": ("claude",),
@@ -65,6 +69,113 @@ def pin_identity(pin: Pin) -> tuple[str, str]:
     return "", ""
 
 
+@dataclass(frozen=True)
+class _PinSignature:
+    kind: str
+    exact: str
+    resolved_exe: str
+    app_id: str
+    family: str
+    is_explorer: bool
+    norm_label: str
+    is_aliasable: bool
+
+
+def _pin_signature(
+    kind: str,
+    label: str,
+    target: str,
+    families: dict[str, str] | None = None,
+) -> _PinSignature:
+    clean_kind = (kind or "app").strip().lower()
+    raw_target = (target or "").strip()
+    exact = norm(raw_target) if clean_kind in ("app", "folder", "file") else raw_target.lower()
+    resolved_exe = ""
+    is_wrapper = False
+    family = ""
+    app_id = raw_target.lower() if clean_kind == "uwp" else ""
+    if clean_kind == "app" and raw_target:
+        candidate = raw_target
+        if raw_target.lower().endswith(".lnk"):
+            from ventude.services.winutil import lnk_target
+
+            candidate = lnk_target(raw_target) or ""
+        if candidate.lower().endswith(".exe"):
+            if os.path.basename(candidate).lower() in GENERIC_WRAPPERS:
+                is_wrapper = True
+            else:
+                resolved_exe = norm(candidate)
+        raw_fam = apps.package_family(resolved_exe or raw_target).lower()
+        if raw_fam:
+            family = raw_fam
+            if families and raw_fam in families:
+                app_id = families[raw_fam].lower()
+    elif clean_kind == "uwp" and app_id and "!" in app_id:
+        family = app_id.split("!", 1)[0].lower()
+    exe_base = os.path.basename(resolved_exe or exact).lower()
+    is_explorer = app_id in EXPLORER_APP_IDS or (clean_kind == "app" and exe_base == "explorer.exe")
+    norm_label = (label or "").strip().lower()
+    is_aliasable = clean_kind == "uwp" or raw_target.lower().endswith(".lnk") or is_wrapper
+    return _PinSignature(
+        kind=clean_kind,
+        exact=exact,
+        resolved_exe=resolved_exe,
+        app_id=app_id,
+        family=family,
+        is_explorer=is_explorer,
+        norm_label=norm_label,
+        is_aliasable=is_aliasable,
+    )
+
+
+def _signatures_match(cand: _PinSignature, other: _PinSignature) -> bool:
+    if cand.exact and cand.exact == other.exact:
+        return True
+    if cand.is_explorer and other.is_explorer:
+        return True
+    if cand.resolved_exe and cand.resolved_exe == other.resolved_exe:
+        return True
+    if (cand.app_id and cand.app_id == other.app_id) or (cand.family and cand.family == other.family):
+        return True
+    return bool(
+        cand.norm_label
+        and cand.norm_label == other.norm_label
+        and cand.kind in ("app", "uwp")
+        and other.kind in ("app", "uwp")
+        and (cand.is_aliasable or other.is_aliasable)
+    )
+
+
+def find_matching_pin(
+    pins: Sequence[Pin],
+    kind: str,
+    label: str,
+    target: str,
+    families: dict[str, str] | None = None,
+) -> Pin | None:
+    """Encontra fixado equivalente mesmo quando o alvo difere (.lnk vs .exe, UWP vs Explorer etc.)."""
+    cand = _pin_signature(kind, label, target, families)
+    for pin in pins:
+        other = _pin_signature(pin.kind, pin.label, pin.target, families)
+        if _signatures_match(cand, other):
+            return pin
+    return None
+
+
+def dedupe_pins(store: object, place: str, families: dict[str, str] | None = None) -> int:
+    """Remove fixados duplicados preservando o primeiro de cada aplicativo."""
+    pins = list(store.pins(place))  # type: ignore[attr-defined]
+    kept: list[Pin] = []
+    removed = 0
+    for pin in pins:
+        if find_matching_pin(kept, pin.kind, pin.label, pin.target, families) is not None:
+            store.remove_pin(pin.id)  # type: ignore[attr-defined]
+            removed += 1
+        else:
+            kept.append(pin)
+    return removed
+
+
 HELPER_WORDS = ("helper", "host", "broker", "runtime", "renderer", "launcher")
 
 
@@ -97,13 +208,17 @@ def provider_for_app(label: str, target: str) -> str:
 
 
 def build_items(
-    pins: list[Pin], windows: list[WindowInfo], families: dict[str, str] | None = None
+    pins: list[Pin],
+    windows: list[WindowInfo],
+    families: dict[str, str] | None = None,
+    order: Sequence[str] | None = None,
 ) -> list[TaskItem]:
-    """Fixados primeiro (na ordem), depois os apps abertos, juntando as janelas do mesmo app."""
+    """Fixados primeiro (na ordem), depois os apps abertos em ordem estável."""
     from ventude.services.winutil import app_name
 
     families = families or {}
-    items: list[TaskItem] = []
+    pinned_items: list[TaskItem] = []
+    unpinned_items: list[TaskItem] = []
     by_exe: dict[str, TaskItem] = {}
     by_app: dict[str, TaskItem] = {}
     by_family: dict[str, TaskItem] = {}
@@ -120,7 +235,7 @@ def build_items(
             exe=exe,
             app_id=app_id,
         )
-        items.append(item)
+        pinned_items.append(item)
         if exe:
             by_exe.setdefault(exe, item)
         if app_id:
@@ -152,7 +267,7 @@ def build_items(
                 exe=exe,
                 app_id=window.app_id,
             )
-            items.append(item)
+            unpinned_items.append(item)
             if exe:
                 by_exe.setdefault(exe, item)
             if app_id:
@@ -160,7 +275,14 @@ def build_items(
             if family:
                 by_family.setdefault(family, item)
         item.windows.append(window)
-    return items
+    if order is not None:
+        rank = {key: idx for idx, key in enumerate(order)}
+        unpinned_items.sort(
+            key=lambda it: (0, rank[it.key], "")
+            if it.key in rank
+            else (1, 0, f"{it.label.lower()}\0{it.key}")
+        )
+    return pinned_items + unpinned_items
 
 
 def split_by_monitor(items: list[TaskItem], monitor: Rect) -> list[TaskItem]:

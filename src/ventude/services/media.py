@@ -182,9 +182,13 @@ class MediaService(QObject):
         loop, thread = self._loop, self._thread
         if not loop or not thread:
             return
-        asyncio.run_coroutine_threadsafe(self._detach_all(), loop)
+        future = asyncio.run_coroutine_threadsafe(self._detach_all(), loop)
+        try:
+            future.result(timeout=0.5)
+        except Exception:  # noqa: BLE001
+            pass
         loop.call_soon_threadsafe(loop.stop)
-        thread.join(timeout=3)
+        thread.join(timeout=2)
         self._thread = self._loop = None
 
     async def _detach_all(self) -> None:

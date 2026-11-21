@@ -44,7 +44,7 @@ ANIMATIONS = [
 DOCK_MODE_OPTIONS = [
     ("Esquivar janelas", "esquivar"),
     ("Sempre visível", "sempre"),
-    ("Oculta", "oculta"),
+    ("Oculta (só com o mouse embaixo)", "oculta"),
 ]
 MEDIA_SOURCES = [("Só o Spotify", "spotify"), ("Qualquer player", "any")]
 INTERVALS = [("2 min", 2), ("5 min", 5), ("10 min", 10), ("15 min", 15), ("30 min", 30)]
@@ -472,7 +472,8 @@ class SettingsPage(Page):
         body.addWidget(
             setting_row(
                 "Modo da Doca",
-                "Esquivar recua só quando uma janela encosta na cápsula; Sempre reserva 64 px.",
+                "Esquivar recua quando uma janela encosta; Sempre reserva 64 px; "
+                "Oculta só aparece ao encostar o mouse embaixo (ou apertar Win).",
                 self.dock_mode,
             )
         )

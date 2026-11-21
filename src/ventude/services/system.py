@@ -84,8 +84,29 @@ def unregister_hotkey(hwnd: int) -> None:
         ctypes.windll.user32.UnregisterHotKey(hwnd, HOTKEY_ID)
 
 
+GWL_STYLE = -16
+WS_CAPTION = 0x00C00000
+
+
+def is_fullscreen_window(
+    rect: tuple[int, int, int, int],
+    monitor: tuple[int, int, int, int],
+    zoomed: bool,
+    style: int,
+) -> bool:
+    """True apenas para tela cheia real (sem barra de título e não apenas maximizada)."""
+    if zoomed or (style & WS_CAPTION) == WS_CAPTION:
+        return False
+    return (
+        rect[0] <= monitor[0]
+        and rect[1] <= monitor[1]
+        and rect[2] >= monitor[2]
+        and rect[3] >= monitor[3]
+    )
+
+
 def fullscreen_app_over(own_hwnd: int) -> bool:
-    """True se a janela em primeiro plano ocupa o monitor inteiro onde a ilha está."""
+    """True se a janela em primeiro plano está em tela cheia real no monitor onde a ilha está."""
     if sys.platform != "win32":
         return False
     try:
@@ -107,6 +128,10 @@ def fullscreen_app_over(own_hwnd: int) -> bool:
         user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MonitorInfo)]
         user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
         user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.IsZoomed.argtypes = [wintypes.HWND]
+        get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        get_long.argtypes = [wintypes.HWND, ctypes.c_int]
+        get_long.restype = ctypes.c_ssize_t
         hwnd = user32.GetForegroundWindow()
         if not hwnd or int(hwnd) == int(own_hwnd):
             return False
@@ -124,7 +149,14 @@ def fullscreen_app_over(own_hwnd: int) -> bool:
             return False
         user32.GetWindowRect(hwnd, ctypes.byref(rect))
         m = info.rcMonitor
-        return rect.left <= m.left and rect.top <= m.top and rect.right >= m.right and rect.bottom >= m.bottom
+        zoomed = bool(user32.IsZoomed(hwnd))
+        style = int(get_long(hwnd, GWL_STYLE))
+        return is_fullscreen_window(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (m.left, m.top, m.right, m.bottom),
+            zoomed,
+            style,
+        )
     except Exception:  # noqa: BLE001
         log.debug("Checagem de tela cheia falhou", exc_info=True)
         return False

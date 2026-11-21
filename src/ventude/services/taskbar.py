@@ -277,12 +277,14 @@ class TaskbarHider:
         self._windows, self._screens, self._work_area = windows, screens, work_area
         if show is None:
             self._show = lambda hwnd, cmd: _user32().ShowWindowAsync(hwnd, cmd)
+            self._show_sync = lambda hwnd, cmd: _user32().ShowWindow(hwnd, cmd)
             self._visible = is_visible or (lambda hwnd: bool(_user32().IsWindowVisible(hwnd)))
             self._is_window = is_window or (lambda hwnd: bool(_user32().IsWindow(hwnd)))
             self._appbar_get = appbar_get or get_appbar_state
             self._appbar_set = appbar_set or set_appbar_state
         else:
             self._show = show
+            self._show_sync = show
             self._visible = is_visible or (lambda _h: True)
             self._is_window = is_window or (lambda _h: True)
             self._appbar_get = appbar_get or (lambda: None)
@@ -393,16 +395,24 @@ class TaskbarHider:
                     saved = [(tuple(m), tuple(w)) for m, w in raw]
             except (OSError, ValueError, TypeError):
                 saved = []
+        bars = self._windows()
         if autohide_changed and saved_state is not None:
             try:
                 self._appbar_set(saved_state)
             except OSError:
                 log.exception("Não deu para restaurar o estado da barra do Windows")
-        for hwnd in self._windows():
+        for hwnd in bars:
             try:
-                self._show(hwnd, SW_SHOW)
+                self._show_sync(hwnd, SW_SHOW)
             except OSError:
                 log.exception("Não deu para mostrar a barra %s", hwnd)
+        if autohide_changed:
+            for hwnd in bars:
+                try:
+                    if not self._visible(hwnd):
+                        self._show_sync(hwnd, SW_SHOW)
+                except OSError:
+                    pass
         if (not autohide_changed) or custom_work:
             current = {mon for mon, _work in self._screens()}
             for mon, work in saved:
@@ -657,7 +667,14 @@ def covering_window(monitor: Rect, own_pid: int | None = None, fullscreen_only: 
     center_x, center_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
     if not (left <= center_x < right and top <= center_y < bottom):
         return False
-    if user32.IsZoomed(hwnd) and not fullscreen_only:
+    zoomed = bool(user32.IsZoomed(hwnd))
+    if fullscreen_only:
+        from ventude.services.system import GWL_STYLE, is_fullscreen_window
+
+        get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        style = int(get_long(hwnd, GWL_STYLE))
+        return is_fullscreen_window((rect.left, rect.top, rect.right, rect.bottom), monitor, zoomed, style)
+    if zoomed:
         return True
     return rect.left <= left and rect.top <= top and rect.right >= right and rect.bottom >= bottom
 

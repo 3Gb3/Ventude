@@ -572,13 +572,40 @@ def test_thumbs_echo_pill_quiet_mode_and_v7_migration(qapp, app_ctx, island, she
 
     app_ctx.store.add_shortcut("url", "GitHub", "https://github.com")
     app_ctx.update_settings(
-        layout_version=6, taskbar_autohide=True, pill_date=False, pill_weather=False
+        layout_version=6, hide_fullscreen=True, taskbar_autohide=True, pill_date=False, pill_weather=False
     )
     app_ctx.apply_migrations()
-    assert app_ctx.settings.layout_version == 7
+    assert app_ctx.settings.layout_version == 8
+    assert not app_ctx.settings.hide_fullscreen
     assert app_ctx.settings.dock_mode == "oculta"
     assert app_ctx.settings.pill_date and app_ctx.settings.pill_weather
     assert app_ctx.store.pinned("start", "https://github.com") is not None
+
+
+def test_dock_unpinned_order_stays_fixed_and_reorders_by_drag(qapp, app_ctx, island, shell):
+    from ventude.services.taskbar import WindowInfo
+
+    app_ctx.update_settings(replace_taskbar=True)
+    shell.start()
+    dock = shell.docks[0]
+    w_a = WindowInfo(10, "Alpha", 101, r"C:\Apps\alpha.exe", foreground=True)
+    w_b = WindowInfo(11, "Beta", 102, r"C:\Apps\beta.exe", foreground=False)
+    w_c = WindowInfo(12, "Gamma", 103, r"C:\Apps\gamma.exe", foreground=False)
+    shell.apply_windows([w_a, w_b, w_c])
+    initial = [i.key for i in dock.items if not i.pinned]
+    assert len(initial) == 3
+
+    # Trocar foco/ordem Z das janelas não muda os ícones de lugar
+    shell.apply_windows([w_c, w_b, w_a])
+    assert [i.key for i in dock.items if not i.pinned] == initial
+
+    # Arrastar muda a ordem, grava no store e persiste mesmo após novas atualizações com Z-order invertido
+    reordered = [initial[2], initial[0], initial[1]]
+    dock.unpinned_reordered.emit(reordered)
+    assert [i.key for i in dock.items if not i.pinned] == reordered
+    assert app_ctx.store.meta("dock_unpinned_order")
+    shell.apply_windows([w_b, w_a, w_c])
+    assert [i.key for i in dock.items if not i.pinned] == reordered
 
 
 def test_power_curtain_interruptor_and_ipc_notify(qapp, app_ctx, island, monkeypatch):
@@ -628,3 +655,120 @@ def test_power_curtain_interruptor_and_ipc_notify(qapp, app_ctx, island, monkeyp
     assert limited == "rate_limited"
     assert ventude_app.handle_ipc_payload(b"x" * 5000, island, stamps, now=12.0) == "too_large"
     assert ventude_app.handle_ipc_payload(b"show", island, stamps, now=12.0) == "reveal" and island.expanded
+
+
+def test_pin_from_dock_to_launcher_does_not_duplicate(qapp, app_ctx, island, shell, monkeypatch):
+    lnk_map = {
+        r"c:\desktop\spotify.lnk": r"C:\Users\u\AppData\Local\Spotify\Update.exe",
+        r"c:\menu\spotify.lnk": r"C:\Users\u\AppData\Local\Spotify\Update.exe",
+        r"c:\desktop\discord.lnk": r"C:\Users\u\AppData\Local\Discord\Update.exe",
+    }
+    monkeypatch.setattr("ventude.services.winutil.lnk_target", lambda p: lnk_map.get(str(p).lower(), ""))
+
+    app_ctx.store.add_pin("start", "uwp", "Explorador de Arquivos", "Microsoft.Windows.Explorer")
+    app_ctx.store.add_pin("start", "app", "Spotify", r"C:\Desktop\Spotify.lnk")
+    app_ctx.store.add_pin("start", "app", "Spotify", r"C:\Menu\Spotify.lnk")
+    app_ctx.store.add_pin("start", "app", "Discord", r"C:\Desktop\Discord.lnk")
+
+    app_ctx.update_settings(layout_version=7)
+    app_ctx.apply_migrations()
+    assert [p.label for p in app_ctx.store.pins("start")] == [
+        "Explorador de Arquivos",
+        "Spotify",
+        "Discord",
+    ]
+
+    # Botão direito na Doca (explorer.exe) -> alterna o mesmo fixado UWP do Lançador sem duplicar
+    msg_unpin = shell.toggle_pin("start", "app", "Explorador de Arquivos", r"C:\Windows\explorer.exe")
+    assert "Desafixado" in msg_unpin
+    assert len(app_ctx.store.pins("start")) == 2
+    shell.toggle_pin("start", "app", "Explorador de Arquivos", r"C:\Windows\explorer.exe")
+    assert len(app_ctx.store.pins("start")) == 3
+
+    # App Squirrel (.lnk -> Update.exe) não duplica ao desafixar/fixar pelo .exe da Doca
+    assert "Desafixado" in shell.toggle_pin("start", "app", "Discord", r"C:\Apps\Discord\Discord.exe")
+    assert [p.label for p in app_ctx.store.pins("start")] == ["Spotify", "Explorador de Arquivos"]
+
+
+def test_oculta_mode_and_win_launcher_dock_sync(qapp, app_ctx, island, shell):
+    from ventude.ui.shell.dock_model import BOTTOM_MARGIN, DOCK_H
+
+    app_ctx.update_settings(replace_taskbar=True, replace_start_menu=True, dock_mode="oculta")
+    shell.start()
+    dock = shell.docks[0]
+    assert dock.isVisible() and dock.slid  # modo oculta nasce escondido mesmo com área de trabalho vazia
+
+    shell.open_search("")
+    ln = shell.launcher
+    assert ln is not None and ln.isVisible()
+    assert not dock.slid  # tecla Win revela a Doca junto com o Lançador
+    assert wait_for(qapp, lambda: not dock._slide_tween.running and not ln._reveal.running)
+    assert ln.geometry().bottom() < dock.capsule_rect_on_screen().top()
+
+    small = QRect(0, 0, 1366, 768)
+    small_rect = ln.target_geometry(small, active=True)
+    assert small_rect.top() >= 56 and small_rect.bottom() < (768 - DOCK_H - BOTTOM_MARGIN)
+
+    ln.dismiss()
+    assert wait_for(qapp, lambda: not ln.isVisible() and dock.slid)
+
+
+def test_controls_tray_icon_right_click_menu_and_close(qapp, app_ctx, island, monkeypatch):
+    from PySide6.QtTest import QTest
+
+    from ventude.services import apps
+    from ventude.ui.shell.controls import TrayIcon
+
+    seen_menus: list[list[str]] = []
+    closed_exes: list[tuple[str, bool]] = []
+    errors: list[tuple[str, str]] = []
+    app_ctx.tray_message.connect(lambda t, m: errors.append((t, m)))
+
+    controls = island.controls
+    monkeypatch.setattr(
+        controls,
+        "_exec_menu",
+        lambda menu, _pos: seen_menus.append([a.text() for a in menu.actions() if a.text()]),
+    )
+
+    def fake_close(exe, *, force=False, **_kw):
+        closed_exes.append((exe, force))
+        return (False, "Erro simulado") if force else (True, "")
+
+    monkeypatch.setattr(apps, "close_background_app", fake_close)
+    monkeypatch.setattr(apps, "tray_apps", lambda: [])
+
+    controls.set_tray_apps([apps.TrayApp("Discord", r"C:\Apps\Discord.exe", b"")])
+    icons_found = [w for w in controls._tray_widgets if isinstance(w, TrayIcon)]
+    assert len(icons_found) == 1
+    QTest.mouseClick(icons_found[0], Qt.MouseButton.RightButton)
+    assert seen_menus and "Fechar aplicativo" in seen_menus[0] and "Encerrar processo" in seen_menus[0]
+
+    app_item = apps.TrayApp("Discord", r"C:\Apps\Discord.exe", b"")
+    controls._close_tray_app(app_item, force=False)
+    controls._close_tray_app(app_item, force=True)
+    assert wait_for(qapp, lambda: len(closed_exes) == 2 and len(errors) == 1)
+    assert closed_exes == [(r"C:\Apps\Discord.exe", False), (r"C:\Apps\Discord.exe", True)]
+
+
+def test_quit_closes_island_and_dock_and_restores_taskbar(qapp, app_ctx, island, shell):
+    from PySide6.QtGui import QCloseEvent
+
+    from ventude.services.taskbar import SW_SHOW
+
+    app_ctx.update_settings(replace_taskbar=True)
+    shell.start()
+    assert shell.docks and shell.docks[0].isVisible()
+    assert shell.hider.hidden and shell.reassert_timer.isActive()
+
+    non_spontaneous = QCloseEvent()
+    island.closeEvent(non_spontaneous)
+    assert non_spontaneous.isAccepted()
+
+    island.prepare_quit()
+    shell.shutdown()
+    assert not island.isVisible() and island._quitting
+    assert not shell.reassert_timer.isActive()
+    assert shell.docks == []
+    assert not shell.hider.hidden and not shell.hider.marker.exists()
+    assert ("show", SW_SHOW) in shell.test_log

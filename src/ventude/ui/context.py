@@ -32,11 +32,13 @@ WEATHER_EVERY = 15 * 60_000
 
 def migrate_shortcuts_to_start_pins(store: Store) -> int:
     """Copia atalhos do painel antigo para os fixados do Lançador ('start'), sem duplicar."""
+    from ventude.ui.shell.items import find_matching_pin
+
     moved = 0
     valid_kinds = ("app", "uwp", "folder", "file", "system", "url")
     for shortcut in store.shortcuts():
-        if not store.pinned("start", shortcut.target):
-            kind = shortcut.kind if shortcut.kind in valid_kinds else "url"
+        kind = shortcut.kind if shortcut.kind in valid_kinds else "url"
+        if find_matching_pin(store.pins("start"), kind, shortcut.label, shortcut.target) is None:
             store.add_pin("start", kind, shortcut.label, shortcut.target, first=False)
             moved += 1
     return moved
@@ -125,6 +127,12 @@ class AppContext(QObject):
                 dock_mode="oculta" if self.settings.taskbar_autohide else "esquivar",
             )
             migrate_shortcuts_to_start_pins(self.store)
+        if version < 8:
+            from ventude.ui.shell.items import dedupe_pins
+
+            changes["hide_fullscreen"] = False
+            dedupe_pins(self.store, "start")
+            dedupe_pins(self.store, "taskbar")
         self.update_settings(**changes)
         if version < 4:
             self.detect_providers()
