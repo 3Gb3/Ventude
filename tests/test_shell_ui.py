@@ -334,9 +334,13 @@ def shell(qapp, app_ctx, island, tmp_path, monkeypatch):
     """ShellController com barra do Windows simulada: nunca toca na barra real."""
     from ventude.services import taskbar
     from ventude.services.taskbar import TaskbarHider, WindowInfo
+    from ventude.ui.shell import controller as controller_module
     from ventude.ui.shell.controller import ShellController
     from ventude.ui.shell.curtain import PowerFx
 
+    # PC "ligado há horas": numa máquina recém-ligada (o runner do CI), shell.start() mostraria
+    # a saudação "Bom dia!", e com ela ativa o Lançador não abre.
+    monkeypatch.setattr(controller_module, "uptime_seconds", lambda: 24 * 3600.0)
     log = []
     hider = TaskbarHider(
         windows=lambda: [1],
@@ -460,8 +464,6 @@ def test_win_key_opens_launcher_and_slot_shortcuts(qapp, app_ctx, island, shell)
     app_ctx.update_settings(replace_start_menu=True)
     assert "launcher" in shell.keys.logic.features
     island.expand()
-    # Fixada: perder o foco recolhe a ilha em 250 ms, o mesmo tempo do settle (corrida no CI).
-    island.panel.pin.setChecked(True)
     settle(qapp, 250)
     assert island.expanded
     island.set_shell_mode(True)
