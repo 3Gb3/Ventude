@@ -466,8 +466,9 @@ def test_win_key_opens_launcher_and_slot_shortcuts(qapp, app_ctx, island, shell)
     assert island.expanded
     island.set_shell_mode(True)
     focus = QApplication.focusWidget()
+    in_island = bool(focus and island.isAncestorOf(focus))
     state = (
-        f"foco={type(focus).__name__ if focus else None} na_ilha={bool(focus and island.isAncestorOf(focus))} "
+        f"foco={type(focus).__name__ if focus else None} na_ilha={in_island} "
         f"campo={island._focus_in_field()} barra={island.panel.command.isVisible()} "
         f"qr={island.panel.qr.isVisible()} modo={island.mode} fx={shell.fx.active} "
         f"shell={app_ctx.shell is not None} ativa={type(QApplication.activeWindow()).__name__}"
