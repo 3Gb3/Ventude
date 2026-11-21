@@ -10,6 +10,7 @@ Reiniciar, desligar e sair da sessão pedem Enter duas vezes.
 
 from __future__ import annotations
 
+import os
 import re
 import webbrowser
 from collections.abc import Callable
@@ -60,6 +61,7 @@ TAB_WORDS = {
     "settings": ("ajustes", "configurações", "configuracoes", "settings"),
 }
 CAFFEINE_WORDS = ("cafeina", "cafeína", "caffeine", "acordado")
+PATH_LIKE = re.compile(r"^([a-zA-Z]:[/\\]|~(?:[/\\]|$)|%[A-Za-z_][A-Za-z0-9_()]*%)")  # C:\, ~\, %appdata%
 REAL_ICON_GLYPHS = ("apps", "external", "folder", "file", "image", "play", "music", "document")
 FILE_LOOK = {  # categoria -> (ícone, seção, rótulo)
     "image": ("image", "Imagens", "Imagem"),
@@ -190,7 +192,7 @@ class CommandEngine(QObject):
             return self.start_suggestions(limit, shell=shell) if start_mode else []
         if shell and text[0] in (">", "@", "/", "=", "?", "!"):
             return self._scoped_commands(text[0], text[1:].strip(), limit)
-        if shell and re.match(r"^([a-zA-Z]:[/\\]|~(?:[/\\]|$))", text):
+        if shell and PATH_LIKE.match(text):
             direct = self._direct_path_commands(text, limit)
             if direct:
                 return direct[:limit]
@@ -431,7 +433,7 @@ class CommandEngine(QObject):
                 )
             return out[:limit]
         if scope == "/":
-            if query and re.match(r"^([a-zA-Z]:[/\\]|~(?:[/\\]|$))", query):
+            if query and PATH_LIKE.match(query):
                 direct = self._direct_path_commands(query, limit)
                 if direct:
                     return direct[:limit]
@@ -495,7 +497,7 @@ class CommandEngine(QObject):
 
     def _direct_path_commands(self, raw: str, limit: int) -> list[Command]:
         try:
-            target = Path(raw).expanduser()
+            target = Path(os.path.expandvars(raw.strip())).expanduser()
         except OSError:
             return []
         out: list[Command] = []

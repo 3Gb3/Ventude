@@ -62,7 +62,8 @@ def parse_pasted(text: str) -> Pasted:
     text = _unescape_cmd(text)
     lowered = text.lower()
 
-    if lowered.startswith("curl ") or "\ncurl " in lowered:
+    # "curl ..." (Chrome, Edge, bash) ou "curl.exe ..." (Firefox > Copiar como cURL (Windows))
+    if re.match(r"curl(?:\.exe)?\s", lowered) or re.search(r"\ncurl(?:\.exe)?\s", lowered):
         for header in _quoted(text, r"-H|--header"):
             name, _, value = header.partition(":")
             name, value = name.strip().lower(), value.strip()

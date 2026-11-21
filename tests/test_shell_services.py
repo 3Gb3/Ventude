@@ -1285,3 +1285,26 @@ def test_index_finds_every_folder_and_media_with_filters(tmp_path):
     assert indexer.search_index(index, "praia", 1)[0].name in ("praia", "praia.mp3")
     assert [e.name for e in indexer.search_index(index, "jogo", 4)] == ["Jogos", "Meu Jogo"]
     assert indexer.Entry("x", str(deep / "praia-sol.jpg"), "file").category == "image"
+
+
+def test_index_shows_system_folders_shallowly(tmp_path):
+    home = tmp_path / "casa"
+    deep = home / "AppData" / "Roaming" / "Discord" / "Cache" / "x" / "y"
+    deep.mkdir(parents=True)
+    (home / "AppData" / "Roaming" / "Discord" / "settings.json").write_text("{}")
+    (home / "AppData" / "Roaming" / ".minecraft" / "saves" / "mundo" / "region").mkdir(parents=True)
+    index = indexer.scan_index([(home, indexer.DEEP, False)])
+    names = {e.name for e in index}
+    assert {"AppData", "Roaming", "Discord", ".minecraft"} <= names
+    assert "x" not in names and "y" not in names  # AppData só alguns níveis
+    assert "region" not in names
+    assert "settings.json" not in names  # nas pastas do sistema, só pastas
+    assert indexer.search_index(index, "appdata", 1)[0].name == "AppData"
+
+
+def test_launcher_accepts_env_var_paths():
+    from ventude.ui.command import PATH_LIKE
+
+    assert PATH_LIKE.match("%appdata%") and PATH_LIKE.match(r"%LOCALAPPDATA%\Discord")
+    assert PATH_LIKE.match(r"C:\Users") and PATH_LIKE.match("~/Downloads")
+    assert not PATH_LIKE.match("appdata") and not PATH_LIKE.match("50%")
