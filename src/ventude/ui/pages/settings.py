@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ventude import __version__
+from ventude.core import updates
 from ventude.core.config import MODULES, Settings
 from ventude.core.paths import app_data_dir
 from ventude.limits import claude, codex, copilot, cursor, grok
@@ -639,8 +640,14 @@ class SettingsPage(Page):
         quit_btn.setObjectName("Danger")
         quit_btn.setIcon(icons.icon("power", theme.DANGER, 15))
         quit_btn.clicked.connect(ctx.quit_requested.emit)
-        for button in (folder, reset, quit_btn):
+        self.update_btn = QPushButton(" Procurar atualização")
+        self.update_btn.setIcon(icons.icon("download", theme.TEXT, 15))
+        self.update_btn.clicked.connect(self._check_update)
+        self.update_status = label("", "Faint", wrap=True)
+        self._update_dialog: QWidget | None = None
+        for button in (folder, reset, quit_btn, self.update_btn):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+        body.addLayout(hbox(self.update_btn, self.update_status, None, spacing=10))
         body.addLayout(hbox(folder, reset, None, quit_btn, spacing=8))
         column.addWidget(card)
         column.addStretch(1)
@@ -792,6 +799,34 @@ class SettingsPage(Page):
             )
         )
         return card
+
+    def _check_update(self) -> None:
+        self.update_btn.setEnabled(False)
+        self.update_status.setText("Procurando no GitHub…")
+        self.ctx.run(
+            updates.latest, __version__, done=self._update_checked, fail=self._update_failed, owner=self
+        )
+
+    def _update_checked(self, update: updates.Update | None) -> None:
+        self.update_btn.setEnabled(True)
+        if update is None:
+            self.update_status.setText(f"Você já está na versão mais nova ({__version__}).")
+            return
+        if not updates.enabled():
+            self.update_status.setText(
+                f"Versão {update.version} disponível. Rodando do código-fonte: atualize com git pull."
+            )
+            return
+        self.update_status.setText(f"Versão {update.version} disponível.")
+        from ventude.ui.update_dialog import ask_to_update
+
+        if self._update_dialog is not None:
+            self._update_dialog.close()
+        self._update_dialog = ask_to_update(update, self.ctx.tasks, self.ctx.quit_requested.emit)
+
+    def _update_failed(self, error: BaseException) -> None:
+        self.update_btn.setEnabled(True)
+        self.update_status.setText(f"Não deu para verificar agora: {error}")
 
     def _detect(self) -> None:
         self.detect_status.setText("Procurando o Codex, o Cursor e o Copilot neste PC…")

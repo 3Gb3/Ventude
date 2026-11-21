@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import string
 import subprocess
@@ -115,6 +116,48 @@ SHALLOW: dict[str, int] = {
 }
 DOT_DEPTH = 2  # pastas ocultas do tipo .minecraft, .ssh, .config
 KIND_BONUS = {"app": 25, "uwp": 25, "folder": 8, "file": 0}
+APP_KINDS = ("app", "uwp")
+# Apelidos e abreviações que não saem das iniciais do nome ("lol" e "vsc" já saem sozinhos:
+# League Of Legends, Visual Studio Code). Cada apelido aponta para trechos do nome do app.
+ALIASES: dict[str, tuple[str, ...]] = {
+    "lol": ("league of legends",),
+    "vava": ("valorant",),
+    "valo": ("valorant",),
+    "disc": ("discord",),
+    "dc": ("discord",),
+    "cs": ("counter-strike", "counter strike"),
+    "cs2": ("counter-strike", "counter strike"),
+    "csgo": ("counter-strike", "counter strike"),
+    "mine": ("minecraft",),
+    "mc": ("minecraft",),
+    "zap": ("whatsapp",),
+    "zapzap": ("whatsapp",),
+    "wpp": ("whatsapp",),
+    "wsp": ("whatsapp",),
+    "whats": ("whatsapp",),
+    "insta": ("instagram",),
+    "yt": ("youtube",),
+    "ff": ("free fire", "firefox"),
+    "r6": ("rainbow six",),
+    "ow": ("overwatch",),
+    "tft": ("teamfight tactics",),
+    "bf": ("battlefield",),
+    "pubg": ("pubg", "battlegrounds"),
+    "fn": ("fortnite",),
+    "gpt": ("chatgpt",),
+    "vscode": ("visual studio code",),
+    "ps": ("photoshop", "powershell"),
+    "pr": ("premiere",),
+    "ppt": ("powerpoint",),
+    "xls": ("excel",),
+    "cmd": ("prompt de comando", "command prompt", "terminal"),
+    "tt": ("tiktok",),
+    "spot": ("spotify",),
+    "tlg": ("telegram",),
+    "bnet": ("battle.net",),
+    "config": ("configurações", "settings"),
+    "calc": ("calculadora", "calculator"),
+}
 CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_CONSOLE = 0x00000010
 
@@ -584,7 +627,45 @@ def parse_query(text: str) -> tuple[str, bool]:
 
 
 def score(item: Entry, query: str, words: list[str]) -> float | None:
-    return _score_key(item.key, item.kind, query, words)
+    value = _score_key(item.key, item.kind, query, words)
+    if item.kind in APP_KINDS:
+        nick = nickname_score(item.name, query)
+        if nick is not None:
+            nick += KIND_BONUS[item.kind] - len(item.key) / 100
+            value = nick if value is None else max(value, nick)
+    return value
+
+
+def initials(name: str) -> str:
+    """Primeira letra de cada palavra, separando também CamelCase: 'League of Legends' -> 'lol',
+    'PowerShell' -> 'ps', 'Grand Theft Auto V' -> 'gtav'."""
+    parts = re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-zà-ÿ]+|\d+", name)
+    return "".join(p[0] for p in parts).lower()
+
+
+def _is_subsequence(query: str, text: str) -> bool:
+    it = iter(text)
+    return all(ch in it for ch in query)
+
+
+def nickname_score(name: str, query: str) -> float | None:
+    """Abreviações dos apps: apelidos (vava, zap), iniciais (lol, vsc) e letras na ordem (vlrnt)."""
+    query = query.strip().lower()
+    if len(query) < 2:
+        return None
+    key = name.lower()
+    if any(target in key for target in ALIASES.get(query, ())):
+        return 90.0  # apelido escolhido de propósito vence quem só começa igual (lol x Lollipop)
+    letters = initials(name)
+    if len(letters) >= 2:
+        if letters == query:
+            return 70.0
+        if letters.startswith(query):
+            return 55.0
+    compact = query.replace(" ", "")
+    if len(compact) >= 3 and key[:1] == compact[0] and _is_subsequence(compact, key):
+        return 20.0
+    return None
 
 
 def _score_key(name: str, kind: str, query: str, words: list[str]) -> float | None:
@@ -631,8 +712,8 @@ def search(
     first = words[0]
     ranked: list[tuple[float, Entry]] = []
     for item in items:
-        if first not in item.key:
-            continue  # filtro barato antes da pontuação
+        if first not in item.key and item.kind not in APP_KINDS:
+            continue  # filtro barato antes da pontuação (apps também casam por apelido e iniciais)
         if not _matches_filter(item, kind_filter):
             continue
         value = score(item, query, words)

@@ -581,3 +581,41 @@ def test_color_picker_and_ocr_flow(qapp, island, app_ctx, monkeypatch):
     assert QGuiApplication.clipboard().text() == "Olá mundo"
     assert island._toast.title.startswith("Texto copiado")
     assert not ocr.available() or ocr.available()  # só existe no Windows
+
+
+def test_settings_update_button(qapp, island, app_ctx, monkeypatch):
+    from ventude.core import net, updates
+
+    island.expand("settings")
+    settle(qapp, 100)
+    page = island.panel.pages["settings"]
+
+    def wait_enabled():
+        end = time.monotonic() + 3
+        while not page.update_btn.isEnabled() and time.monotonic() < end:
+            qapp.processEvents()
+
+    monkeypatch.setattr(updates, "latest", lambda _v: None)
+    page.update_btn.click()
+    wait_enabled()
+    assert "mais nova" in page.update_status.text()
+
+    def boom(_v):
+        raise net.NetError("sem rede")
+
+    monkeypatch.setattr(updates, "latest", boom)
+    page.update_btn.click()
+    wait_enabled()
+    assert "sem rede" in page.update_status.text()
+
+    found = updates.Update("9.9.9", "- Nova", "https://github.com/x/Ventude-Setup.exe", 10)
+    monkeypatch.setattr(updates, "latest", lambda _v: found)
+    monkeypatch.setattr(updates, "enabled", lambda: False)
+    page.update_btn.click()
+    wait_enabled()
+    assert "9.9.9" in page.update_status.text() and page._update_dialog is None
+    monkeypatch.setattr(updates, "enabled", lambda: True)
+    page.update_btn.click()
+    wait_enabled()
+    assert page._update_dialog is not None and page._update_dialog.isVisible()
+    page._update_dialog.close()
