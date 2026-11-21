@@ -44,6 +44,8 @@ class DockLayout:
     separator_x: float | None = None
     overflow_rect: tuple[float, float, float, float] | None = None
     overflow_items: tuple[TaskItem, ...] = ()
+    start_rect: tuple[float, float, float, float] | None = None  # botão Iniciar (abre o Lançador)
+    start_separator_x: float | None = None
 
     @property
     def overflow_count(self) -> int:
@@ -56,6 +58,13 @@ class DockLayout:
             if slot.x - GAP / 2 <= x <= slot.x + slot.w + GAP / 2:
                 return slot
         return None
+
+    def hit_start(self, x: float, y: float) -> bool:
+        if self.start_rect is None:
+            return False
+        sx, _sy, sw, _sh = self.start_rect
+        in_band = self.capsule_y <= y <= self.capsule_y + self.capsule_h
+        return in_band and sx - GAP / 2 <= x <= sx + sw + GAP / 2
 
     def hit_overflow(self, x: float, y: float) -> bool:
         if self.overflow_rect is None:
@@ -73,13 +82,17 @@ class DockLayout:
         return count
 
 
-def _content_width(n_slots: int, slot_size: int, has_sep: bool, has_overflow: bool) -> float:
+def _content_width(
+    n_slots: int, slot_size: int, has_sep: bool, has_overflow: bool, has_start: bool = False
+) -> float:
     total_units = n_slots + (1 if has_overflow else 0)
     if total_units == 0:
         return float(PAD_X * 2 + slot_size)
     w = PAD_X * 2 + total_units * slot_size + max(0, total_units - 1) * GAP
     if has_sep:
         w += DIVIDER_W - GAP
+    if has_start:
+        w += slot_size + DIVIDER_W  # botão Iniciar + divisória antes dos apps
     return float(w)
 
 
@@ -96,6 +109,7 @@ class SlotModel:
         drag_outside: bool = False,
         insert_index: int | None = None,
         insert_section: str = "pinned",
+        start_button: bool = False,
     ) -> DockLayout:
         limit = max(ICON_MIN + PAD_X * 2, max_w or (window_w - 32))
         visible_items = [
@@ -118,27 +132,27 @@ class SlotModel:
             return len(candidates) + (1 if has_gap else 0), has_sep
 
         n_units, has_sep = split_counts(visible_items)
-        if _content_width(n_units, ICON_MAX, has_sep, False) > limit:
+        if _content_width(n_units, ICON_MAX, has_sep, False, start_button) > limit:
             # Encolhe até ICON_MIN antes de jogar excedente para +N
             fitted = ICON_MIN
             for candidate_sz in range(ICON_MAX, ICON_MIN - 1, -1):
-                if _content_width(n_units, candidate_sz, has_sep, False) <= limit:
+                if _content_width(n_units, candidate_sz, has_sep, False, start_button) <= limit:
                     fitted = candidate_sz
                     break
             slot_size = fitted
-            if _content_width(n_units, slot_size, has_sep, False) > limit:
+            if _content_width(n_units, slot_size, has_sep, False, start_button) > limit:
                 kept = list(visible_items)
                 while kept:
                     idx_pop = len(kept) - 1
                     overflow.insert(0, kept.pop(idx_pop))
                     n_units, has_sep = split_counts(kept)
-                    if _content_width(n_units, slot_size, has_sep, True) <= limit:
+                    if _content_width(n_units, slot_size, has_sep, True, start_button) <= limit:
                         break
                 visible_items = kept
 
         n_units, has_sep = split_counts(visible_items)
         has_overflow = len(overflow) > 0
-        capsule_w = _content_width(n_units, slot_size, has_sep, has_overflow)
+        capsule_w = _content_width(n_units, slot_size, has_sep, has_overflow, start_button)
         capsule_x = (window_w - capsule_w) / 2.0
         capsule_y = float(WINDOW_H - BOTTOM_MARGIN - DOCK_H)
         slot_y = capsule_y + (DOCK_H - slot_size) / 2.0
@@ -148,6 +162,13 @@ class SlotModel:
 
         slots: list[SlotRect] = []
         cursor_x = capsule_x + PAD_X
+        start_rect: tuple[float, float, float, float] | None = None
+        start_separator_x: float | None = None
+        if start_button:
+            start_rect = (cursor_x, slot_y, float(slot_size), float(slot_size))
+            if n_units > 0 or has_overflow:
+                cursor_x += slot_size + DIVIDER_W
+                start_separator_x = cursor_x - DIVIDER_W / 2.0
         gap_pos = max(0, min(insert_index, len(pinned))) if pinned_gap and insert_index is not None else -1
         unpinned_gap_pos = (
             max(0, min(insert_index, len(unpinned))) if unpinned_gap and insert_index is not None else -1
@@ -213,6 +234,8 @@ class SlotModel:
             separator_x=separator_x,
             overflow_rect=overflow_rect,
             overflow_items=tuple(overflow),
+            start_rect=start_rect,
+            start_separator_x=start_separator_x,
         )
 
 

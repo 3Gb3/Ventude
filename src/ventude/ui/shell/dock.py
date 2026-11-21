@@ -59,6 +59,7 @@ class Dock(QWidget):
     unpinned_reordered = Signal(list)  # list[str] das chaves dos apps abertos na nova ordem
     pin_unpinned = Signal(int)  # pin_id removido via Puf
     pin_dropped = Signal(str, str, str, int)  # (kind, label, target, insert_index)
+    start_clicked = Signal()  # botão Iniciar: abre/fecha o Lançador sem precisar da tecla Windows
 
     def __init__(self, ctx: object, shell: object, screen: object) -> None:
         super().__init__(
@@ -91,6 +92,9 @@ class Dock(QWidget):
         self._hovered_key = ""
         self._hovered_overflow = False
         self._pressed_key = ""
+        self._hovered_start = False
+        self._pressed_start = False
+        self._start_halo = 0.0
         self._show_hover_label = False
         self._halo_progress: dict[str, float] = {}
         self._slot_x: dict[str, float] = {}
@@ -347,6 +351,7 @@ class Dock(QWidget):
             drag_outside=self._drag_outside,
             insert_index=insert_idx,
             insert_section=self._drag_section if self._dragging_internal else "pinned",
+            start_button=True,
         )
         reduced = motion.reduced_motion(getattr(self.ctx, "settings", None))
         for slot in self._layout.slots:
@@ -377,6 +382,8 @@ class Dock(QWidget):
             return False
         if self._arrivals or self._launching_until or self._attention_keys:
             return True
+        if abs(self._start_halo - (1.0 if self._hovered_start else 0.0)) > 0.02:
+            return True
         for slot in self._layout.slots:
             if abs(self._slot_x.get(slot.key, slot.x) - slot.x) > 0.35:
                 return True
@@ -398,6 +405,13 @@ class Dock(QWidget):
             else:
                 dirty = True
         if self._attention_keys:
+            dirty = True
+        target_start = 1.0 if self._hovered_start else 0.0
+        if abs(self._start_halo - target_start) > 0.02:
+            self._start_halo += (target_start - self._start_halo) * HOVER_EASE
+            dirty = True
+        elif self._start_halo != target_start:
+            self._start_halo = target_start
             dirty = True
         for key in list(self._arrivals):
             nxt = self._arrivals[key] + 0.067
@@ -441,7 +455,7 @@ class Dock(QWidget):
 
     def _reveal_hover_label(self) -> None:
         if (
-            self._hovered_key
+            (self._hovered_key or self._hovered_start)
             and not self.suppress_hover_label
             and not self._dragging_internal
             and not self._menus_open()
@@ -469,15 +483,15 @@ class Dock(QWidget):
         now = time.monotonic()
         reduced = motion.reduced_motion(getattr(self.ctx, "settings", None))
 
+        self._paint_start(p, reduced)
+
         for slot in lay.slots:
             self._paint_slot(p, slot, now, reduced)
 
-        if lay.separator_x is not None:
-            p.setPen(QPen(QColor(theme.HAIRLINE), 1.0))
-            p.drawLine(
-                QPointF(lay.separator_x, cap.top() + 12),
-                QPointF(lay.separator_x, cap.bottom() - 12),
-            )
+        for sep_x in (lay.start_separator_x, lay.separator_x):
+            if sep_x is not None:
+                p.setPen(QPen(QColor(theme.HAIRLINE), 1.0))
+                p.drawLine(QPointF(sep_x, cap.top() + 12), QPointF(sep_x, cap.bottom() - 12))
 
         if lay.overflow_rect is not None and lay.overflow_count > 0:
             ox, oy, ow, oh = lay.overflow_rect
@@ -490,6 +504,15 @@ class Dock(QWidget):
             p.drawText(or_rect, Qt.AlignmentFlag.AlignCenter, f"+{lay.overflow_count}")
 
         # Mini-ilha acima do ícone com hover depois de 300ms (quando sem thumb strip/lançador visível)
+        if (
+            self._show_hover_label
+            and self._hovered_start
+            and lay.start_rect is not None
+            and not self.suppress_hover_label
+            and not self._menus_open()
+        ):
+            sx, _sy, sw, _sh = lay.start_rect
+            self._paint_label_pill(p, sx + sw / 2.0, "Iniciar")
         if (
             self._show_hover_label
             and self._hovered_key
@@ -600,16 +623,53 @@ class Dock(QWidget):
                 p.setBrush(dot_color)
                 p.drawRoundedRect(dot_rect, 1.5, 1.5)
 
+    def _launcher_open(self) -> bool:
+        launcher = getattr(self.shell, "launcher", None)
+        return bool(launcher is not None and launcher.isVisible() and not getattr(launcher, "closing", False))
+
+    def _paint_start(self, p: QPainter, reduced: bool) -> None:
+        """Botão Iniciar na ponta esquerda: o tornadinho da Ventude, abre o Lançador."""
+        start = self._layout.start_rect
+        if start is None:
+            return
+        rect = QRectF(*start)
+        halo_t = (1.0 if self._hovered_start else 0.0) if reduced else self._start_halo
+        lift = 0.0 if reduced else HOVER_LIFT_PX * halo_t
+        scale = 1.0 if reduced else 1.0 + HOVER_SCALE * halo_t
+        if self._pressed_start:
+            scale *= 0.90
+            lift *= 0.4
+        is_open = self._launcher_open()
+        if halo_t > 0.02 or is_open or self._pressed_start:
+            p.setPen(Qt.PenStyle.NoPen)
+            if self._pressed_start:
+                color = QColor(theme.HALO_PRESS)
+            elif halo_t > 0.02:
+                color = QColor(255, 255, 255, round(20 * halo_t))
+            else:
+                color = QColor(255, 255, 255, 10)
+            p.setBrush(color)
+            p.drawRoundedRect(rect.adjusted(1, 2, -1, -2), theme.R_ITEM, theme.R_ITEM)
+        icon = (26 if rect.width() >= 36 else max(18, round(rect.width() * 0.72))) * scale
+        cx, cy = rect.center().x(), rect.center().y() - 2.0 - lift
+        brand.paint_tornado(p, QRectF(cx - icon / 2.0, cy - icon / 2.0, icon, icon), background=False)
+        if is_open:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(theme.DOT_FOCUS))
+            p.drawRoundedRect(QRectF(cx - 7.0, rect.bottom() - 4.0, 14.0, 3.0), 1.5, 1.5)
+
     def _paint_hover_label(self, p: QPainter, slot: SlotRect) -> None:
         text = slot.item.label
         if slot.item.other_monitor:
             text = f"{text} · outra tela"
+        self._paint_label_pill(p, self._slot_x.get(slot.key, slot.x) + slot.w / 2.0, text)
+
+    def _paint_label_pill(self, p: QPainter, cx: float, text: str) -> None:
         font = shell_font(11)
         p.setFont(font)
         text_w = p.fontMetrics().horizontalAdvance(text)
         pill_w = min(220.0, float(text_w + 22))
         pill_h = 26.0
-        cx = self._slot_x.get(slot.key, slot.x) + slot.w / 2.0
         px = max(6.0, min(cx - pill_w / 2.0, self.width() - pill_w - 6.0))
         py = max(4.0, float(LABEL_BAND - pill_h - 8))
         rect = QRectF(px, py, pill_w, pill_h)
@@ -640,6 +700,19 @@ class Dock(QWidget):
             p.drawText(pill, Qt.AlignmentFlag.AlignCenter, msg)
 
     # ---------- mouse, hover e arrasto ----------
+    def _set_start_hover(self, on: bool) -> None:
+        if on == self._hovered_start:
+            return
+        self._hovered_start = on
+        if on:
+            self._show_hover_label = False
+            self._hover_label_timer.start()
+        elif not self._hovered_key:  # indo direto para um ícone: o timer agora é dele
+            self._show_hover_label = False
+            self._hover_label_timer.stop()
+        self._ensure_tick()
+        self.update()
+
     def _set_hover(self, slot: SlotRect | None, overflow: bool = False) -> None:
         new_key = slot.key if slot is not None else ""
         if new_key == self._hovered_key and overflow == self._hovered_overflow:
@@ -661,6 +734,8 @@ class Dock(QWidget):
 
     def leaveEvent(self, _event: object) -> None:
         self._pressed_key = ""
+        self._pressed_start = False
+        self._set_start_hover(False)
         if not self._dragging_internal:
             self._set_hover(None, False)
 
@@ -689,12 +764,18 @@ class Dock(QWidget):
                 self._ensure_tick()
                 self.update()
                 return
-        slot = self._layout.hit(pos.x(), pos.y())
-        overflow = False if slot is not None else self._layout.hit_overflow(pos.x(), pos.y())
+        on_start = self._layout.hit_start(pos.x(), pos.y())
+        slot = None if on_start else self._layout.hit(pos.x(), pos.y())
+        overflow = False if (slot is not None or on_start) else self._layout.hit_overflow(pos.x(), pos.y())
         self._set_hover(slot, overflow)
+        self._set_start_hover(on_start)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         pos = event.position()
+        if event.button() == Qt.MouseButton.LeftButton and self._layout.hit_start(pos.x(), pos.y()):
+            self._pressed_start = True
+            self.update()
+            return
         slot = self._layout.hit(pos.x(), pos.y())
         if event.button() == Qt.MouseButton.LeftButton and slot is not None:
             self._pressed_key = slot.key
@@ -708,6 +789,12 @@ class Dock(QWidget):
         pos = event.position()
         was_pressed = self._pressed_key
         self._pressed_key = ""
+        if self._pressed_start:
+            self._pressed_start = False
+            if event.button() == Qt.MouseButton.LeftButton and self._layout.hit_start(pos.x(), pos.y()):
+                self.start_clicked.emit()
+            self.update()
+            return
         if self._dragging_internal and self._drag_slot is not None:
             dragged = self._drag_slot
             outside = self._drag_outside

@@ -1339,3 +1339,26 @@ def test_launcher_accepts_env_var_paths():
     assert PATH_LIKE.match("%appdata%") and PATH_LIKE.match(r"%LOCALAPPDATA%\Discord")
     assert PATH_LIKE.match(r"C:\Users") and PATH_LIKE.match("~/Downloads")
     assert not PATH_LIKE.match("appdata") and not PATH_LIKE.match("50%")
+
+
+def test_dock_model_start_button_sits_left_of_apps():
+    from ventude.ui.shell.dock_model import DIVIDER_W, SlotModel
+    from ventude.ui.shell.items import TaskItem
+
+    items = [
+        TaskItem(f"pin:{i}", f"App {i}", "app", f"app{i}.exe", "app", f"app{i}.exe", pin_id=i + 1)
+        for i in range(3)
+    ]
+    model = SlotModel()
+    plain = model.layout(items, window_w=1000)
+    lay = model.layout(items, window_w=1000, start_button=True)
+    assert plain.start_rect is None and not plain.hit_start(500, 80)
+    assert lay.start_rect is not None and lay.start_separator_x is not None
+    sx, sy, sw, sh = lay.start_rect
+    assert lay.capsule_w == plain.capsule_w + lay.slot_size + DIVIDER_W
+    assert sx + sw < lay.start_separator_x < lay.slots[0].x
+    assert lay.hit_start(sx + sw / 2, sy + sh / 2)
+    assert lay.hit(sx + sw / 2, sy + sh / 2) is None  # o botão não é um slot (Win+1 continua no 1º app)
+
+    empty = model.layout([], window_w=1000, start_button=True)
+    assert empty.start_rect is not None and empty.start_separator_x is None

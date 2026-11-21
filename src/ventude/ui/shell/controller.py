@@ -234,6 +234,7 @@ class ShellController(QObject):
             dock.unpinned_reordered.connect(self._reorder_unpinned)
             dock.pin_unpinned.connect(self._unpin_taskbar_pin)
             dock.pin_dropped.connect(self._drop_pin_on_dock)
+            dock.start_clicked.connect(self.start_button_clicked)
             self._apply_items_to_dock(dock)
             dock.start_bar(entrance=True, start_hidden=start_hidden)
             self.docks.append(dock)
@@ -759,11 +760,17 @@ class ShellController(QObject):
             self.launcher.set_person(apps.display_name(), apps.account_picture())
             self.launcher.set_power_badge(bool(self.ctx.power.pending))  # type: ignore[attr-defined]
             self.launcher.shown.connect(lambda: self._suspend_island_hover(True))
+            self.launcher.shown.connect(self._repaint_docks)  # realce do botão Iniciar
             self.launcher.hidden_.connect(self._on_launcher_hidden)
         return self.launcher
 
+    def _repaint_docks(self) -> None:
+        for dock in self.docks:
+            dock.update()
+
     def _on_launcher_hidden(self) -> None:
         self._launcher_screen = None
+        self._repaint_docks()
         self._suspend_island_hover(False)
         self._check_dodge()
 
@@ -790,6 +797,15 @@ class ShellController(QObject):
                 if dock.slid:
                     dock.slide(False)
         self._launcher().open_launcher(rect, text=text)
+
+    def start_button_clicked(self) -> None:
+        """Botão Iniciar da Doca. Se o clique acabou de fechar o Lançador (perdeu o foco), não reabre."""
+        launcher = self.launcher
+        if launcher is not None and not launcher.isVisible():
+            closed_at = getattr(launcher, "_last_closed_at", 0.0)
+            if time.monotonic() - closed_at < 0.4:
+                return
+        self.toggle_start()
 
     def toggle_start(self) -> None:
         if self.fx.active:
