@@ -6,6 +6,7 @@ import time
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QGuiApplication, QKeyEvent, QWheelEvent
+from PySide6.QtWidgets import QApplication
 
 from tests.test_ui import _mouse, settle
 from ventude.services.audio import AppSession, AudioService, AudioState, Device
@@ -464,8 +465,20 @@ def test_win_key_opens_launcher_and_slot_shortcuts(qapp, app_ctx, island, shell)
     settle(qapp, 250)
     assert island.expanded
     island.set_shell_mode(True)
+    focus = QApplication.focusWidget()
+    state = (
+        f"foco={type(focus).__name__ if focus else None} na_ilha={bool(focus and island.isAncestorOf(focus))} "
+        f"campo={island._focus_in_field()} barra={island.panel.command.isVisible()} "
+        f"qr={island.panel.qr.isVisible()} modo={island.mode} fx={shell.fx.active} "
+        f"shell={app_ctx.shell is not None} ativa={type(QApplication.activeWindow()).__name__}"
+    )
     island.keyPressEvent(key(Qt.Key.Key_D, text="d"))
-    assert wait_for(qapp, lambda: shell.launcher.isVisible()) and shell.launcher.input.text() == "d"
+    opened = wait_for(qapp, lambda: shell.launcher.isVisible())
+    assert opened and shell.launcher.input.text() == "d", (
+        f"{state} | depois: visivel={shell.launcher.isVisible()} texto={shell.launcher.input.text()!r} "
+        f"modo={island.mode} barra={island.panel.command.isVisible()} "
+        f"barra_texto={island.panel.command.input.text()!r}"
+    )
     shell.launcher.hide()
 
     assert wait_for(qapp, lambda: len(shell.docks[0].items) == 2)
