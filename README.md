@@ -11,6 +11,7 @@ e uma nova barra de tarefas, Menu Iniciar e Pesquisa embaixo.
 [![Downloads](https://img.shields.io/github/downloads/3Gb3/Ventude_Notch/total?label=downloads&color=2ea44f)](https://github.com/3Gb3/Ventude_Notch/releases)
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?logo=windows)
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776ab?logo=python&logoColor=white)
+[![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-informational)](LICENSE)
 
 ### [⬇ Baixar o Ventude para Windows](https://github.com/3Gb3/Ventude_Notch/releases/latest/download/Ventude-Setup.exe)
 
@@ -18,7 +19,7 @@ e uma nova barra de tarefas, Menu Iniciar e Pesquisa embaixo.
 
 <br>
 
-<img src="docs/screens/shell-iniciar.webp" alt="Ventude Shell: Menu Iniciar com fixados, recentes e a Doca" width="100%">
+<img src="docs/screens/shell-iniciar.webp" alt="Ventude Shell: Lançador com fixados e recentes, a ilha no topo e a Doca embaixo" width="100%">
 
 </div>
 
@@ -50,13 +51,16 @@ Quem usa várias IAs no dia a dia vive abrindo abas só para descobrir quanto ai
 ## A ilha
 
 <p align="center">
-  <img src="docs/screens/ilha.png" alt="Ilha fechada com data, clima, hora e anéis de uso das IAs" height="60">
-  <img src="docs/screens/ilha-musica.png" alt="Ilha fechada tocando música" height="60">
-  <img src="docs/screens/ilha-timer.png" alt="Ilha com música, estante, Pomodoro, clima e anéis" height="60">
+  <img src="docs/screens/ilha.webp" alt="Ilha fechada com data, clima, hora e anéis de uso das IAs" height="60">
+  <img src="docs/screens/ilha-musica.webp" alt="Ilha fechada tocando música" height="60">
 </p>
 <p align="center">
-  <img src="docs/screens/inicio.png" alt="Painel Início" width="49%">
-  <img src="docs/screens/ias.png" alt="Limites das IAs" width="49%">
+  <img src="docs/screens/ilha-timer.webp" alt="Ilha com música, Pomodoro, estante, clima e anéis" height="60">
+  <img src="docs/screens/aviso-na-ilha.webp" alt="Aviso de limite na própria ilha" height="60">
+</p>
+<p align="center">
+  <img src="docs/screens/inicio.webp" alt="Painel Início" width="49%">
+  <img src="docs/screens/ias.webp" alt="Limites das IAs" width="49%">
 </p>
 
 Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta, vira um painel com abas:
@@ -75,9 +79,18 @@ Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta
 | **Ajustes** | Tudo salvo na hora. Abas desligadas somem e param de rodar. |
 
 <p align="center">
-  <img src="docs/screens/agenda.png" alt="Agenda" width="32%">
-  <img src="docs/screens/clima.png" alt="Clima" width="32%">
-  <img src="docs/screens/mercado.png" alt="Mercado" width="32%">
+  <img src="docs/screens/sistema.webp" alt="Sistema: CPU, GPU, RAM, rede, disco e bateria ao vivo" width="49%">
+  <img src="docs/screens/audio.webp" alt="Áudio: saídas, microfone e mixer por aplicativo" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/agenda.webp" alt="Agenda" width="32%">
+  <img src="docs/screens/clima.webp" alt="Clima" width="32%">
+  <img src="docs/screens/mercado.webp" alt="Mercado" width="32%">
+</p>
+<p align="center">
+  <img src="docs/screens/estante.webp" alt="Estante temporária" width="32%">
+  <img src="docs/screens/comandos.webp" alt="Barra de comandos criando uma tarefa" width="32%">
+  <img src="docs/screens/clima-dia.webp" alt="Detalhes do clima de um dia, hora a hora" width="32%">
 </p>
 
 <details>
@@ -99,12 +112,19 @@ Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta
 ## Ventude Shell
 
 <p align="center">
-  <img src="docs/screens/shell-pesquisa.webp" alt="Pesquisa (tecla Windows) com as pesquisas recentes" width="49%">
-  <img src="docs/screens/shell-pesquisa-resultados.webp" alt="Resultados da Pesquisa com o painel de ações" width="49%">
+  <img src="docs/screens/shell-doca.webp" alt="Doca flutuante com fixados e apps abertos" width="70%">
 </p>
 <p align="center">
-  <img src="docs/screens/shell-painel-rapido.webp" alt="Painel rápido: rede, cafeína, microfone, ferramentas e volume" width="49%">
-  <img src="docs/screens/shell-ate-logo.webp" alt="Animação de desligar: Até logo!" width="49%">
+  <img src="docs/screens/shell-pesquisa.webp" alt="Lançador: pesquisa com a melhor correspondência e ações" width="49%">
+  <img src="docs/screens/shell-projeto-git.webp" alt="Lançador: projeto Git com Terminal, Editor e Agente aqui" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/shell-iniciar-todos.webp" alt="Todos os apps por categoria com trilho A–Z" width="49%">
+  <img src="docs/screens/shell-previas.webp" alt="Prévias ao vivo das janelas acima da Doca" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screens/controles.webp" alt="Controles na ilha: som, rede, Cafeína, Foco, Silêncio e apps em segundo plano" width="32%">
+  <img src="docs/screens/shell-ate-logo.webp" alt="Interruptor de energia: Até logo!" width="66%">
 </p>
 
 | Parte | O que faz |
@@ -186,6 +206,10 @@ Toda alteração na `main` gera uma versão nova automaticamente pelo GitHub Act
 Encontrou um bug ou tem uma ideia? [Abra uma issue](https://github.com/3Gb3/Ventude_Notch/issues). Pull requests são bem-vindos.
 
 Se o Ventude te ajudou, deixe uma ⭐ no repositório e compartilhe com quem também vive de olho nos limites das IAs.
+
+## Licença
+
+Distribuído sob a [licença MIT](LICENSE): use, modifique e redistribua à vontade, mantendo o aviso de copyright.
 
 <div align="center">
 <sub>Feito no Brasil 🇧🇷 para o Windows.</sub>

@@ -3,6 +3,8 @@ name = "ventude"
 version = "2.0.0"
 description = "Dynamic Island e shell para Windows: barra de tarefas, Menu Iniciar e Pesquisa próprios, limites das suas IAs, mídia, clima, agenda e atalhos"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pyside6-essentials>=6.9",

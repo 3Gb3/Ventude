@@ -92,10 +92,11 @@ def demo_fetchers() -> dict:
             "grok",
             "ok",
             [
-                Window("mode:grok-4-auto", "Auto", 46, None, "27 de 50 restantes · janela de 2h"),
-                Window("mode:grok-4", "Expert", 80, now + 41 * 60, "4 de 20 restantes · janela de 2h"),
+                Window(
+                    "credits", "Limite semanal", 46, now + 5 * 86400 + 3 * H, "Grok Bot 46%", period=7 * 86400
+                ),
             ],
-            plan="SuperGrok",
+            plan="Premium",
             source="grok.com",
         ),
         "codex": lambda ctx: Report(
