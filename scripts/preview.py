@@ -478,7 +478,7 @@ def main() -> None:
     from ventude.ui.toast import Toast
 
     ctx.shelf.add_text("Endereço da reunião: Av. Paulista, 1000")
-    ctx.shelf.add_paths([str(Path.home()), sys.executable, "https://github.com/3Gb3/Ventude_Notch"])
+    ctx.shelf.add_paths([str(Path.home()), sys.executable, "https://github.com/3Gb3/Ventude"])
     ctx.timer.start_pomodoro()
     media.state = state
     media.state_changed.emit(state)
@@ -616,7 +616,7 @@ def shell_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     shot(island, out / "43-audio.png")
     island.panel.select("home")
     ctx.indexer.files = [
-        indexer.entry("Ventude_Notch", str(Path.cwd()), "folder"),
+        indexer.entry("Ventude", str(Path.cwd()), "folder"),
         indexer.entry("Projetos", str(Path.home()), "folder"),
     ]
     ctx.indexer.apps = [indexer.entry("Visual Studio Code", sys.executable, "app")]
@@ -878,11 +878,11 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     ctx.indexer.apps = catalog
     folders = Path(tempfile.mkdtemp(prefix="ventude-demo-"))
     demo_files = []
-    repo_dir = folders / "Ventude_Notch"
+    repo_dir = folders / "Ventude"
     (repo_dir / ".git").mkdir(parents=True)
     (repo_dir / ".git" / "HEAD").write_text("ref: refs/heads/2.0.0\n", encoding="utf-8")
     demo_files.append(
-        indexer.entry("Ventude_Notch", str(repo_dir), "folder", is_project=True, branch="2.0.0")
+        indexer.entry("Ventude", str(repo_dir), "folder", is_project=True, branch="2.0.0")
     )
     for name in ("Projetos", "Fotos da viagem"):
         (folders / name).mkdir()
@@ -956,7 +956,7 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
 
     add_window("Explorador de Arquivos", "Downloads - Explorador de Arquivos", 101)
     add_window("Explorador de Arquivos", "Projetos - Explorador de Arquivos", 102)
-    add_window("Firefox", "Ventude_Notch · GitHub — Mozilla Firefox", 201, foreground=True)
+    add_window("Firefox", "Ventude · GitHub — Mozilla Firefox", 201, foreground=True)
     add_window("Discord", "#geral | Ventude - Discord", 301)
     add_window("Spotify", "Spotify Premium", 401)
     shell.apply_windows(windows)
@@ -977,7 +977,7 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
 
     desktop = wallpaper()
     p = QPainter(desktop)
-    p.drawImage(330, 100, mock_window("Ventude_Notch · GitHub — Mozilla Firefox", "#6EE7B7", 1260, 790))
+    p.drawImage(330, 100, mock_window("Ventude · GitHub — Mozilla Firefox", "#6EE7B7", 1260, 790))
     p.end()
     dock_x = (W - dock.width()) // 2
     dock_y = H - dock.height()
@@ -1037,7 +1037,7 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     ln.input.setText("con")
     settle(island, 350)
     scene("77-lancador-busca.png", ln, lx, (H - ln.height()) // 2)
-    ln.input.setText("/ Ventude_Notch")
+    ln.input.setText("/ Ventude")
     settle(island, 350)
     scene("78-lancador-projeto-git.png", ln, lx, (H - ln.height()) // 2)
     ln.input.clear()

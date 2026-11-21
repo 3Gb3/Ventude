@@ -12,12 +12,12 @@ def release(tag="v1.0.7", **asset):
         "draft": False,
         "prerelease": False,
         "body": "- Novidade A\n- Novidade B",
-        "html_url": "https://github.com/3Gb3/Ventude_Notch/releases/tag/" + tag,
+        "html_url": "https://github.com/3Gb3/Ventude/releases/tag/" + tag,
         "assets": [
             {"name": "outro.zip", "browser_download_url": "https://github.com/x/outro.zip"},
             {
                 "name": "Ventude-Setup.exe",
-                "browser_download_url": "https://github.com/3Gb3/Ventude_Notch/releases/download/x/Ventude-Setup.exe",
+                "browser_download_url": "https://github.com/3Gb3/Ventude/releases/download/x/Ventude-Setup.exe",
                 "size": 10,
                 **asset,
             },

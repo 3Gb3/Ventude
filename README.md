@@ -9,13 +9,13 @@
 Seus limites de IA, sua música, seu clima e sua agenda numa pílula discreta no topo da tela,
 e uma nova barra de tarefas, Menu Iniciar e Pesquisa embaixo.
 
-[![Última versão](https://img.shields.io/github/v/release/3Gb3/Ventude_Notch?label=vers%C3%A3o&color=7c5cff)](https://github.com/3Gb3/Ventude_Notch/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/3Gb3/Ventude_Notch/total?label=downloads&color=2ea44f)](https://github.com/3Gb3/Ventude_Notch/releases)
+[![Última versão](https://img.shields.io/github/v/release/3Gb3/Ventude?label=vers%C3%A3o&color=7c5cff)](https://github.com/3Gb3/Ventude/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/3Gb3/Ventude/total?label=downloads&color=2ea44f)](https://github.com/3Gb3/Ventude/releases)
 ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?logo=windows)
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776ab?logo=python&logoColor=white)
 [![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-informational)](LICENSE)
 
-### [⬇ Baixar o Ventude para Windows](https://github.com/3Gb3/Ventude_Notch/releases/latest/download/Ventude-Setup.exe)
+### [⬇ Baixar o Ventude para Windows](https://github.com/3Gb3/Ventude/releases/latest/download/Ventude-Setup.exe)
 
 <sub>Grátis · instala sem administrador · atualiza sozinho</sub>
 
@@ -39,7 +39,7 @@ Quem usa várias IAs no dia a dia vive abrindo abas só para descobrir quanto ai
 
 ## Instalação
 
-1. Baixe o **[`Ventude-Setup.exe`](https://github.com/3Gb3/Ventude_Notch/releases/latest/download/Ventude-Setup.exe)** da [última versão](https://github.com/3Gb3/Ventude_Notch/releases/latest).
+1. Baixe o **[`Ventude-Setup.exe`](https://github.com/3Gb3/Ventude/releases/latest/download/Ventude-Setup.exe)** da [última versão](https://github.com/3Gb3/Ventude/releases/latest).
 2. Abra o instalador. Ele não pede administrador, instala em `%LOCALAPPDATA%\Programs\Ventude`, cria os atalhos e já abre o Ventude.
 3. Pronto. As IAs que você já usa no PC são detectadas sozinhas; as outras se ligam em **Ajustes > Limites das IAs**.
 
@@ -189,8 +189,8 @@ Esses valores ficam protegidos pelo Windows (DPAPI): só a sua conta do Windows 
 Requer **Python 3.12+** e [uv](https://docs.astral.sh/uv/).
 
 ```powershell
-git clone https://github.com/3Gb3/Ventude_Notch.git
-cd Ventude_Notch
+git clone https://github.com/3Gb3/Ventude.git
+cd Ventude
 uv sync
 uv run ventude
 ```
@@ -205,7 +205,7 @@ Toda alteração na `main` gera uma versão nova automaticamente pelo GitHub Act
 
 ## Contribuindo
 
-Encontrou um bug ou tem uma ideia? [Abra uma issue](https://github.com/3Gb3/Ventude_Notch/issues). Pull requests são bem-vindos.
+Encontrou um bug ou tem uma ideia? [Abra uma issue](https://github.com/3Gb3/Ventude/issues). Pull requests são bem-vindos.
 
 Se o Ventude te ajudou, deixe uma ⭐ no repositório e compartilhe com quem também vive de olho nos limites das IAs.
 

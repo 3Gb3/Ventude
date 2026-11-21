@@ -84,7 +84,7 @@ def social_preview(path: Path) -> None:
     text("Dynamic Island e shell para Windows", 36, theme.TEXT_2, 310, QFont.Weight.Normal)
     text("Limites de Claude, Gemini, Grok, Codex,", 30, theme.TEXT_2, 380, QFont.Weight.Normal)
     text("Cursor e Copilot sempre à vista", 30, theme.TEXT_2, 422, QFont.Weight.Normal)
-    text("github.com/3Gb3/Ventude_Notch", 26, theme.ACCENT, 490, QFont.Weight.DemiBold)
+    text("github.com/3Gb3/Ventude", 26, theme.ACCENT, 490, QFont.Weight.DemiBold)
     p.end()
     img.save(str(path), "PNG")
 
