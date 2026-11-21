@@ -839,3 +839,28 @@ def test_controls_fit_their_content_and_menus_stay_on_top(qapp, app_ctx, island)
     menu = brand.ink_menu(controls)
     assert menu.windowFlags() & QtNs.WindowType.WindowStaysOnTopHint
     menu.deleteLater()
+
+
+def test_dock_start_button_opens_and_closes_launcher(qapp, app_ctx, island, shell):
+    from PySide6.QtTest import QTest
+
+    app_ctx.update_settings(replace_taskbar=True)
+    shell.start()
+    dock = shell.docks[0]
+    sx, sy, sw, sh = dock.current_layout.start_rect
+    center = QPoint(round(sx + sw / 2), round(sy + sh / 2))
+    clicks = []
+    dock.start_clicked.connect(lambda: clicks.append(1))
+
+    QTest.mouseClick(dock, Qt.MouseButton.LeftButton, pos=center)
+    assert clicks == [1]
+    ln = shell.launcher
+    assert ln is not None and ln.isVisible()
+
+    assert wait_for(qapp, lambda: not ln._reveal.running)
+    shell.start_button_clicked()
+    assert wait_for(qapp, lambda: not ln.isVisible())
+
+    # Clique logo depois de fechar (perda de foco ao clicar na Doca) não reabre na hora
+    shell.start_button_clicked()
+    assert not ln.isVisible()
