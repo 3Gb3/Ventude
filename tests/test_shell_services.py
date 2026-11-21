@@ -1214,3 +1214,74 @@ def test_close_background_app_rules():
         terminate_fn=lambda _pids: (0, 1),
     )
     assert not ok_err and close_calls == [] and "permissão" in msg_err.lower()
+
+
+# ---------- 3.1: tela cheia, sites e busca no disco todo ----------
+def test_fullscreen_ignores_maximized_and_dock_never_peeks_in_games():
+    from ventude.services.system import WS_CAPTION, is_fullscreen_window
+    from ventude.ui.shell.dock_model import should_dodge
+
+    mon = (0, 0, 1920, 1080)
+    # sem a barra do Windows, maximizada cobre a tela toda, mas não é tela cheia
+    assert not is_fullscreen_window((-8, -8, 1928, 1088), mon, zoomed=True, style=WS_CAPTION, client=mon)
+    # jogo "sem bordas" que mantém o estilo de barra de título: a área cliente cobre o monitor
+    assert is_fullscreen_window((-8, -31, 1928, 1088), mon, zoomed=False, style=WS_CAPTION, client=mon)
+    small = (108, 131, 892, 692)
+    assert not is_fullscreen_window((100, 100, 900, 700), mon, zoomed=False, style=0, client=small)
+    dock = (700, 1010, 1220, 1062)
+    assert should_dodge(dock, None, "sempre", fullscreen=True, hover_reveal=True)  # mouse embaixo no jogo
+    assert should_dodge(dock, None, "esquivar", fullscreen=True, thumb_open=True)
+    assert not should_dodge(dock, None, "esquivar", fullscreen=True, menu_open=True)  # tecla Windows
+
+
+def test_sites_and_typed_addresses():
+    from ventude.services import sites
+
+    assert sites.match("youtube")[0].name == "YouTube"
+    assert sites.match("yt")[0].url == "https://www.youtube.com"
+    assert sites.match("zap")[0].name == "WhatsApp Web"
+    assert sites.match("y") == []
+    assert sites.as_url("terra.com.br") == "https://terra.com.br"
+    assert sites.as_url("github.com/user/repo") == "https://github.com/user/repo"
+    assert sites.as_url("localhost:3000") == "http://localhost:3000"
+    assert sites.as_url("https://x.com") == "https://x.com"
+    for text in ("youtube", "foto.jpg viagem", "2.5", "timer 5m"):
+        assert sites.as_url(text) == "", text
+
+
+def test_index_finds_every_folder_and_media_with_filters(tmp_path):
+    home = tmp_path / "casa"
+    deep = home / "Pictures" / "2024" / "viagem" / "praia" / "dia1" / "manhã"
+    deep.mkdir(parents=True)
+    (deep / "praia-sol.jpg").write_bytes(b"x")
+    (home / "Videos").mkdir()
+    (home / "Videos" / "praia drone.mp4").write_bytes(b"x")
+    (home / "Music").mkdir()
+    (home / "Music" / "praia.mp3").write_bytes(b"x")
+    disk = tmp_path / "D"
+    (disk / "Jogos" / "Meu Jogo" / "dados").mkdir(parents=True)
+    (disk / "Jogos" / "Meu Jogo" / "dados" / "praia.bin").write_bytes(b"x")  # fora do usuário: só mídia
+    (disk / "Jogos" / "Meu Jogo" / "trailer.mkv").write_bytes(b"x")
+    roots = [
+        (home / "Pictures", indexer.DEEP, True),
+        (home / "Videos", indexer.DEEP, True),
+        (home / "Music", indexer.DEEP, True),
+        (home, indexer.DEEP, False),
+        (disk, indexer.DEEP, False),
+    ]
+    index = indexer.scan_index(roots)
+    names = [e.name for e in index]
+    assert "manhã" in names and "Meu Jogo" in names  # sem limite de profundidade
+    assert "praia.bin" not in names and "trailer.mkv" in names
+    assert "Pictures" in names  # a pasta do usuário também vira resultado
+    assert len({e.path.lower() for e in index}) == len(index)
+    assert indexer.parse_filter("img: praia") == ("praia", "image")
+    assert indexer.parse_filter("/v drone") == ("drone", "video")
+    assert indexer.parse_filter("praia") == ("praia", "")
+    assert [e.name for e in indexer.search_index(index, "praia", 8, "image")] == ["praia-sol.jpg"]
+    assert [e.name for e in indexer.search_index(index, "praia", 8, "video")] == ["praia drone.mp4"]
+    assert [e.name for e in indexer.search_index(index, "praia", 8, "audio")] == ["praia.mp3"]
+    assert indexer.search_index(index, "praia", 8, "folder")[0].name == "praia"
+    assert indexer.search_index(index, "praia", 1)[0].name in ("praia", "praia.mp3")
+    assert [e.name for e in indexer.search_index(index, "jogo", 4)] == ["Jogos", "Meu Jogo"]
+    assert indexer.Entry("x", str(deep / "praia-sol.jpg"), "file").category == "image"

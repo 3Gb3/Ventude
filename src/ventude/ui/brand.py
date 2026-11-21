@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QWidget
 
 from ventude.services import dwm
@@ -227,41 +227,3 @@ def ink_menu(parent: QWidget | None = None) -> QMenu:
         f"QMenu::separator {{ height: 1px; background: rgba(255,255,255,0.08); margin: 5px 8px; }}"
     )
     return menu
-
-
-_DESAT_CACHE: OrderedDict[tuple[int, float, float], QPixmap] = OrderedDict()
-
-
-def desaturate_pixmap(
-    pixmap: QPixmap,
-    saturation: float = theme.ASLEEP_SATURATION,
-    opacity: float = theme.ASLEEP_OPACITY,
-) -> QPixmap:
-    """Versão 'dormindo' do ícone (dessaturação leve + opacidade), em cache."""
-    if pixmap.isNull():
-        return pixmap
-    key = (pixmap.cacheKey(), round(saturation, 2), round(opacity, 2))
-    if key in _DESAT_CACHE:
-        _DESAT_CACHE.move_to_end(key)
-        return _DESAT_CACHE[key]
-    img = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
-    w, h = img.width(), img.height()
-    sat = max(0.0, min(1.0, saturation))
-    op = max(0.0, min(1.0, opacity))
-    for y in range(h):
-        for x in range(w):
-            px = img.pixelColor(x, y)
-            if px.alpha() == 0:
-                continue
-            lum = round(0.299 * px.red() + 0.587 * px.green() + 0.114 * px.blue())
-            r = round(lum + (px.red() - lum) * sat)
-            g = round(lum + (px.green() - lum) * sat)
-            b = round(lum + (px.blue() - lum) * sat)
-            a = round(px.alpha() * op)
-            img.setPixelColor(x, y, QColor(r, g, b, a))
-    out = QPixmap.fromImage(img)
-    out.setDevicePixelRatio(pixmap.devicePixelRatio())
-    _DESAT_CACHE[key] = out
-    while len(_DESAT_CACHE) > 256:
-        _DESAT_CACHE.popitem(last=False)
-    return out

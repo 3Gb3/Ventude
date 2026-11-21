@@ -575,8 +575,8 @@ def test_thumbs_echo_pill_quiet_mode_and_v7_migration(qapp, app_ctx, island, she
         layout_version=6, hide_fullscreen=True, taskbar_autohide=True, pill_date=False, pill_weather=False
     )
     app_ctx.apply_migrations()
-    assert app_ctx.settings.layout_version == 8
-    assert not app_ctx.settings.hide_fullscreen
+    assert app_ctx.settings.layout_version == 9
+    assert app_ctx.settings.hide_fullscreen and not app_ctx.settings.zone_open
     assert app_ctx.settings.dock_mode == "oculta"
     assert app_ctx.settings.pill_date and app_ctx.settings.pill_weather
     assert app_ctx.store.pinned("start", "https://github.com") is not None

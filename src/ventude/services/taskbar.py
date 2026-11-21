@@ -667,13 +667,11 @@ def covering_window(monitor: Rect, own_pid: int | None = None, fullscreen_only: 
     center_x, center_y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
     if not (left <= center_x < right and top <= center_y < bottom):
         return False
-    zoomed = bool(user32.IsZoomed(hwnd))
     if fullscreen_only:
-        from ventude.services.system import GWL_STYLE, is_fullscreen_window
+        from ventude.services.system import window_fullscreen
 
-        get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
-        style = int(get_long(hwnd, GWL_STYLE))
-        return is_fullscreen_window((rect.left, rect.top, rect.right, rect.bottom), monitor, zoomed, style)
+        return window_fullscreen(int(hwnd), monitor)
+    zoomed = bool(user32.IsZoomed(hwnd))
     if zoomed:
         return True
     return rect.left <= left and rect.top <= top and rect.right >= right and rect.bottom >= bottom

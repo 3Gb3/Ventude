@@ -102,6 +102,16 @@ class EchoPill(QWidget):
                 return
             self._fade.play(dur, self._opacity, 0.0, motion.in_cubic)
 
+    def set_covered(self, covered: bool) -> None:
+        """Some enquanto um jogo/vídeo está em tela cheia neste monitor."""
+        if not self._shown:
+            return
+        if covered and self.isVisible():
+            self.hide()
+        elif not covered and not self.isVisible():
+            self.setWindowOpacity(max(self._opacity, 1.0))
+            self.show()
+
     def _on_fade(self, value: float) -> None:
         self._opacity = value
         self.setWindowOpacity(value)

@@ -1,5 +1,22 @@
 # Progresso
 
+## Ajustes da 3.0 (Calma): tela cheia, Doca e busca no PC inteiro
+
+- [x] **Tela cheia de verdade**: sem a barra do Windows toda janela maximizada ocupa a tela, então a detecção agora ignora janelas maximizadas (`IsZoomed`) e conta jogos sem bordas pela área cliente cobrindo o monitor, além do `SHQueryUserNotificationState` (Direct3D exclusivo e modo apresentação).
+- [x] **Doca em jogos**: encostar o mouse embaixo não traz mais a Doca em tela cheia (só a tecla Windows ou um arraste); depois de recuar ela some de vez, sem a faixa de 4 px por cima do jogo. O Eco dos outros monitores também some.
+- [x] **Ilha em jogos**: "Sumir em tela cheia" ligado por padrão (migração 9) e, mesmo desligado, a ilha não se reafirma por cima de um jogo em tela cheia.
+- [x] **Ilha abre no Início**: entrar pela zona do clima abria sempre o Clima; passar o mouse agora abre o Início (ou a última aba, se reabrir logo). Clicar no clima/anéis/data continua abrindo a aba deles; "Abrir na aba apontada" volta o comportamento antigo.
+- [x] **Ícones da Doca**: cores normais (antes os fixados fechados eram dessaturados por uma rotina pixel a pixel em Python, que travava o hover e podia congelar o ícone genérico no cache), 32 px nativos (nítidos), fundo da cápsula em cache e hover com leve elevação e escala.
+- [x] **Prévias das janelas**: a janela das prévias passou a ser opaca com cantos do Windows 11; o DWM não desenha miniaturas ao vivo dentro de janelas translúcidas por pixel, então antes só aparecia o ícone. Aparecem em 0,26 s.
+- [x] **Busca no PC inteiro**: todas as pastas de todos os discos (sem limite de profundidade, das rasas para as fundas) e imagens, vídeos, músicas, documentos e compactados em qualquer lugar; nas pastas do usuário, todos os arquivos. Índice enxuto (só caminho e nome) com busca por `str.find`: ~4 s para varrer, ~6 MB e 1–4 ms por busca nesta máquina. Resultados separados em Pastas, Imagens, Vídeos, Músicas, Documentos e Arquivos, com "Mostrar na pasta".
+- [x] **Filtros**: `img:`/`foto:`, `video:`, `musica:`/`audio:`, `doc:` e `pasta:` (ou `/i`, `/v`, `/m`, `/d`, `/p`).
+- [x] **Sites**: digitar "youtube", "gmail", "zap", "netflix"... oferece abrir o site no navegador (60 sites comuns, com apelidos), e endereços digitados ("terra.com.br", "localhost:3000") abrem direto.
+
+### A validar no seu PC
+
+- Jogos em tela cheia exclusiva e sem bordas, vídeo em F11 no navegador e apresentação: Doca, ilha e Eco somem; janela maximizada não.
+- Prévias ao vivo ao parar o mouse num app aberto da Doca.
+
 ## Versão 2.0.0: Ventude Shell (branch `2.0.0`)
 
 Ainda não está na `main`. O Ventude deixa de ser só uma Dynamic Island e passa a substituir a barra de tarefas, o Menu Iniciar e a Pesquisa do Windows.

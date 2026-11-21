@@ -39,9 +39,12 @@ from ventude.ui.shell.dock_model import (
 from ventude.ui.shell.items import TaskItem
 
 MIME_VENTUDE_ITEM = "application/x-ventude-item"
-ASLEEP_SATURATION = theme.ASLEEP_SATURATION
 RESPIRO_TIMEOUT_S = 8.0
-HOVER_LABEL_DELAY_MS = 300
+HOVER_LABEL_DELAY_MS = 220
+HOVER_EASE = 0.42  # fração por quadro (16 ms): ~90 ms para o halo/elevação chegarem
+HOVER_LIFT_PX = 4.0
+HOVER_SCALE = 0.10
+PINNED_IDLE_OPACITY = 0.9  # fixado sem janela: cor normal, só um pouco mais discreto
 EDGE_STRIP_PX = 4
 
 
@@ -80,6 +83,7 @@ class Dock(QWidget):
         self._layout: DockLayout = self._model.layout([], 640)
         self.slid = False
         self.fullscreen = False
+        self._fs_hidden = False  # escondida de vez por um jogo/vídeo em tela cheia
         self.menu_open = False
         self.suppress_hover_label = False
 
@@ -94,7 +98,7 @@ class Dock(QWidget):
         self._indicator_w: dict[str, float] = {}
         self._launching_until: dict[str, float] = {}
         self._attention_keys: set[str] = set()
-        self._asleep_cache: dict[tuple[str, int], QPixmap] = {}
+        self._capsule_cache: tuple[tuple[int, int, int, float], QPixmap] | None = None
 
         # Arrasto interno (reordenar ou desafixar com Puf) e externo
         self._drag_start_pos: QPointF | None = None
@@ -230,9 +234,26 @@ class Dock(QWidget):
         self._slide_tween.stop()
         self._entrance_tween.stop()
         self.slid = False
+        self._fs_hidden = False
         self.hide()
 
+    def sync_fullscreen(self, on: bool) -> None:
+        """Em tela cheia, depois de recuar, a Doca some de vez (sem a faixa de 4 px sobre o jogo)."""
+        self.fullscreen = on
+        if on and self.slid and not self._slide_tween.running and self.isVisible():
+            self._fs_hidden = True
+            self.hide()
+        elif not on and self._fs_hidden:
+            self._fs_hidden = False
+            self.move(self.shown_rect().left(), self._hidden_top())
+            self.show()
+            self.update()
+
     def slide(self, hide: bool) -> None:
+        if not hide and self._fs_hidden:
+            self._fs_hidden = False
+            self.move(self.shown_rect().left(), self._hidden_top())
+            self.show()
         if hide == self.slid:
             return
         if self._entrance_tween.running:
@@ -404,7 +425,7 @@ class Dock(QWidget):
             target_h = 1.0 if slot.key == self._hovered_key else 0.0
             cur_h = self._halo_progress.get(slot.key, 0.0)
             if abs(cur_h - target_h) > 0.02:
-                self._halo_progress[slot.key] = cur_h + (target_h - cur_h) * 0.28
+                self._halo_progress[slot.key] = cur_h + (target_h - cur_h) * HOVER_EASE
                 dirty = True
             elif cur_h != target_h:
                 self._halo_progress[slot.key] = target_h
@@ -443,7 +464,7 @@ class Dock(QWidget):
 
         lay = self._layout
         cap = QRectF(lay.capsule_x, lay.capsule_y, lay.capsule_w, lay.capsule_h)
-        brand.paint_ink(p, cap, DOCK_RADIUS, outer_rim=True)
+        self._paint_capsule(p, cap)
 
         now = time.monotonic()
         reduced = motion.reduced_motion(getattr(self.ctx, "settings", None))
@@ -484,18 +505,25 @@ class Dock(QWidget):
         if self._dragging_internal and self._drag_slot is not None:
             self._paint_drag_ghost(p, self._drag_slot)
 
-    def _slot_pixmap(self, item: TaskItem, size: int, awake: bool) -> QPixmap:
-        px = app_pixmap(self.ctx, item.icon_kind, item.icon_target, size, "window")
-        if awake:
-            return px
-        cache_key = (f"{item.icon_kind}:{item.icon_target}", size)
-        muted = self._asleep_cache.get(cache_key)
-        if muted is None:
-            muted = brand.desaturate_pixmap(px, saturation=ASLEEP_SATURATION, opacity=1.0)
-            if len(self._asleep_cache) > 96:
-                self._asleep_cache.clear()
-            self._asleep_cache[cache_key] = muted
-        return muted
+    def _paint_capsule(self, p: QPainter, cap: QRectF) -> None:
+        """Fundo da cápsula em cache: o hover só repinta ícones, nunca o gradiente/contorno."""
+        ratio = self.devicePixelRatioF()
+        key = (round(cap.width()), round(cap.height()), DOCK_RADIUS, ratio)
+        if self._capsule_cache is None or self._capsule_cache[0] != key:
+            pad = 2
+            pm = QPixmap(round((cap.width() + pad * 2) * ratio), round((cap.height() + pad * 2) * ratio))
+            pm.setDevicePixelRatio(ratio)
+            pm.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pm)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            brand.paint_ink(painter, QRectF(pad, pad, cap.width(), cap.height()), DOCK_RADIUS, outer_rim=True)
+            painter.end()
+            self._capsule_cache = (key, pm)
+        p.drawPixmap(QPointF(cap.left() - 2, cap.top() - 2), self._capsule_cache[1])
+
+    def _slot_pixmap(self, item: TaskItem, size: int, awake: bool) -> QPixmap:  # noqa: ARG002
+        """Ícone real do app, sempre em cores (nada de versão cinza congelada no cache)."""
+        return app_pixmap(self.ctx, item.icon_kind, item.icon_target, size, "window")
 
     def _paint_slot(self, p: QPainter, slot: SlotRect, now: float, reduced: bool) -> None:
         item = slot.item
@@ -506,27 +534,33 @@ class Dock(QWidget):
         halo_t = 1.0 if (hovered and reduced) else self._halo_progress.get(slot.key, 0.0)
         arrival = self._arrivals.get(slot.key, 1.0)
         scale = motion.out_back(1.1)(arrival) if arrival < 1.0 else 1.0
+        lift = 0.0
+        if not reduced:
+            scale *= 1.0 + HOVER_SCALE * halo_t
+            lift = HOVER_LIFT_PX * halo_t
         if pressed:
             scale *= 0.90
+            lift *= 0.4
 
         if halo_t > 0.02 or item.active:
             p.setPen(Qt.PenStyle.NoPen)
             if pressed:
                 color = QColor(theme.HALO_PRESS)
             elif halo_t > 0.02:
-                color = QColor(255, 255, 255, round(15 * halo_t))
+                color = QColor(255, 255, 255, round(20 * halo_t))
             else:
                 color = QColor(255, 255, 255, 10)
             p.setBrush(color)
             p.drawRoundedRect(rect.adjusted(1, 2, -1, -2), theme.R_ITEM, theme.R_ITEM)
 
-        icon_base = max(20, round(slot.w * 0.62))
+        # 32 px é o tamanho nativo dos ícones do Windows: fica nítido, sem reescala borrada
+        icon_base = 32 if slot.w >= 42 else max(20, round(slot.w * 0.74))
         icon_size = icon_base * scale
-        cx, cy = rect.center().x(), rect.center().y() - 2.0
+        cx, cy = rect.center().x(), rect.center().y() - 2.0 - lift
         awake = bool(item.windows) or hovered or pressed or (slot.key in self._launching_until)
         px = self._slot_pixmap(item, icon_base, awake)
 
-        opacity = min(1.0, 0.25 + arrival) if arrival < 1.0 else (1.0 if awake else theme.ASLEEP_OPACITY)
+        opacity = min(1.0, 0.25 + arrival) if arrival < 1.0 else (1.0 if awake else PINNED_IDLE_OPACITY)
         # Respiro suave quando o app está abrindo (expira em 8s)
         until = self._launching_until.get(slot.key)
         if until is not None and not reduced:

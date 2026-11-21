@@ -1,4 +1,9 @@
-"""Prévias ao vivo das janelas ao parar o mouse num app da Doca (DWM Thumbnail + Desdobrar)."""
+"""Prévias ao vivo das janelas ao parar o mouse num app da Doca (DWM Thumbnail).
+
+A janela das prévias é opaca de propósito: o DWM não desenha miniaturas ao vivo dentro de janelas
+translúcidas por pixel (WS_EX_LAYERED com UpdateLayeredWindow), que é o que o Qt usa com
+WA_TranslucentBackground. Os cantos arredondados e a borda vêm do próprio Windows 11.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +12,14 @@ from PySide6.QtGui import QColor, QCursor, QFont, QImage, QMouseEvent, QPainter
 
 from ventude.services import dwm, taskbar
 from ventude.services.taskbar import WindowInfo
-from ventude.ui import brand, icons, motion, theme
+from ventude.ui import icons, motion, theme
 from ventude.ui.shell.common import ShellWindow, app_pixmap, draw_pixmap, shell_font
 from ventude.ui.shell.items import TaskItem
 
-CARD_W, CARD_H = 232, 168
-THUMB_H = 128
+CARD_W, CARD_H = 248, 180
+THUMB_H = 138
 PAD = 8
-SHADOW_PAD = 10
+SHADOW_PAD = 0  # opaca: a sombra e os cantos são do Windows
 MAX_CARDS = 6
 
 
@@ -23,6 +28,8 @@ class ThumbnailPopup(ShellWindow):
 
     def __init__(self, ctx: object, shell: object) -> None:
         super().__init__(ctx, radius=theme.R_CARD, focus=False, bg=theme.INK_RAISED)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         self.shell = shell
         self.setWindowTitle("Ventude: prévias")
         self.setMouseTracking(True)
@@ -36,10 +43,27 @@ class ThumbnailPopup(ShellWindow):
         self._dock_top = 0
         self._screen_rect = QRect()
         self.preview_images: dict[int, QImage] = {}  # prévias geradas (scripts/preview.py), sem DWM
-        self._shadow = brand.ShadowCache()
         self._dwm_fade = motion.Tween(self)
         self._dwm_fade.progressed.connect(self._on_dwm_fade)
         self.shown.connect(self._register)
+
+    def apply_ink(self) -> None:
+        hwnd = int(self.winId())
+        dwm.disable_glass(hwnd)
+        dwm.dark_frame(hwnd)
+        dwm.round_corners(hwnd)
+        dwm.border_color(hwnd, 0x2A2E36)
+
+    def open_at(self, rect: QRect, offset: QPoint = QPoint(0, 10)) -> None:
+        """Aparece no lugar (sem opacidade de janela, que quebraria o DWM); as prévias entram com fade."""
+        self._closing = False
+        self._tween.stop()
+        self.setGeometry(rect)
+        self._target_pos = rect.topLeft()
+        self.setWindowOpacity(1.0)
+        self.show()
+        self.raise_()
+        self.shown.emit()
 
     def _panel_rect(self) -> QRectF:
         return QRectF(
@@ -73,7 +97,7 @@ class ThumbnailPopup(ShellWindow):
         panel_h = CARD_H + PAD * 2
         center = anchor_rect.center().x()
         px = max(screen_rect.left() + 8, min(center - panel_w // 2, screen_rect.right() - panel_w - 7))
-        py = dock_top - panel_h - 8
+        py = dock_top - panel_h - 14
         rect = QRect(px - SHADOW_PAD, py - SHADOW_PAD, panel_w + SHADOW_PAD * 2, panel_h + SHADOW_PAD * 2)
         self._unregister()
         if self.isVisible() and not self._closing:
@@ -145,9 +169,10 @@ class ThumbnailPopup(ShellWindow):
 
     # ---------- desenho ----------
     def paint_background(self, p: QPainter) -> None:
-        panel = self._panel_rect()
-        self._shadow.paint(p, panel, theme.R_CARD)
-        brand.paint_ink(p, panel, theme.R_CARD, bg=self.bg, alpha=self.alpha)
+        p.fillRect(self.rect(), QColor(self.bg))
+        grad_h = min(self.height(), 120)
+        for y in range(0, grad_h, 4):  # brilho de topo do material Tinta, sem transparência
+            p.fillRect(0, y, self.width(), 4, QColor(255, 255, 255, round(8 * (1 - y / grad_h))))
 
     def paintEvent(self, _event: object) -> None:
         p = QPainter(self)
