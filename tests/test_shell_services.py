@@ -876,6 +876,36 @@ def test_indexer_scans_and_ranks(tmp_path):
     assert indexer.search(items, "") == []
 
 
+def test_search_finds_apps_by_nickname():
+    names = [
+        "League of Legends",
+        "Lollipop Editor",
+        "VALORANT",
+        "Discord",
+        "Visual Studio Code",
+        "WhatsApp",
+        "Google Chrome",
+        "Grand Theft Auto V",
+    ]
+    apps = [indexer.entry(n, f"C:/menu/{n}.lnk", "app") for n in names]
+    folders = [indexer.entry("lolzinho", "C:/lolzinho", "folder")]
+    queries = ("lol", "vava", "disc", "vsc", "zap", "gc", "gta")
+    first = {q: indexer.search(apps + folders, q, 3)[0].name for q in queries}
+    assert first == {
+        "lol": "League of Legends",  # apelido vence quem só começa igual
+        "vava": "VALORANT",
+        "disc": "Discord",
+        "vsc": "Visual Studio Code",
+        "zap": "WhatsApp",
+        "gc": "Google Chrome",
+        "gta": "Grand Theft Auto V",
+    }
+    assert indexer.search(apps, "vlrnt")[0].name == "VALORANT"  # letras na ordem
+    assert indexer.initials("PowerShell") == "ps" and indexer.initials("League of Legends") == "lol"
+    assert indexer.nickname_score("Discord", "x") is None
+    assert indexer.search(apps, "qwz") == []
+
+
 # ---------- energia ----------
 def test_power_detection_and_matching(qapp, monkeypatch):
     assert power.update_pending(lambda key: key.endswith("RebootRequired"))

@@ -2,7 +2,8 @@
 
 Cada push na main gera uma Release (vX.Y.N) com o instalador Ventude-Setup.exe.
 Na inicialização, o app empacotado compara a sua versão com a última Release e,
-se houver uma mais nova, pergunta se você quer atualizar.
+se houver uma mais nova, pergunta se você quer atualizar. Nos Ajustes, o botão "Procurar
+atualização" faz a mesma consulta na hora.
 """
 
 from __future__ import annotations
@@ -75,18 +76,24 @@ def parse_release(data: Any, current: str) -> Update | None:
     )
 
 
+def latest(current: str) -> Update | None:
+    """Consulta a última Release; None quando você já está na mais nova. Falha de rede vira NetError
+    (usado pelo botão "Procurar atualização", que mostra o motivo)."""
+    data = net.get_json(
+        LATEST_URL,
+        headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+        timeout=10,
+    )
+    return parse_release(data, current)
+
+
 def check(current: str) -> Update | None:
     """Consulta a última Release. Falhas de rede viram None (nunca atrapalham o app)."""
     try:
-        data = net.get_json(
-            LATEST_URL,
-            headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
-            timeout=10,
-        )
+        return latest(current)
     except net.NetError as exc:
         log.info("Sem informação de atualização agora: %s", exc)
         return None
-    return parse_release(data, current)
 
 
 class Cancelled(Exception):

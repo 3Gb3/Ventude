@@ -46,7 +46,7 @@ Quem usa várias IAs no dia a dia vive abrindo abas só para descobrir quanto ai
 > [!NOTE]
 > Como o instalador ainda não é assinado digitalmente, o Windows pode mostrar "O Windows protegeu o PC". Clique em **Mais informações > Executar assim mesmo**.
 
-**Atualizações:** ao iniciar, o Ventude confere se há uma versão nova e pergunta se você quer atualizar. Se aceitar, ele baixa, confere o arquivo, instala em silêncio e reabre.
+**Atualizações:** ao iniciar, o Ventude confere se há uma versão nova e pergunta se você quer atualizar. Se aceitar, ele baixa, confere o arquivo, instala em silêncio e reabre. Para conferir na hora, use **Procurar atualização** nos Ajustes.
 
 ---
 
@@ -103,7 +103,7 @@ Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta
 - **Timer e Pomodoro**, com a contagem na ilha e um pulso ao terminar.
 - **Barra de comandos** (Ctrl + K ou começar a digitar): cria tarefas (`t: revisar PR`), compromissos (`a: dentista amanhã 9h-10h`) e timers (`timer 15m`, `pomodoro`).
 - **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows).
-- **Busca universal**: apps (inclusive da Loja), pastas e arquivos. `/p nome` busca pastas, `1450 * 5,85` calcula e copia, `qr texto` gera um QR Code.
+- **Busca universal**: apps (inclusive da Loja), pastas e arquivos. Entende apelidos e abreviações: `lol` acha League of Legends, `vava` o Valorant, `zap` o WhatsApp, `vsc` o Visual Studio Code. `/p nome` busca pastas, `1450 * 5,85` calcula e copia, `qr texto` gera um QR Code.
 - **Modo Cafeína**: o Windows não apaga a tela nem suspende.
 - **Privacidade**: ponto laranja com o microfone em uso, verde com a câmera, com o nome do app.
 - **Letra sincronizada** da música (lrclib.net) e player do Spotify ou de qualquer player do Windows.

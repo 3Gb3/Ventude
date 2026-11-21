@@ -142,9 +142,21 @@ def test_stamp_version_starts_line_at_pyproject_version():
     spec = importlib.util.spec_from_file_location("stamp_version", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.base_version() == (2, 0, 0)
+    assert module.base_version() == (2, 1, 0)
     assert module.next_version((2, 0, 0), ["v1.2.4", "v1.2.5"]) == "2.0.0"  # primeira da linha 2.0
     assert module.next_version((1, 1, 0), ["v1.0.7", "v1.0.8"]) == "1.1.0"
     assert module.next_version((1, 1, 0), ["v1.0.8", "v1.1.0", "v1.1.1", "v1.1.x"]) == "1.1.2"
     assert module.next_version((1, 2, 0), ["v1.1.9"]) == "1.2.0"
     assert updates.parse_version("v1.1.0") > updates.parse_version("1.0.42")
+
+
+def test_latest_reports_network_errors(monkeypatch):
+    def boom(*_a, **_k):
+        raise net.NetError("sem rede")
+
+    monkeypatch.setattr(net, "get_json", boom)
+    with pytest.raises(net.NetError):
+        updates.latest("1.0.0")
+    monkeypatch.setattr(net, "get_json", lambda *_a, **_k: release("v2.0.1"))
+    assert updates.latest("2.0.1") is None
+    assert updates.latest("2.0.0").version == "2.0.1"
