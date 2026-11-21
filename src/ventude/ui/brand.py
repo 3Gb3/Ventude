@@ -55,6 +55,49 @@ def paint_ink(
     return path
 
 
+# Tornadinho do ícone: (y, largura, deslocamento x) de cada volta, num quadro de 64×64.
+_TORNADO = ((14.5, 44.0, -0.5), (23.5, 35.0, 4.0), (32.5, 25.0, 7.0), (41.5, 15.0, 4.0), (50.0, 6.0, -0.5))
+_TORNADO_SMALL = ((16.0, 44.0, -1.0), (28.0, 28.0, 4.5), (40.0, 14.0, 4.5), (50.0, 5.0, 0.0))
+
+
+def paint_tornado(p: QPainter, rect: QRectF, *, background: bool = True) -> None:
+    """Desenha o ícone do Ventude (um tornadinho em Tinta) dentro de `rect` (quadrado)."""
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    side = min(rect.width(), rect.height())
+    s = side / 64.0
+    ox = rect.left() + (rect.width() - side) / 2.0
+    oy = rect.top() + (rect.height() - side) / 2.0
+    if background:
+        box = QRectF(ox, oy, side, side)
+        path = rounded_path(box, 15.0 * s)
+        grad = QLinearGradient(0, box.top(), 0, box.bottom())
+        grad.setColorAt(0.0, QColor("#1A1E25"))
+        grad.setColorAt(1.0, QColor(theme.BG))
+        p.fillPath(path, grad)
+        if side >= 32:
+            p.setPen(QPen(QColor(255, 255, 255, 26), max(1.0, s)))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(rounded_path(box.adjusted(0.5, 0.5, -0.5, -0.5), 15.0 * s))
+    small = side < 28
+    turns = _TORNADO_SMALL if small else _TORNADO
+    stroke = (7.5 if small else 5.6) * s
+    top, bottom = QColor(theme.ACCENT), QColor("#38BDF8")
+    for index, (y, width, dx) in enumerate(turns):
+        t = index / max(1, len(turns) - 1)
+        color = _mix_color(top, bottom, t)
+        cx = ox + (32.0 + dx) * s
+        cy = oy + y * s
+        half = width / 2.0 * s
+        bend = min(2.4, width * 0.07) * s  # cada volta inclina e curva um pouco, como um redemoinho girando
+        line = QPainterPath(QPointF(cx - half, cy + bend / 2.0))
+        line.quadTo(QPointF(cx, cy - bend), QPointF(cx + half, cy - bend / 2.0))
+        p.setPen(QPen(color, stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(line)
+    p.restore()
+
+
 def _mix_color(a: QColor, b: QColor, t: float) -> QColor:
     t = max(0.0, min(1.0, t))
     return QColor(

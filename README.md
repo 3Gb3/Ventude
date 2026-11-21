@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/icon.png" alt="Ícone do Ventude: um tornadinho" width="96">
+
 # Ventude
 
 **Uma Dynamic Island e um shell completo para o Windows 10 e 11.**
