@@ -286,7 +286,11 @@ def build_items(
 
 
 def split_by_monitor(items: list[TaskItem], monitor: Rect) -> list[TaskItem]:
-    """Filtra os itens para um monitor: fixados sempre aparecem; abertos só onde têm janela."""
+    """Itens da Doca de um monitor: todos aparecem em todas as telas.
+
+    O que tem janela neste monitor fica normal; o que só tem janela em outro monitor aparece com o
+    indicador vazado ("outra tela") e o clique leva até a janela de lá.
+    """
     if monitor == (0, 0, 0, 0):
         return list(items)
     out: list[TaskItem] = []
@@ -298,6 +302,6 @@ def split_by_monitor(items: list[TaskItem], monitor: Rect) -> list[TaskItem]:
         on_here = [w for w in item.windows if w.monitor in (monitor, (0, 0, 0, 0))]
         if on_here:
             out.append(replace(item, windows=on_here, other_monitor=False))
-        elif item.pinned:
+        else:
             out.append(replace(item, windows=list(item.windows), other_monitor=True))
     return out

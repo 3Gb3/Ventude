@@ -1058,9 +1058,9 @@ def test_dock_model_layout_overflow_dodge_and_split_by_monitor():
         for i in range(18)
     ]
     lay_wide = model.layout(items[:4], window_w=1000, max_w=900)
-    assert lay_wide.slot_size == 44 and lay_wide.overflow_count == 0 and len(lay_wide.slots) == 4
+    assert lay_wide.slot_size == 38 and lay_wide.overflow_count == 0 and len(lay_wide.slots) == 4
     lay_narrow = model.layout(items, window_w=460, max_w=440)
-    assert lay_narrow.slot_size == 36 and lay_narrow.overflow_count > 0
+    assert lay_narrow.slot_size == 30 and lay_narrow.overflow_count > 0
 
     # Dodge math
     dock_rect = (700, 1018, 1220, 1070)
@@ -1090,7 +1090,8 @@ def test_dock_model_layout_overflow_dodge_and_split_by_monitor():
     m1 = split_by_monitor(built, mon1)
     m2 = split_by_monitor(built, mon2)
     assert m1[0].other_monitor and [i.label for i in m1] == ["Code", "Wt"]
-    assert not m2[0].other_monitor and [i.label for i in m2] == ["Code"]
+    assert not m2[0].other_monitor and [i.label for i in m2] == ["Code", "Wt"]
+    assert m2[1].other_monitor and not m1[1].other_monitor
 
 
 def test_indexer_git_projects_antigravity_and_rename_pin(tmp_path, store, monkeypatch):
