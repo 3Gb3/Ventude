@@ -853,7 +853,7 @@ def write_apng(path: Path, frames: list[QImage], delay_ms: int, last_ms: int = 1
 
 def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     """Telas do Ventude Shell 3.0 ('Calma'), compostas numa área de trabalho de 1920×1080."""
-    from ventude.services import indexer, shellicons
+    from ventude.services import apps, indexer, shellicons
     from ventude.services import taskbar as taskbar_service
     from ventude.services.audio import AudioState, Device
     from ventude.services.taskbar import TaskbarHider, WindowInfo
@@ -881,9 +881,7 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     repo_dir = folders / "Ventude"
     (repo_dir / ".git").mkdir(parents=True)
     (repo_dir / ".git" / "HEAD").write_text("ref: refs/heads/2.0.0\n", encoding="utf-8")
-    demo_files.append(
-        indexer.entry("Ventude", str(repo_dir), "folder", is_project=True, branch="2.0.0")
-    )
+    demo_files.append(indexer.entry("Ventude", str(repo_dir), "folder", is_project=True, branch="2.0.0"))
     for name in ("Projetos", "Fotos da viagem"):
         (folders / name).mkdir()
         demo_files.append(indexer.entry(name, str(folders / name), "folder"))
@@ -891,6 +889,23 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
         (folders / name).write_bytes(b"")
         demo_files.append(indexer.entry(name, str(folders / name), "file"))
     ctx.indexer.files = demo_files
+    # "Continuar" do Lançador: recentes de demonstração, nunca a pasta Recent de quem gera as capturas.
+    stamp = time.time()
+    demo_recent = [
+        apps.RecentFile("Relatório Q4.docx", str(folders / "Relatório Q4.docx"), stamp - 3 * 3600, False),
+        apps.RecentFile("Projetos", str(folders / "Projetos"), stamp - 5 * 3600, True),
+        apps.RecentFile(
+            "Orçamento 2027.xlsx", str(folders / "Orçamento 2027.xlsx"), stamp - 26 * 3600, False
+        ),
+    ]
+    apps.recent_files = lambda *a, **k: list(demo_recent)  # type: ignore[assignment]
+    # Controles > "Em segundo plano": apps de demonstração, não a bandeja real do PC.
+    demo_tray = [
+        apps.TrayApp(e.name, e.path, b"")
+        for e in catalog
+        if e.name in ("Discord", "Spotify", "Steam", "OBS Studio")
+    ]
+    apps.tray_apps = lambda *a, **k: list(demo_tray)  # type: ignore[assignment]
 
     hider = TaskbarHider(
         windows=lambda: [1],
