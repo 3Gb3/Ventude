@@ -459,7 +459,10 @@ def test_win_key_opens_launcher_and_slot_shortcuts(qapp, app_ctx, island, shell)
     app_ctx.update_settings(replace_start_menu=True)
     assert "launcher" in shell.keys.logic.features
     island.expand()
+    # Fixada: perder o foco recolhe a ilha em 250 ms, o mesmo tempo do settle (corrida no CI).
+    island.panel.pin.setChecked(True)
     settle(qapp, 250)
+    assert island.expanded
     island.set_shell_mode(True)
     island.keyPressEvent(key(Qt.Key.Key_D, text="d"))
     assert wait_for(qapp, lambda: shell.launcher.isVisible()) and shell.launcher.input.text() == "d"
