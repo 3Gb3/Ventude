@@ -2,9 +2,10 @@
 
 Fontes, em ordem:
 1. Grok CLI (xAI): lê o login de ~/.grok/auth.json e consulta os créditos do ciclo.
-2. grok.com: com o cookie (ou o "Copiar como cURL") colado em Ajustes, consulta as
-   consultas restantes por modo com uma conexão igual à do Chrome (o grok.com fica
-   atrás do Cloudflare, que barra o Python puro).
+2. grok.com: com o cookie (ou o "Copiar como cURL") colado em Ajustes, lê o limite de
+   créditos do plano (a tela "Utilização") com uma conexão igual à do Chrome (o grok.com
+   fica atrás do Cloudflare, que barra o Python puro). Se não vier, cai nas consultas
+   restantes por modo (/rest/rate-limits), o formato antigo.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import struct
 import time
 from pathlib import Path
 from typing import Any
@@ -150,6 +152,118 @@ def parse_rate(data: Any, key: str, label: str, now: float | None = None) -> Win
     return Window(f"mode:{key}", label, round(used, 1), now + wait if wait else None, detail, period=window)
 
 
+# ---------- créditos do plano (a barra "Utilização" do grok.com) ----------
+# O grok.com trocou as cotas por modelo (que hoje voltam sempre cheias) por um limite
+# de créditos semanal, servido em gRPC-web (protobuf). Campos de GetGrokCreditsConfig:
+#   1 (config) → 1: % usado (float) · 4/5: início/fim do ciclo (Timestamp)
+#                7: por produto {1: produto, 2: % (float)} · 8: {1: tipo, 2: início, 3: fim}
+WEB_CREDITS = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig"
+CREDIT_PRODUCTS = {9: "Grok Bot"}
+
+
+def _varint(buf: bytes, i: int) -> tuple[int, int]:
+    value = shift = 0
+    while True:
+        if i >= len(buf):
+            raise ValueError("varint truncado")
+        b = buf[i]
+        i += 1
+        value |= (b & 0x7F) << shift
+        if not b & 0x80:
+            return value, i
+        shift += 7
+
+
+def proto_fields(buf: bytes) -> dict[int, list[Any]]:
+    """Decodifica uma mensagem protobuf sem esquema: {campo: [valores brutos]}."""
+    out: dict[int, list[Any]] = {}
+    i = 0
+    while i < len(buf):
+        tag, i = _varint(buf, i)
+        field, wire = tag >> 3, tag & 7
+        if wire == 0:
+            value, i = _varint(buf, i)
+        elif wire == 1:
+            value, i = buf[i : i + 8], i + 8
+        elif wire == 2:
+            size, i = _varint(buf, i)
+            value, i = buf[i : i + size], i + size
+        elif wire == 5:
+            value, i = buf[i : i + 4], i + 4
+        else:
+            raise ValueError(f"wire type {wire} não suportado")
+        out.setdefault(field, []).append(value)
+    return out
+
+
+def grpc_web_message(raw: bytes) -> bytes | None:
+    """Primeiro quadro de dados de uma resposta gRPC-web (ignora o quadro de trailers)."""
+    i = 0
+    while i + 5 <= len(raw):
+        flag, size = raw[i], int.from_bytes(raw[i + 1 : i + 5], "big")
+        frame = raw[i + 5 : i + 5 + size]
+        if not flag & 0x80:
+            return frame
+        i += 5 + size
+    return None
+
+
+def _f32(value: Any) -> float | None:
+    return struct.unpack("<f", value)[0] if isinstance(value, bytes) and len(value) == 4 else None
+
+
+def _timestamp(value: Any) -> float | None:
+    if not isinstance(value, bytes):
+        return None
+    fields = proto_fields(value)
+    seconds = fields.get(1, [None])[0]
+    return float(seconds) if isinstance(seconds, int) and seconds > 0 else None
+
+
+def parse_credits(raw: bytes) -> Window | None:
+    try:
+        message = grpc_web_message(raw)
+        if not message:
+            return None
+        top = proto_fields(message)
+        config = proto_fields(top[1][0]) if isinstance(top.get(1, [None])[0], bytes) else {}
+        used = _f32(config.get(1, [None])[0]) if config else None
+        if used is None:
+            used = 0.0 if config else None  # proto3 omite o 0
+        if used is None:
+            return None
+        start = _timestamp(config.get(4, [None])[0])
+        end = _timestamp(config.get(5, [None])[0])
+        parts = []
+        for item in config.get(7, []):
+            sub = proto_fields(item) if isinstance(item, bytes) else {}
+            product = sub.get(1, [None])[0]
+            pct = _f32(sub.get(2, [None])[0]) or 0.0
+            name = CREDIT_PRODUCTS.get(product, f"Produto {product}")
+            parts.append(f"{name} {pct:.0f}%")
+    except (ValueError, IndexError, KeyError):
+        log.info("GetGrokCreditsConfig em formato inesperado: %s", raw[:120].hex())
+        return None
+    period = end - start if start and end and end > start else None
+    days = round(period / 86400) if period else 0
+    kind = {1: "diário", 7: "semanal"}.get(days, "mensal" if 28 <= days <= 31 else "")
+    label = f"Limite {kind}" if kind else "Créditos · ciclo atual"
+    used = round(max(0.0, min(100.0, used)), 1)
+    return Window("credits", label, used, end, " · ".join(parts), period=period)
+
+
+def _web_credits(headers: dict[str, str]) -> Window | None:
+    grpc_headers = {
+        **headers,
+        "Content-Type": "application/grpc-web+proto",
+        "Accept": "*/*",
+        "x-grpc-web": "1",
+    }
+    empty_frame = b"\x00\x00\x00\x00\x00"  # quadro gRPC-web com mensagem vazia
+    raw = net.browser_request("POST", WEB_CREDITS, headers=grpc_headers, data=empty_frame, timeout=12)
+    return parse_credits(raw)
+
+
 def _web_error(exc: net.NetError) -> ProviderError:
     log.info("grok.com respondeu %s: %s", exc.status or exc, (exc.body or "")[:200])
     if exc.challenge:
@@ -184,6 +298,13 @@ def _from_web(raw: str) -> Report:
     }
     if pasted.user_agent:
         headers["User-Agent"] = pasted.user_agent
+    try:
+        credits = _web_credits(headers)
+    except net.NetError as exc:
+        log.info("Créditos do grok.com indisponíveis (%s); usando cotas por modelo.", exc)
+        credits = None
+    if credits:
+        return Report("grok", "ok", [credits], source="grok.com")
     models = [(m, m) for m in pasted.models if m not in {k for k, _ in WEB_MODELS}] + WEB_MODELS
     windows: list[Window] = []
     errors: list[net.NetError] = []

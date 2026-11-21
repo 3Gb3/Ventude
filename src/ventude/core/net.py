@@ -64,12 +64,12 @@ def request(
     params: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
     json_body: Any = None,
+    data: bytes | None = None,
     timeout: float = 15,
     insecure: bool = False,
 ) -> bytes:
     if params:
         url = f"{url}{'&' if '?' in url else '?'}{urllib.parse.urlencode(params)}"
-    data = None
     hdrs = {"User-Agent": USER_AGENT, "Accept": "application/json, text/xml, */*"}
     hdrs.update(headers or {})
     if json_body is not None:
@@ -141,16 +141,18 @@ def browser_request(
     *,
     headers: dict[str, str] | None = None,
     json_body: Any = None,
+    data: bytes | None = None,
     timeout: float = 15,
 ) -> bytes:
     """Requisição para sites atrás do Cloudflare (claude.ai, grok.com).
 
     O Python puro tem uma "assinatura" de TLS que o Cloudflare reconhece e bloqueia.
     Com o curl_cffi, a conexão fica igual à do Chrome. Sem ele, cai no urllib.
+    `data` manda um corpo binário (ex.: gRPC-web) no lugar do JSON.
     """
     if browser_transport() != "curl_cffi":
         hdrs = {"User-Agent": BROWSER_UA, **(headers or {})}
-        return request(method, url, headers=hdrs, json_body=json_body, timeout=timeout)
+        return request(method, url, headers=hdrs, json_body=json_body, data=data, timeout=timeout)
     from curl_cffi import requests as curl
 
     hdrs = {"Accept": "application/json, text/plain, */*", **(headers or {})}
@@ -160,6 +162,7 @@ def browser_request(
             url,
             headers=hdrs,
             json=json_body,
+            data=data,
             timeout=timeout,
             impersonate="chrome",
             allow_redirects=True,
