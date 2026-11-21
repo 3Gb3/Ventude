@@ -746,6 +746,7 @@ def test_controls_tray_icon_right_click_menu_and_close(qapp, app_ctx, island, mo
 
     app_item = apps.TrayApp("Discord", r"C:\Apps\Discord.exe", b"")
     controls._close_tray_app(app_item, force=False)
+    assert wait_for(qapp, lambda: len(closed_exes) == 1)
     controls._close_tray_app(app_item, force=True)
     assert wait_for(qapp, lambda: len(closed_exes) == 2 and len(errors) == 1)
     assert closed_exes == [(r"C:\Apps\Discord.exe", False), (r"C:\Apps\Discord.exe", True)]
