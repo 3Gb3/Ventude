@@ -213,3 +213,45 @@ def test_dock_model_end_buttons():
     assert lay.end_separator_x is not None and lay.end_separator_x < lay.end_rect("background")[0]
     last = lay.slots[-1]
     assert last.x + last.w < lay.end_separator_x
+
+
+# ---------- notificações do Windows ----------
+def test_windows_notifications_denied_shows_access_hint(qapp, app_ctx):
+    from ventude.services.winnotify import Snapshot, WindowsNotifications
+    from ventude.ui.shell.notifications import NotificationsView
+
+    win = WindowsNotifications(app_ctx.run, reader=lambda _k, _a: Snapshot("denied", [], {}))
+    app_ctx.notifications.attach_windows(win)
+    win.refresh()
+    assert wait_for(qapp, lambda: win.access == "denied")
+    view = NotificationsView(app_ctx)
+    view.refresh()
+    assert view.access_btn.isVisibleTo(view)
+
+
+# ---------- luz noturna ----------
+def test_night_light_blob_toggle():
+    from ventude.services import nightlight
+
+    off = bytes.fromhex(
+        "43 42 01 00 0A 02 01 00 2A 06 E4 86 EC D5 06 2A 2B 0E 13 43 42 01 00 D0 0A "
+        "02 C6 14 F7 D4 B0 D1 FC F4 D3 EE 01 00 00 00 00"
+    )
+    assert nightlight.is_on(off) is False
+    on = nightlight.toggled(off, True)
+    assert on is not None and len(on) == len(off) + 2 and nightlight.is_on(on) is True
+    assert on[18] == 0x15 and on[23:25] == b"\x10\x00" and on[10] == 0xE5  # carimbo subiu
+    back = nightlight.toggled(on, False)
+    assert back is not None and nightlight.is_on(back) is False and back[19:] == off[19:]
+    assert nightlight.toggled(b"\x00" * 10, True) is None  # formato desconhecido: não mexe
+
+
+def test_background_uses_current_ventude_icon():
+    import sys
+
+    from ventude.services import apps
+    from ventude.ui.shell.background import is_ventude
+
+    assert is_ventude(apps.TrayApp("Ventude", r"C:\Apps\Ventude\Ventude.exe", b"old"))
+    assert is_ventude(apps.TrayApp("Python", sys.executable, b""))
+    assert not is_ventude(apps.TrayApp("Discord", r"C:\Apps\Discord.exe", b""))

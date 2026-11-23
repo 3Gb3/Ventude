@@ -40,6 +40,8 @@ src/ventude/
     privacy.py         microfone/câmera em uso (CapabilityAccessManager\ConsentStore)
     caffeine.py        SetThreadExecutionState (tela sempre acesa)
     notifications.py   central de notificações do Ventude (avisos guardados no SQLite)
+    winnotify.py       notificações dos outros apps (UserNotificationListener do WinRT)
+    nightlight.py      Luz noturna liga/desliga pelo estado do CloudStore (HKCU)
     qr.py              gerador de QR Code (ISO 18004) em Python puro
     lyrics.py          letra sincronizada do lrclib.net, com cache
     calc.py            calculadora segura da busca (ast, sem eval)

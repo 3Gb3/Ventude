@@ -516,6 +516,15 @@ class SettingsPage(Page):
                 self.quiet_mode,
             )
         )
+        self.windows_notifications = self._switch(s.windows_notifications, "windows_notifications")
+        body.addWidget(
+            setting_row(
+                "Notificações do Windows",
+                "Mostra as notificações dos outros apps (Discord, WhatsApp, e-mail...) na tela de "
+                "Notificações do Ventude. O Windows pode pedir permissão na primeira vez.",
+                self.windows_notifications,
+            )
+        )
         self.power_animation = self._switch(s.power_animation, "power_animation")
         body.addWidget(
             setting_row(

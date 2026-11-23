@@ -18,6 +18,9 @@ dependencies = [
     "winrt-windows-graphics-imaging>=3.0 ; sys_platform == 'win32'",
     "winrt-windows-media-ocr>=3.0 ; sys_platform == 'win32'",
     "winrt-windows-globalization>=3.0 ; sys_platform == 'win32'",
+    "winrt-windows-ui-notifications>=3.0 ; sys_platform == 'win32'",
+    "winrt-windows-ui-notifications-management>=3.0 ; sys_platform == 'win32'",
+    "winrt-windows-applicationmodel>=3.0 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]

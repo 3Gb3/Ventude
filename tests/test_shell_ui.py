@@ -889,3 +889,44 @@ def test_dock_start_button_opens_and_closes_launcher(qapp, app_ctx, island, shel
     # Clique logo depois de fechar (perda de foco ao clicar na Doca) não reabre na hora
     shell.start_button_clicked()
     assert not ln.isVisible()
+
+
+def test_windows_notifications_merge_into_center_and_view(qapp, app_ctx, shell):
+    from ventude.services.winnotify import Snapshot, WindowsNotifications, WinNotice
+
+    removed: list[list[int]] = []
+    snap = Snapshot(
+        "allowed",
+        [
+            WinNotice(7, "Discord", "Discord_x!App", "Ana", "bora jogar?", time.time() - 30),
+            WinNotice(8, "Discord", "Discord_x!App", "Rafa", "ok", time.time() - 60),
+            WinNotice(9, "Outlook", "", "Reunião", "às 15h", time.time() - 90),
+        ],
+        {"Discord_x!App": b""},
+    )
+    def reader(_known, _ask):  # como no Windows: o que foi apagado não volta
+        gone = {i for batch in removed for i in batch}
+        return Snapshot(snap.access, [n for n in snap.items if n.id not in gone], snap.logos)
+
+    win = WindowsNotifications(app_ctx.run, reader=reader, remover=removed.append)
+    center = app_ctx.notifications
+    center.clear()
+    center.attach_windows(win)
+    win.refresh()
+    assert wait_for(qapp, lambda: len(win.items) == 3)
+    assert center.unread == 3
+
+    shell.open_page("notifications")
+    ln = shell.launcher
+    assert wait_for(qapp, ln.isVisible)
+    assert center.unread == 0  # abriu, viu
+    view = ln.notifications_view
+    cards = [w for w in view.cards if type(w).__name__ == "NoticeCard"]
+    assert [c.source for c in cards] == ["windows"] * 3
+    assert cards[0].notice.title == "Ana"
+    view._dismiss("windows", 9)
+    assert wait_for(qapp, lambda: removed == [[9]])
+    view._clear_app("Discord")
+    assert wait_for(qapp, lambda: len(removed) == 2 and sorted(removed[1]) == [7, 8])
+    assert not win.items
+    ln.hide()

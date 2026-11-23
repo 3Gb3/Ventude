@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ventude.core.timefmt import clock
-from ventude.services import apps
+from ventude.services import apps, nightlight
 from ventude.ui import icons, theme
 from ventude.ui.shell.common import HoverButton, draw_pixmap
 
@@ -207,7 +207,7 @@ class ControlsBody(QWidget):
         self.focus.clicked.connect(self._toggle_focus)
         self.night = QuickTile("night", "Luz noturna")
         self.night.set_state(False, "Configurar")
-        self.night.clicked.connect(lambda: self._open("ms-settings:nightlight"))
+        self.night.clicked.connect(self._toggle_night)
         self.project = QuickTile("monitor", "Projetar")
         self.project.set_state(False, "Win + P")
         self.project.clicked.connect(self._project)
@@ -293,6 +293,22 @@ class ControlsBody(QWidget):
             "bell-off" if quiet else "bell",
         )
         self._audio(ctx.audio.state)  # type: ignore[attr-defined]
+        self._sync_night()
+
+    def _sync_night(self, on: bool | None = None) -> None:
+        on = nightlight.state() if on is None else on
+        if on is None:
+            self.night.set_state(False, "Configurar")
+        else:
+            self.night.set_state(on, "Ligada" if on else "Desligada")
+
+    def _toggle_night(self) -> None:
+        """Liga/desliga direto; se o Windows guardar o estado num formato novo, abre as Configurações."""
+        current = nightlight.state()
+        if current is None or not nightlight.set_on(not current):
+            self._open("ms-settings:nightlight")
+            return
+        self._sync_night(not current)
 
     def _audio(self, state: object) -> None:
         mic = getattr(state, "mic", None)

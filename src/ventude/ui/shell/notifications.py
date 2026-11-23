@@ -1,7 +1,8 @@
 """Tela de Notificações do Ventude (página do Lançador, também aberta pelo sino da Doca).
 
-Mostra os avisos guardados pela `NotificationCenter` (limites das IAs, Agenda, timer, Sistema...),
-agrupados por origem e do mais novo para o mais antigo, com Não perturbe (o Silêncio) e Limpar tudo.
+Mostra os avisos do Ventude (limites das IAs, Agenda, timer, Sistema...) e as notificações dos outros
+apps que estão na central do Windows, agrupados por origem e do mais novo para o mais antigo, com
+Não perturbe (o Silêncio) e Limpar tudo. Clicar numa do Windows abre o app dono dela.
 """
 
 from __future__ import annotations
@@ -9,11 +10,11 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from ventude.core.timefmt import ago
-from ventude.services import apps
+from ventude.services import apps, winnotify
 from ventude.services.notifications import Notice, group_of
 from ventude.ui import icons, theme
 from ventude.ui.shell.common import HoverButton, draw_pixmap, shell_font
@@ -29,11 +30,20 @@ def when_text(at: float, now: float | None = None) -> str:
 class NoticeCard(QWidget):
     """Um aviso: ícone na cor dele, título, texto (até 2 linhas), quando e X ao passar o mouse."""
 
-    dismissed = Signal(int)
+    dismissed = Signal(str, int)  # (origem: "ventude" | "windows", id)
+    activated = Signal(str, int)
 
-    def __init__(self, notice: Notice, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, notice: Notice, parent: QWidget | None = None, *, logo: bytes = b"", source: str = "ventude"
+    ) -> None:
         super().__init__(parent)
         self.notice = notice
+        self.source = source
+        self.logo = QPixmap()
+        if logo:
+            self.logo.loadFromData(logo)
+        if source == "windows":
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(CARD_H)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.setMouseTracking(True)
@@ -62,13 +72,18 @@ class NoticeCard(QWidget):
             base = theme.color(theme.ACCENT)
         bubble = QRectF(12, (CARD_H - 34) / 2, 34, 34)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(base.red(), base.green(), base.blue(), 40))
-        p.drawRoundedRect(bubble, 11, 11)
-        draw_pixmap(
-            p,
-            icons.pixmap(self.notice.icon or "bell", base.name(), 17),
-            bubble.adjusted(8.5, 8.5, -8.5, -8.5),
-        )
+        if not self.logo.isNull():  # ícone real do app (notificações do Windows)
+            p.setBrush(QColor(255, 255, 255, 10))
+            p.drawRoundedRect(bubble, 11, 11)
+            draw_pixmap(p, self.logo, bubble.adjusted(6, 6, -6, -6))
+        else:
+            p.setBrush(QColor(base.red(), base.green(), base.blue(), 40))
+            p.drawRoundedRect(bubble, 11, 11)
+            draw_pixmap(
+                p,
+                icons.pixmap(self.notice.icon or "bell", base.name(), 17),
+                bubble.adjusted(8.5, 8.5, -8.5, -8.5),
+            )
 
         when = when_text(self.notice.at)
         p.setFont(shell_font(10))
@@ -114,7 +129,9 @@ class NoticeCard(QWidget):
             event.button() == Qt.MouseButton.LeftButton
             and self._close_rect().adjusted(-4, -4, 4, 4).contains(pos)
         ):
-            self.dismissed.emit(self.notice.id)
+            self.dismissed.emit(self.source, self.notice.id)
+        elif event.button() == Qt.MouseButton.LeftButton and self.rect().contains(pos.toPoint()):
+            self.activated.emit(self.source, self.notice.id)
 
 
 def _pill_btn(text: str, tip: str) -> QPushButton:
@@ -182,7 +199,10 @@ class NotificationsView(QWidget):
         empty_title = QLabel("Tudo em dia")
         empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        empty_text = QLabel("Limites das IAs, lembretes da Agenda, timer e avisos do sistema aparecem aqui.")
+        empty_text = QLabel(
+            "Notificações dos seus apps, limites das IAs, lembretes da Agenda e avisos do sistema "
+            "aparecem aqui."
+        )
         empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_text.setWordWrap(True)
         empty_text.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 12px;")
@@ -205,9 +225,21 @@ class NotificationsView(QWidget):
             f"QPushButton:hover {{ color: {theme.TEXT}; background: rgba(255,255,255,0.06); }}"
         )
         win.clicked.connect(self._open_windows)
+        self.access_btn = QPushButton("Liberar as notificações do Windows ›")
+        self.access_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.access_btn.setToolTip("Configurações > Privacidade > Notificações: permita o acesso dos apps")
+        self.access_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; padding: 4px 6px; color: {theme.WARN};"
+            " font-size: 11px; border-radius: 8px; }"
+            "QPushButton:hover { background: rgba(255,255,255,0.06); }"
+        )
+        self.access_btn.clicked.connect(self._open_privacy)
+        self.access_btn.hide()
         foot.addWidget(self.summary)
         foot.addStretch(1)
+        foot.addWidget(self.access_btn)
         foot.addWidget(win)
+        self._holding = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -250,9 +282,26 @@ class NotificationsView(QWidget):
             base.format(bg=theme.INK_KEY, fg=theme.TEXT_2, hover="rgba(255,255,255,0.10)")
         )
 
+    @property
+    def windows(self) -> object | None:
+        center = self.center
+        return getattr(center, "windows", None) if center is not None else None
+
     def _changed(self) -> None:
-        if self.isVisible():
+        if self.isVisible() and not self._holding:
             self.refresh()
+
+    def showEvent(self, event: object) -> None:
+        super().showEvent(event)  # type: ignore[arg-type]
+        win = self.windows
+        if win is not None and hasattr(win, "set_fast"):
+            win.set_fast(True)  # com a tela aberta, relê a central do Windows mais vezes
+
+    def hideEvent(self, event: object) -> None:
+        super().hideEvent(event)  # type: ignore[arg-type]
+        win = self.windows
+        if win is not None and hasattr(win, "set_fast"):
+            win.set_fast(False)
 
     def refresh(self) -> None:
         for widget in self.cards:
@@ -261,23 +310,38 @@ class NotificationsView(QWidget):
             widget.deleteLater()
         self.cards = []
         center = self.center
-        items = center.newest_first() if center is not None else []  # type: ignore[attr-defined]
-        # agrupa por origem, na ordem do aviso mais novo de cada grupo
-        groups: dict[str, list[Notice]] = {}
-        for notice in items:
-            groups.setdefault(group_of(notice.kind)[0], []).append(notice)
+        items: list[tuple[str, Notice, bytes]] = []  # (origem, aviso, logo)
+        if center is not None:
+            items += [("ventude", n, b"") for n in center.newest_first()]  # type: ignore[attr-defined]
+        win = self.windows
+        self._win_by_id: dict[int, object] = {}
+        for w in list(getattr(win, "items", []) or []):
+            self._win_by_id[w.id] = w
+            notice = Notice(w.id, w.title, w.text, "windows", "bell", "", w.at, w.id in win.seen)  # type: ignore[union-attr]
+            items.append(("windows", notice, win.logo(w)))  # type: ignore[union-attr]
+        items.sort(key=lambda entry: entry[1].at, reverse=True)
+        # agrupa por origem (grupo do Ventude ou app do Windows), na ordem do aviso mais novo de cada um
+        groups: dict[tuple[str, str], list[tuple[str, Notice, bytes]]] = {}
+        for source, notice, logo in items:
+            if source == "windows":
+                key = ("windows", self._win_by_id[notice.id].app)  # type: ignore[attr-defined]
+            else:
+                key = ("ventude", group_of(notice.kind)[0])
+            groups.setdefault(key, []).append((source, notice, logo))
         insert_at = 0
-        for label, notices in groups.items():
-            header = self._group_header(label, notices[0].kind, len(notices))
+        for (source, label), entries in groups.items():
+            header = self._group_header(label, source, entries[0][1].kind, len(entries), entries[0][2])
             self.list_box.insertWidget(insert_at, header)
             self.cards.append(header)
             insert_at += 1
-            for notice in notices:
-                card = NoticeCard(notice)
+            for src, notice, logo in entries:
+                card = NoticeCard(notice, logo=logo, source=src)
                 card.dismissed.connect(self._dismiss)
+                card.activated.connect(self._activate)
                 self.list_box.insertWidget(insert_at, card)
                 self.cards.append(card)
                 insert_at += 1
+        self.access_btn.setVisible(getattr(win, "access", "") == "denied")
         has = bool(items)
         self.scroll.setVisible(has)
         self.empty.setVisible(not has)
@@ -289,19 +353,32 @@ class NotificationsView(QWidget):
             novas = "1 nova" if unread == 1 else f"{unread} novas"
             self.summary.setText(f"{len(items)} notificações · {novas}")
         else:
-            self.summary.setText(f"{len(items)} notificações · {when_text(items[0].at, time.time())}")
+            self.summary.setText(f"{len(items)} notificações · {when_text(items[0][1].at, time.time())}")
 
-    def _group_header(self, label: str, kind: str, count: int) -> QWidget:
+    def _group_header(self, label: str, source: str, kind: str, count: int, logo: bytes = b"") -> QWidget:
         host = QWidget()
         row = QHBoxLayout(host)
         row.setContentsMargins(4, 6, 0, 0)
         row.setSpacing(6)
         icon = QLabel()
-        icon.setPixmap(icons.pixmap(group_of(kind)[1], theme.TEXT_2, 13))
+        pixmap = QPixmap()
+        if logo and pixmap.loadFromData(logo):
+            icon.setPixmap(
+                pixmap.scaled(
+                    13, 13, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+                )
+            )
+        else:
+            icon.setPixmap(
+                icons.pixmap(group_of(kind)[1] if source == "ventude" else "bell", theme.TEXT_2, 13)
+            )
         name = QLabel(f"{label} · {count}" if count > 1 else label)
         name.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 11px; font-weight: 600;")
         clear = HoverButton("close", "", f"Limpar {label}", QSize(22, 22), 11, 10)
-        clear.clicked.connect(lambda k=kind: self._clear_group(k))
+        if source == "windows":
+            clear.clicked.connect(lambda a=label: self._clear_app(a))
+        else:
+            clear.clicked.connect(lambda k=kind: self._clear_group(k))
         row.addWidget(icon)
         row.addWidget(name)
         row.addStretch(1)
@@ -309,14 +386,41 @@ class NotificationsView(QWidget):
         return host
 
     def mark_read(self) -> None:
+        """Viu: zera o selo, mas os cartões mantêm o risquinho de "nova" até a próxima abertura."""
         center = self.center
         if center is not None:
-            center.mark_all_read()  # type: ignore[attr-defined]
+            self._holding = True
+            try:
+                center.mark_all_read()  # type: ignore[attr-defined]
+            finally:
+                self._holding = False
 
-    def _dismiss(self, notice_id: int) -> None:
+    def _dismiss(self, source: str, notice_id: int) -> None:
+        if source == "windows":
+            win = self.windows
+            if win is not None:
+                win.dismiss([notice_id])  # type: ignore[attr-defined]
+            return
         center = self.center
         if center is not None:
             center.dismiss(notice_id)  # type: ignore[attr-defined]
+
+    def _activate(self, source: str, notice_id: int) -> None:
+        win = self.windows
+        notice = getattr(self, "_win_by_id", {}).get(notice_id)
+        if source != "windows" or win is None or notice is None:
+            return
+        self.finished.emit()
+        win.open(notice)  # type: ignore[attr-defined]
+
+    def _clear_app(self, app: str) -> None:
+        win = self.windows
+        if win is not None:
+            win.dismiss_app(app)  # type: ignore[attr-defined]
+
+    def _open_privacy(self) -> None:
+        self.finished.emit()
+        winnotify.privacy_settings()
 
     def _clear_group(self, kind: str) -> None:
         center = self.center
@@ -327,6 +431,9 @@ class NotificationsView(QWidget):
         center = self.center
         if center is not None:
             center.clear()  # type: ignore[attr-defined]
+        win = self.windows
+        if win is not None:
+            win.clear()  # type: ignore[attr-defined]
 
     def _toggle_quiet(self) -> None:
         settings = getattr(self.ctx, "settings", None)
