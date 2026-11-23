@@ -365,6 +365,7 @@ dependencies = [
     { name = "curl-cffi" },
     { name = "pyside6-essentials" },
     { name = "winrt-runtime", marker = "sys_platform == 'win32'" },
+    { name = "winrt-windows-applicationmodel", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-foundation", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-foundation-collections", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-globalization", marker = "sys_platform == 'win32'" },
@@ -373,6 +374,8 @@ dependencies = [
     { name = "winrt-windows-media-control", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-media-ocr", marker = "sys_platform == 'win32'" },
     { name = "winrt-windows-storage-streams", marker = "sys_platform == 'win32'" },
+    { name = "winrt-windows-ui-notifications", marker = "sys_platform == 'win32'" },
+    { name = "winrt-windows-ui-notifications-management", marker = "sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -387,6 +390,7 @@ requires-dist = [
     { name = "curl-cffi", specifier = ">=0.15" },
     { name = "pyside6-essentials", specifier = ">=6.9" },
     { name = "winrt-runtime", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
+    { name = "winrt-windows-applicationmodel", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
     { name = "winrt-windows-foundation", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
     { name = "winrt-windows-foundation-collections", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
     { name = "winrt-windows-globalization", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
@@ -395,6 +399,8 @@ requires-dist = [
     { name = "winrt-windows-media-control", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
     { name = "winrt-windows-media-ocr", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
     { name = "winrt-windows-storage-streams", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
+    { name = "winrt-windows-ui-notifications", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
+    { name = "winrt-windows-ui-notifications-management", marker = "sys_platform == 'win32'", specifier = ">=3.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -431,6 +437,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/d4/7eeaa903c33f60603347f0364b64437233924e92c6afed575e504db715ae/winrt_runtime-4.2.0-cp315-cp315t-win32.whl", hash = "sha256:c3656bf858cbc9c3bc412a8b6b24cf1d7c86759afe001345f47d43bb6d19865c", size = 218960, upload-time = "2026-11-17T23:51:22.289Z" },
     { url = "https://files.pythonhosted.org/packages/f1/c0/7c1e08ce28414a72d217c7e978b7f5708f24730f8c7efef6e615971e2e48/winrt_runtime-4.2.0-cp315-cp315t-win_amd64.whl", hash = "sha256:c31d5688e88df32c008d965f48a9fbfdc42812c73107a4d80c920b7512f91993", size = 270608, upload-time = "2026-11-17T23:51:24.078Z" },
     { url = "https://files.pythonhosted.org/packages/7f/43/5c71e5b6221ef4d8ca0c3a34efc75a10586c6cf24395cadd2bd331015b20/winrt_runtime-4.2.0-cp315-cp315t-win_arm64.whl", hash = "sha256:226ad984665960ba1abb507683b849e1b7215a7e935e0fd262c98d4a25226754", size = 253423, upload-time = "2026-11-17T23:51:25.673Z" },
+]
+
+[[package]]
+name = "winrt-windows-applicationmodel"
+version = "4!10.0.28000.2957"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "winrt-runtime" },
+    { name = "winrt-windows-foundation" },
+    { name = "winrt-windows-foundation-collections" },
+    { name = "winrt-windows-storage-streams" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/55/5d/25811cce54f419d691f23d36a6f9fc5973d0aefd588ec3c9caf36e69f0db/winrt_windows_applicationmodel-4!10.0.28000.2957.tar.gz", hash = "sha256:207ecf145687d17f41fcc95a84de66885ef5059bf0de9c8cb6058509d911df83", size = 26511, upload-time = "2026-10-31T23:43:07.181Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/9d/0734e0dd379ad00e8f0d287322f95dd5d11170c5aa76d589e62f3309d233/winrt_windows_applicationmodel-4!10.0.28000.2957-py3-none-any.whl", hash = "sha256:ec7ba3a99a3d23438d1dea8e19be665635c339a1bafa266ac5e3b051a6191759", size = 29647, upload-time = "2026-10-31T23:37:47.254Z" },
 ]
 
 [[package]]
@@ -544,4 +565,32 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9b/5a/db5b75cf82b834963d4440e23ea0d6ecbd06d788d4f2b854ef0eec48376a/winrt_windows_storage_streams-4!10.0.28000.2957.tar.gz", hash = "sha256:6284341b4b01ab872007def0b8d29bf30d84d46f6922f6e42be1d738d6bf2ff7", size = 16649, upload-time = "2026-10-31T23:45:47.22Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/8d/0fc70dedc79e36acab9aff05cdceb112a7512176f901ee37f6e522dfbfad/winrt_windows_storage_streams-4!10.0.28000.2957-py3-none-any.whl", hash = "sha256:e113832320f2e7f8b09cedfb400cb7eaf0ac769ad1f2038ddbe88801497916c4", size = 18829, upload-time = "2026-10-31T23:41:34.224Z" },
+]
+
+[[package]]
+name = "winrt-windows-ui-notifications"
+version = "4!10.0.28000.2957"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "winrt-runtime" },
+    { name = "winrt-windows-foundation" },
+    { name = "winrt-windows-foundation-collections" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e6/f7/3decadf1cae14deb18e245749e0e37798de2c32e615ec0bebef5bd4d0040/winrt_windows_ui_notifications-4!10.0.28000.2957.tar.gz", hash = "sha256:5ab89819245c7a90db2d5fe2a0d0cc88158d50bf6fbba12c96145b25bc04a9d3", size = 27118, upload-time = "2026-10-31T23:46:18.168Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/ca/985b65ada4f5bdca166a01f15239e5cbb25b5f5bd703f7bb54d80f5f2b19/winrt_windows_ui_notifications-4!10.0.28000.2957-py3-none-any.whl", hash = "sha256:2d4e78018df29bb107d0490926ae0a7254be68b6b9c1bd81547d0df569682ea7", size = 30930, upload-time = "2026-10-31T23:42:15.239Z" },
+]
+
+[[package]]
+name = "winrt-windows-ui-notifications-management"
+version = "4!10.0.28000.2957"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "winrt-runtime" },
+    { name = "winrt-windows-foundation" },
+    { name = "winrt-windows-foundation-collections" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/30/456963162f48ba9a5458e2ea8098b2e0cc1f9f571b7e62d688bc8c420d6a/winrt_windows_ui_notifications_management-4!10.0.28000.2957.tar.gz", hash = "sha256:0bd120b991502406c1bf5876bfff3e598a712927f79cb7d1c26c9f6ee2b4e886", size = 5587, upload-time = "2026-10-31T23:46:19.033Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/66/24/2f21a847a71813cc20183a91072a9b0b4d7d7e9b6102a808e77c8fbe8805/winrt_windows_ui_notifications_management-4!10.0.28000.2957-py3-none-any.whl", hash = "sha256:a700959cb688e7b8c046afa4aac10bf90a715b3221f30966a6bec8308002c48c", size = 7358, upload-time = "2026-10-31T23:42:16.143Z" },
 ]

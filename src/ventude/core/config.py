@@ -92,6 +92,7 @@ class Settings:
     lock_after_min: int = 5  # tela de bloqueio do Ventude depois de N min parado (0 = nunca)
     lock_require_password: bool = True  # mexer na tela de bloqueio bloqueia o Windows (pede a senha)
     win_triple_hide: bool = True  # tecla Windows 3 vezes seguidas esconde/mostra a ilha
+    windows_notifications: bool = True  # notificações dos outros apps (Windows) na tela de Notificações
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3

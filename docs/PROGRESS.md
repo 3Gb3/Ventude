@@ -11,8 +11,13 @@
 - [x] **Windows 3×**: três toques seguidos na tecla Windows (até 0,45 s entre eles) somem com a ilha num "buraco negro" (as pontas são sugadas para o meio, gira, colapsa num brilho); mais três e ela volta. Ajuste em Bloqueio.
 - [x] **Clima**: o gráfico hora a hora mostra ícone, hora, temperatura e umidade em todas as horas (antes, de 2 em 2 quando apertado).
 
+- [x] **Notificações do Windows** na mesma tela (ajuste, ligado por padrão): `UserNotificationListener` do WinRT, relido a cada 6 s (2 s com a tela aberta), porque o evento de "mudou" não funciona para apps sem pacote da Loja. Agrupadas pelo app, com o ícone real; clique abre o app, X/Limpar apagam também da central do Windows. Sem permissão, aparece "Liberar as notificações do Windows ›". Conferido nesta máquina: acesso permitido e leitura com texto e ícone.
+- [x] **Luz noturna direto**: a tecla dos Controles liga/desliga regravando o estado no CloudStore do registro (HKCU). Com formato desconhecido, nada é gravado e abre as Configurações.
+- [x] **Ícone do Ventude** em Em segundo plano: o desenhado na hora (o Windows guarda uma foto antiga do ícone da bandeja).
+
 ### A validar no seu PC
 
+- Luz noturna ligando e desligando pela tecla dos Controles (não foi acionada de verdade aqui, só a leitura do estado).
 - Bloqueio por inatividade e o bloqueio do Windows logo depois do primeiro toque (vídeo no navegador não deve bloquear).
 - Windows 3× com e sem "Tecla Windows abre o Lançador" (sem ele, os dois primeiros toques abrem e fecham o Iniciar do Windows).
 

@@ -27,6 +27,7 @@ from ventude.services.shelf import ShelfService
 from ventude.services.shellicons import IconCache
 from ventude.services.timer import TimerService
 from ventude.services.weather import Forecast, Place, WeatherService
+from ventude.services.winnotify import WindowsNotifications
 
 WEATHER_EVERY = 15 * 60_000
 
@@ -91,6 +92,8 @@ class AppContext(QObject):
         self.indexer = Indexer(self.run)
         self.icons = IconCache()  # ícones reais do Windows (barra, Iniciar e busca)
         self.notifications = NotificationCenter(store)  # tela de Notificações (Lançador e Doca)
+        self.windows_notices = WindowsNotifications(self.run)  # as dos outros apps (central do Windows)
+        self.notifications.attach_windows(self.windows_notices)
         self.tray_message.connect(lambda title, text: self.notifications.add(title, text))
         # Ventude Shell (2.0): o app liga estes dois; nos testes ficam vazios e tudo cai no modo da ilha.
         self.shell: object | None = None  # ShellController
@@ -150,6 +153,8 @@ class AppContext(QObject):
         QTimer.singleShot(1200, self.refresh_weather)
         self.reminders.start()
         self.apply_migrations()
+        self._sync_windows_notices(self.settings)
+        self.settings_changed.connect(self._sync_windows_notices)
         self.hardware.start()
         self.audio.start()
         self.privacy.start()
@@ -163,8 +168,15 @@ class AppContext(QObject):
             lambda s: self.shelf.set_clipboard_history(s.clipboard_history and s.module_enabled("shelf"))
         )
 
+    def _sync_windows_notices(self, settings: Settings) -> None:
+        if settings.windows_notifications and not self.windows_notices.active:
+            self.windows_notices.start()
+        elif not settings.windows_notifications and self.windows_notices.active:
+            self.windows_notices.stop()
+
     def stop(self) -> None:
         """Desfaz o que mexe no sistema (chamado ao sair)."""
+        self.windows_notices.timer.stop()
         self.caffeine.stop()
         if self.lock_screen is not None:
             self.lock_screen.stop()  # type: ignore[attr-defined]

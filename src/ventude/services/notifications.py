@@ -56,12 +56,19 @@ class NotificationCenter(QObject):
         self.store = store
         self.items: list[Notice] = []
         self._next_id = 1
+        self.windows: object | None = None  # WindowsNotifications: as dos outros apps
         self._load()
+
+    def attach_windows(self, windows: object) -> None:
+        """Junta as notificações do Windows: o selo e a tela passam a contar as duas."""
+        self.windows = windows
+        windows.changed.connect(self.changed.emit)  # type: ignore[attr-defined]
 
     # ---------- leitura ----------
     @property
     def unread(self) -> int:
-        return sum(1 for n in self.items if not n.read)
+        own = sum(1 for n in self.items if not n.read)
+        return own + int(getattr(self.windows, "unread", 0) or 0)
 
     def newest_first(self) -> list[Notice]:
         return sorted(self.items, key=lambda n: (n.at, n.id), reverse=True)
@@ -113,6 +120,8 @@ class NotificationCenter(QObject):
             self.changed.emit()
 
     def mark_all_read(self) -> None:
+        if self.windows is not None:
+            self.windows.mark_all_seen()  # type: ignore[attr-defined]
         if any(not n.read for n in self.items):
             for n in self.items:
                 n.read = True

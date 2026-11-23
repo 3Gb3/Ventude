@@ -6,6 +6,8 @@ clique abre, botão direito traz abrir local, fechar e encerrar. A Doca tem um b
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Callable
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
@@ -17,6 +19,16 @@ from ventude.ui import brand, icons, theme
 from ventude.ui.shell.common import HoverButton, app_pixmap, draw_pixmap, shell_font
 
 COLUMNS = 7
+
+
+def is_ventude(app: apps.TrayApp) -> bool:
+    """O próprio Ventude (instalado ou rodando pelo Python)."""
+    exe = os.path.normcase(os.path.abspath(app.exe)) if app.exe else ""
+    if exe and exe == os.path.normcase(os.path.abspath(sys.executable)):
+        return True
+    return os.path.basename(exe).startswith("ventude") or app.name.strip().lower() == "ventude"
+
+
 TILE = QSize(84, 82)
 
 
@@ -38,7 +50,8 @@ class BackgroundTile(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.pixmap = QPixmap()
-        if app.icon:
+        self.own = is_ventude(app)  # o Windows guarda uma foto velha do ícone; o nosso é desenhado
+        if app.icon and not self.own:
             self.pixmap.loadFromData(app.icon)
 
     def paintEvent(self, _event: object) -> None:
@@ -48,8 +61,14 @@ class BackgroundTile(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.HALO)
             p.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), 14, 14)
-        pixmap = self.pixmap if not self.pixmap.isNull() else app_pixmap(self.ctx, "app", self.app.exe, 30)
-        draw_pixmap(p, pixmap, QRectF((self.width() - 30) / 2, 12, 30, 30))
+        icon_rect = QRectF((self.width() - 30) / 2, 12, 30, 30)
+        if self.own:
+            brand.paint_tornado(p, icon_rect)
+        else:
+            pixmap = (
+                self.pixmap if not self.pixmap.isNull() else app_pixmap(self.ctx, "app", self.app.exe, 30)
+            )
+            draw_pixmap(p, pixmap, icon_rect)
         p.setPen(QColor(theme.TEXT))
         p.setFont(shell_font(11))
         rect = QRectF(4, 48, self.width() - 8, 28)
