@@ -39,6 +39,7 @@ src/ventude/
     audio.py           Core Audio: dispositivos, padrão (IPolicyConfig), volumes e mixer por app
     privacy.py         microfone/câmera em uso (CapabilityAccessManager\ConsentStore)
     caffeine.py        SetThreadExecutionState (tela sempre acesa)
+    notifications.py   central de notificações do Ventude (avisos guardados no SQLite)
     qr.py              gerador de QR Code (ISO 18004) em Python puro
     lyrics.py          letra sincronizada do lrclib.net, com cache
     calc.py            calculadora segura da busca (ast, sem eval)
@@ -60,6 +61,8 @@ src/ventude/
     capture.py         sobreposição de tela: conta-gotas e seleção para OCR
     qr.py              cartão do QR Code dentro da ilha
     power_menu.py      menu da Central de Energia na ilha (sem o Shell)
+    lockscreen.py      tela de bloqueio do Ventude e bloqueio por inatividade (a senha fica com o Windows)
+    blackhole.py       efeito "buraco negro" da ilha (tecla Windows 3 vezes)
     tray.py            ícone e menu da bandeja, avisos
     pages/             uma classe por aba, criada só quando a aba é aberta
     shell/             Ventude Shell (2.0)

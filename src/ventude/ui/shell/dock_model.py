@@ -20,6 +20,8 @@ ICON_MIN = 30
 GAP = 4
 DIVIDER_W = 13
 UNPIN_DRAG_OFFSET = 48
+END_W = 30  # botões da ponta direita (Em segundo plano, Notificações)
+END_GAP = 2
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,8 @@ class DockLayout:
     overflow_items: tuple[TaskItem, ...] = ()
     start_rect: tuple[float, float, float, float] | None = None  # botão Iniciar (abre o Lançador)
     start_separator_x: float | None = None
+    end_rects: tuple[tuple[str, tuple[float, float, float, float]], ...] = ()
+    end_separator_x: float | None = None
 
     @property
     def overflow_count(self) -> int:
@@ -66,6 +70,18 @@ class DockLayout:
         in_band = self.capsule_y <= y <= self.capsule_y + self.capsule_h
         return in_band and sx - GAP / 2 <= x <= sx + sw + GAP / 2
 
+    def hit_end(self, x: float, y: float) -> str:
+        """Nome do botão da ponta direita sob o cursor ("" se nenhum)."""
+        if not (self.capsule_y <= y <= self.capsule_y + self.capsule_h):
+            return ""
+        for name, (ex, _ey, ew, _eh) in self.end_rects:
+            if ex - END_GAP / 2 <= x <= ex + ew + END_GAP / 2:
+                return name
+        return ""
+
+    def end_rect(self, name: str) -> tuple[float, float, float, float] | None:
+        return next((rect for key, rect in self.end_rects if key == name), None)
+
     def hit_overflow(self, x: float, y: float) -> bool:
         if self.overflow_rect is None:
             return False
@@ -82,7 +98,17 @@ class DockLayout:
         return count
 
 
+def _ends_width(ends: int) -> float:
+    return float(DIVIDER_W + ends * END_W + max(0, ends - 1) * END_GAP) if ends else 0.0
+
+
 def _content_width(
+    n_slots: int, slot_size: int, has_sep: bool, has_overflow: bool, has_start: bool = False, ends: int = 0
+) -> float:
+    return _base_width(n_slots, slot_size, has_sep, has_overflow, has_start) + _ends_width(ends)
+
+
+def _base_width(
     n_slots: int, slot_size: int, has_sep: bool, has_overflow: bool, has_start: bool = False
 ) -> float:
     total_units = n_slots + (1 if has_overflow else 0)
@@ -110,8 +136,9 @@ class SlotModel:
         insert_index: int | None = None,
         insert_section: str = "pinned",
         start_button: bool = False,
+        end_buttons: tuple[str, ...] = (),
     ) -> DockLayout:
-        limit = max(ICON_MIN + PAD_X * 2, max_w or (window_w - 32))
+        limit = max(ICON_MIN + PAD_X * 2, max_w or (window_w - 32)) - _ends_width(len(end_buttons))
         visible_items = [
             it for it in items if not (drag_key and not drag_outside and it.key == drag_key)
         ]
@@ -152,7 +179,7 @@ class SlotModel:
 
         n_units, has_sep = split_counts(visible_items)
         has_overflow = len(overflow) > 0
-        capsule_w = _content_width(n_units, slot_size, has_sep, has_overflow, start_button)
+        capsule_w = _content_width(n_units, slot_size, has_sep, has_overflow, start_button, len(end_buttons))
         capsule_x = (window_w - capsule_w) / 2.0
         capsule_y = float(WINDOW_H - BOTTOM_MARGIN - DOCK_H)
         slot_y = capsule_y + (DOCK_H - slot_size) / 2.0
@@ -224,7 +251,19 @@ class SlotModel:
         if has_overflow:
             overflow_rect = (cursor_x, slot_y, float(slot_size), float(slot_size))
 
+        end_rects: list[tuple[str, tuple[float, float, float, float]]] = []
+        end_separator_x: float | None = None
+        if end_buttons:
+            end_y = capsule_y + (DOCK_H - END_W) / 2.0
+            ex = capsule_x + capsule_w - PAD_X - len(end_buttons) * END_W - (len(end_buttons) - 1) * END_GAP
+            end_separator_x = ex - DIVIDER_W / 2.0
+            for name in end_buttons:
+                end_rects.append((name, (ex, end_y, float(END_W), float(END_W))))
+                ex += END_W + END_GAP
+
         return DockLayout(
+            end_rects=tuple(end_rects),
+            end_separator_x=end_separator_x,
             capsule_x=capsule_x,
             capsule_y=capsule_y,
             capsule_w=capsule_w,

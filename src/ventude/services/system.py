@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
@@ -279,6 +280,7 @@ def volume_step(up: bool, steps: int = 1) -> bool:
 # ---------- tecla Windows abre o Ventude (hook de teclado de baixo nível) ----------
 VK_LWIN, VK_RWIN, VK_A, VK_S = 0x5B, 0x5C, 0x41, 0x53
 WIN_KEYS = (VK_LWIN, VK_RWIN)
+TRIPLE_GAP_S = 0.45  # Win 3 vezes: no máximo isto entre um toque e o seguinte
 DIGIT_VKS = range(0x31, 0x3A)  # 1..9
 MODIFIERS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}  # Shift, Ctrl e Alt (esq./dir.)
 SHIFT_KEYS = {0x10, 0xA0, 0xA1}
@@ -300,6 +302,7 @@ class WinKeyLogic:
     - Win + A: abre Controles ("controls") e engole o A.
     - Win + 1..9 (ou Win + Shift + 1..9): aciona o slot N da Doca ("slot:N" / "slot_new:N").
     - Win + qualquer outra tecla (E, D, L, N, V, Tab, setas, Shift + S...): segue para o Windows.
+    - Win sozinha 3 vezes seguidas (com "triple"): esconde/mostra a ilha ("triple").
     Teclas injetadas por programas (inclusive pelo próprio Ventude) passam direto.
     """
 
@@ -310,6 +313,18 @@ class WinKeyLogic:
         self.combo = False  # outra tecla passou junto com o Win (atalho do Windows)
         self.swallowed = False  # engolimos uma tecla (Win + S/A/1..9): o Windows precisa da máscara
         self._down_swallowed: set[int] = set()
+        self.clock = time.monotonic
+        self.taps: list[float] = []  # quando o Win foi apertado sozinho (para o "3 vezes")
+
+    def _tap(self) -> bool:
+        """Registra um toque solo no Win; True no terceiro seguido (cada um a até 0,45 s do anterior)."""
+        now = self.clock()
+        self.taps = [t for t in self.taps if now - t <= TRIPLE_GAP_S * 2] + [now]
+        recent = self.taps[-3:]
+        if len(recent) == 3 and all(b - a <= TRIPLE_GAP_S for a, b in zip(recent, recent[1:], strict=False)):
+            self.taps.clear()
+            return True
+        return False
 
     def set_features(self, features: set[str]) -> None:
         self.features = set(features)
@@ -335,8 +350,14 @@ class WinKeyLogic:
                 return PASS, ""
             self._down_swallowed.clear()
             if self.swallowed:
+                self.taps.clear()
                 return BLOCK, "mask"
-            if not self.combo and "launcher" in self.features:
+            if self.combo:
+                self.taps.clear()
+                return PASS, ""
+            if "triple" in self.features and self._tap():
+                return BLOCK, "triple"
+            if "launcher" in self.features:
                 return BLOCK, "start"
             return PASS, ""
         if not self.wins:
@@ -382,6 +403,7 @@ class KeyboardHook(QObject):
     start_pressed = Signal()
     search_pressed = Signal()
     controls_pressed = Signal()
+    triple_pressed = Signal()  # Win 3 vezes: esconde/mostra a ilha
     slot_pressed = Signal(int, bool)  # (slot 1..9, nova janela?)
 
     def __init__(self) -> None:
@@ -465,10 +487,12 @@ class KeyboardHook(QObject):
                     action, event = self.logic.feed(int(data.vkCode), down, bool(data.flags & LLKHF_INJECTED))
                 except Exception:  # noqa: BLE001 - nunca travar o teclado
                     action, event = PASS, ""
-                if event in ("start", "mask"):
+                if event in ("start", "mask", "triple"):
                     release_win_masked(int(data.vkCode))
                 if event == "start":
                     self.start_pressed.emit()
+                elif event == "triple":
+                    self.triple_pressed.emit()
                 elif event == "search":
                     self.search_pressed.emit()
                 elif event == "controls":

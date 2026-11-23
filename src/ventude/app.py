@@ -236,6 +236,9 @@ def run() -> int:
 
     shell = ShellController(ctx, island)  # barra, Iniciar, Pesquisa, tecla Windows e "Até logo!"
     tray = Tray(ctx, island)
+    from ventude.ui.lockscreen import LockScreen
+
+    ctx.lock_screen = LockScreen(ctx)  # tela de bloqueio do Ventude (e o bloqueio por inatividade)
     _install_failsafes(app, shell)
 
     ipc_timestamps: list[float] = []
@@ -295,6 +298,7 @@ def run() -> int:
     tray.show()
     island.show()
     shell.start()
+    ctx.lock_screen.start()
     log.info("Ventude %s iniciado", __version__)
     tasks.run(net.browser_transport, done=lambda name: log.info("Conexão com claude.ai/grok.com: %s", name))
     if updates.enabled():

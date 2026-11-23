@@ -20,6 +20,7 @@ from ventude.services.lyrics import LyricsService
 from ventude.services.market import MarketService
 from ventude.services.media import MediaService
 from ventude.services.news import NewsService
+from ventude.services.notifications import NotificationCenter
 from ventude.services.power import PowerService
 from ventude.services.privacy import PrivacyMonitor
 from ventude.services.shelf import ShelfService
@@ -89,9 +90,12 @@ class AppContext(QObject):
         self.lyrics = LyricsService(store, self.run)
         self.indexer = Indexer(self.run)
         self.icons = IconCache()  # ícones reais do Windows (barra, Iniciar e busca)
+        self.notifications = NotificationCenter(store)  # tela de Notificações (Lançador e Doca)
+        self.tray_message.connect(lambda title, text: self.notifications.add(title, text))
         # Ventude Shell (2.0): o app liga estes dois; nos testes ficam vazios e tudo cai no modo da ilha.
         self.shell: object | None = None  # ShellController
         self.power_fx: object | None = None  # PowerFx: "Até logo!" antes de desligar, reiniciar...
+        self.lock_screen: object | None = None  # LockScreen: tela de bloqueio do Ventude (só no app)
         self.settings_changed.connect(lambda _s: self.hardware.sync())
         self.forecast: Forecast | None = None
         self.weather_busy = False
@@ -162,6 +166,8 @@ class AppContext(QObject):
     def stop(self) -> None:
         """Desfaz o que mexe no sistema (chamado ao sair)."""
         self.caffeine.stop()
+        if self.lock_screen is not None:
+            self.lock_screen.stop()  # type: ignore[attr-defined]
         self.audio.stop()
         self.hardware.stop()
         self.privacy.stop()
@@ -243,6 +249,10 @@ class AppContext(QObject):
         """Bloquear, suspender, desligar... Com o Shell, passa pela animação ("Até logo!") antes."""
         from ventude.services import power
 
+        if key == "lock" and self.lock_screen is not None:
+            # A tela do Ventude cobre tudo; o primeiro toque chama o bloqueio do Windows (senha).
+            self.lock_screen.show_lock(auto=False)  # type: ignore[attr-defined]
+            return True, ""
         if self.power_fx is not None and self.settings.power_animation:
             self.power_fx.play(key)  # type: ignore[attr-defined]
             return True, ""

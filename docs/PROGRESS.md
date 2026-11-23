@@ -1,5 +1,21 @@
 # Progresso
 
+## Iniciar mais completo, Notificações, tela de bloqueio e Windows 3×
+
+- [x] **Em segundo plano no Iniciar**: os apps da bandeja saíram dos Controles da ilha e viraram uma página do Lançador (grade com nome; clique abre, botão direito: abrir local, fechar, encerrar; atalho para a bandeja do Windows).
+- [x] **Ponta direita da Doca**: seta (Em segundo plano) e sino (Notificações, com ponto de "nova"); abrem o Lançador direto na página e fecham com outro clique.
+- [x] **Rodapé do Lançador**: Em segundo plano, Notificações (com selo), Conta-gotas e Texto da tela, além de Ajustes e Energia.
+- [x] **Controles mais enxutos**: sem volume/saída/microfone (a aba Áudio já cuida do Som), sem ferramentas e sem a bandeja; ficam as 8 teclas e os atalhos Som, Em segundo plano, Notificações e Configurações.
+- [x] **Notificações do Ventude**: limites das IAs, Agenda, timer, Sistema e avisos da bandeja ficam guardados (60 mais novos, no SQLite), agrupados por origem, com X por aviso/grupo, Limpar tudo e Não perturbe (o Silêncio). Música, volume e confirmações rápidas não entram.
+- [x] **Tela de bloqueio do Ventude**: relógio grande, data, clima, música e notificações novas em todas as telas. Aparece depois de N min parado (Ajustes > Bloqueio: 1, 2, 3, 5, 10, 15, 30 ou 60 min, personalizado ou Nunca; padrão 5) e no "Bloquear". O primeiro toque chama o bloqueio do Windows (senha/PIN/Hello); mexer nos primeiros 5 s depois de ela aparecer sozinha só tira a tela. Não bloqueia com Cafeína, jogo/vídeo em tela cheia ou app pedindo tela acesa (`CallNtPowerInformation`).
+- [x] **Windows 3×**: três toques seguidos na tecla Windows (até 0,45 s entre eles) somem com a ilha num "buraco negro" (as pontas são sugadas para o meio, gira, colapsa num brilho); mais três e ela volta. Ajuste em Bloqueio.
+- [x] **Clima**: o gráfico hora a hora mostra ícone, hora, temperatura e umidade em todas as horas (antes, de 2 em 2 quando apertado).
+
+### A validar no seu PC
+
+- Bloqueio por inatividade e o bloqueio do Windows logo depois do primeiro toque (vídeo no navegador não deve bloquear).
+- Windows 3× com e sem "Tecla Windows abre o Lançador" (sem ele, os dois primeiros toques abrem e fecham o Iniciar do Windows).
+
 ## Ajustes da 3.0 (Calma): tela cheia, Doca e busca no PC inteiro
 
 - [x] **Tela cheia de verdade**: sem a barra do Windows toda janela maximizada ocupa a tela, então a detecção agora ignora janelas maximizadas (`IsZoomed`) e conta jogos sem bordas pela área cliente cobrindo o monitor, além do `SHQueryUserNotificationState` (Direct3D exclusivo e modo apresentação).

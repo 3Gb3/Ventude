@@ -26,6 +26,8 @@ DEFAULT_SYMBOLS = "^BVSP:Ibovespa,BRL=X:Dólar,BTC-USD:Bitcoin,PETR4.SA:Petrobra
 DEFAULT_NEWS = "G1,BBC Brasil,Tecnoblog"
 ANIMATION_SPEEDS = {"nenhuma": 0, "rapida": 170, "normal": 260, "suave": 380}
 DOCK_MODES = ("esquivar", "sempre", "oculta")
+LOCK_PRESETS_MIN = (1, 2, 3, 5, 10, 15, 30, 60)  # opções prontas do "Bloquear depois de"
+LOCK_MAX_MIN = 24 * 60
 METRIC_KEYS = ("cpu", "gpu", "gpu_temp", "ram", "net_down", "net_up", "ping", "battery")
 
 
@@ -87,6 +89,9 @@ class Settings:
     shell_greeting: bool = True  # "Bom dia!" ao ligar o PC
     start_view: str = "category"  # legado
     pill_date: bool = True  # data na ilha fechada (única data no Shell 3.0)
+    lock_after_min: int = 5  # tela de bloqueio do Ventude depois de N min parado (0 = nunca)
+    lock_require_password: bool = True  # mexer na tela de bloqueio bloqueia o Windows (pede a senha)
+    win_triple_hide: bool = True  # tecla Windows 3 vezes seguidas esconde/mostra a ilha
     market_symbols: str = DEFAULT_SYMBOLS
     news_sources: str = DEFAULT_NEWS
     layout_version: int = 3
@@ -177,6 +182,7 @@ class Settings:
         s.collapse_delay_ms = max(0, min(s.collapse_delay_ms, 10_000))
         s.limits_interval_min = max(2, min(s.limits_interval_min, 60))
         s.hover_delay_ms = max(0, min(s.hover_delay_ms, 2000))
+        s.lock_after_min = max(0, min(s.lock_after_min, LOCK_MAX_MIN))
         if s.media_source not in ("spotify", "any"):
             s.media_source = "spotify"
         if s.animation not in ANIMATION_SPEEDS:

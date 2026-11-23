@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
     QRegion,
 )
 from PySide6.QtWidgets import (
@@ -57,7 +58,7 @@ from PySide6.QtWidgets import (
 
 from ventude.core.config import MODULES, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
-from ventude.services import apps, hardware, system, winutil
+from ventude.services import hardware, system, winutil
 from ventude.services.hardware import Snapshot
 from ventude.services.media import MediaState
 from ventude.services.privacy import PrivacyState
@@ -1047,6 +1048,8 @@ class Island(QWidget):
         self._dragging = False
         self._auto_hidden = False
         self._user_hidden = False
+        self._hole: object | None = None  # BlackHole rodando (Win 3 vezes)
+        self._hole_pixmap: QPixmap | None = None
         self._quitting = False
         self._collapsed_at = time.time()
         self._hotkey = False
@@ -1371,7 +1374,6 @@ class Island(QWidget):
         self.mode = IslandMode.CONTROLS
         self.controls.refresh_clock()
         self.controls.refresh()
-        self.ctx.run(apps.tray_apps, done=self.controls.set_tray_apps, owner=self.controls)
         self._animate(self.target_rect(IslandMode.CONTROLS), opening=True)
         if self._revealing():
             self._layout_panel()
@@ -1964,6 +1966,9 @@ class Island(QWidget):
 
     def show_toast(self, toast: Toast) -> None:
         """A ilha cresce um pouco com o aviso e volta a ser pílula sozinha."""
+        center = getattr(self.ctx, "notifications", None)
+        if center is not None:
+            center.add(toast.title, toast.text, kind=toast.kind, icon=toast.icon, color=toast.color)
         if not self._allows_in_quiet(toast):
             return
         blocked_by_ui = self.open_body or self._hover_suspended
@@ -2231,3 +2236,38 @@ class Island(QWidget):
         self._auto_hidden = False
         self._user_hidden = hidden
         self.setVisible(not hidden)
+
+    def black_hole(self) -> None:
+        """Tecla Windows 3 vezes: a ilha é sugada para o meio e some; de novo, volta do ponto."""
+        from ventude.ui.blackhole import BlackHole
+
+        if getattr(self, "_hole", None) is not None:
+            return  # uma animação por vez
+        hiding = self.isVisible() and not self._user_hidden
+        if hiding:
+            if self.mode != IslandMode.PILL or self._toast is not None:
+                self._cancel_toasts()
+                self.collapse()
+                self.setGeometry(self.target_rect(IslandMode.PILL))
+            self._hole_pixmap = self.grab()
+            rect = self.geometry()
+            self.user_hidden(True)
+        else:
+            rect = self.target_rect(IslandMode.PILL)
+            if self._hole_pixmap is None or self._hole_pixmap.isNull():
+                self.setGeometry(rect)
+                self._hole_pixmap = self.grab()
+        hole = BlackHole(self._hole_pixmap, rect, inward=hiding, settings=self.ctx.settings)
+        self._hole = hole
+
+        def done() -> None:
+            self._hole = None
+            if not hiding:
+                self.user_hidden(False)
+                self.reposition()
+                self.raise_()
+            shell = getattr(self.ctx, "shell", None)
+            if shell is not None and hasattr(shell, "sync_echos"):
+                shell.sync_echos()  # type: ignore[attr-defined]
+
+        hole.play(done)

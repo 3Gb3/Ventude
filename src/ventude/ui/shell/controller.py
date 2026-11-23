@@ -72,6 +72,7 @@ class ShellController(QObject):
         self.keys.start_pressed.connect(self.win_pressed)
         self.keys.search_pressed.connect(lambda: self.open_search())
         self.keys.controls_pressed.connect(self.open_controls)
+        self.keys.triple_pressed.connect(self.triple_win)
         self.keys.slot_pressed.connect(self.activate_slot)
         self.events = events or shellhook.ShellEvents(self)
         self.events.windows_changed.connect(self.refresh_windows)
@@ -123,6 +124,9 @@ class ShellController(QObject):
         ctx.power.changed.connect(self._power_pending)  # type: ignore[attr-defined]
         ctx.indexer.apps_ready.connect(lambda _n: self.seed_start_pins())  # type: ignore[attr-defined]
         ctx.icons.changed.connect(lambda _n: self._icons_arrived())  # type: ignore[attr-defined]
+        center = getattr(ctx, "notifications", None)
+        if center is not None:
+            center.changed.connect(self._repaint_docks)  # selo do sino na Doca
 
     @property
     def taskbars(self) -> list[Dock]:
@@ -189,6 +193,8 @@ class ShellController(QObject):
             features.add("controls")
         if taskbar_on and getattr(settings, "hotkey_dock_numbers", True):
             features.add("slots")
+        if getattr(settings, "win_triple_hide", True):
+            features.add("triple")
         self.keys.set_features(features)
         want = bool(features)
         if want and not self.keys.active:
@@ -235,6 +241,7 @@ class ShellController(QObject):
             dock.pin_unpinned.connect(self._unpin_taskbar_pin)
             dock.pin_dropped.connect(self._drop_pin_on_dock)
             dock.start_clicked.connect(self.start_button_clicked)
+            dock.end_clicked.connect(self.open_page)
             self._apply_items_to_dock(dock)
             dock.start_bar(entrance=True, start_hidden=start_hidden)
             self.docks.append(dock)
@@ -785,7 +792,23 @@ class ShellController(QObject):
         if self.island is not None and hasattr(self.island, "suspend_hover"):
             self.island.suspend_hover(on)  # type: ignore[attr-defined]
 
-    def open_search(self, text: str = "") -> None:
+    def open_page(self, page: str) -> None:
+        """Botões da ponta direita da Doca: abre o Lançador na página (ou fecha, se já está nela)."""
+        if self.fx.active:
+            return
+        launcher = self.launcher
+        if launcher is not None and launcher.isVisible() and not launcher.closing:
+            if launcher.current_page() == page:
+                launcher.dismiss()
+            else:
+                launcher._open_page(page)
+            self._repaint_docks()
+            return
+        if launcher is not None and time.monotonic() - getattr(launcher, "_last_closed_at", 0.0) < 0.4:
+            return  # o clique acabou de fechar o Lançador (perdeu o foco): não reabre
+        self.open_search("", page=page)
+
+    def open_search(self, text: str = "", page: str = "") -> None:
         if self.fx.active:
             return
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
@@ -796,7 +819,7 @@ class ShellController(QObject):
                 dock.suppress_hover_label = True
                 if dock.slid:
                     dock.slide(False)
-        self._launcher().open_launcher(rect, text=text)
+        self._launcher().open_launcher(rect, text=text, page=page)
 
     def start_button_clicked(self) -> None:
         """Botão Iniciar da Doca. Se o clique acabou de fechar o Lançador (perdeu o foco), não reabre."""
@@ -817,6 +840,14 @@ class ShellController(QObject):
 
     def win_pressed(self) -> None:
         self.toggle_start()
+
+    def triple_win(self) -> None:
+        """Win 3 vezes: os 2 primeiros toques abriram e fecharam o Lançador; o 3º some/volta a ilha."""
+        if self.launcher is not None and self.launcher.isVisible():
+            self.launcher.dismiss()
+        if self.fx.active or self.island is None or not hasattr(self.island, "black_hole"):
+            return
+        self.island.black_hole()  # type: ignore[attr-defined]
 
     def open_controls(self) -> None:
         if self.fx.active or self.island is None:
