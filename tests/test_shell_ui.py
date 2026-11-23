@@ -440,9 +440,7 @@ def test_dock_reorder_unpin_and_controls_in_island(qapp, app_ctx, island, shell)
 
     shell.keys.controls_pressed.emit()
     assert wait_for(qapp, lambda: island.mode == IslandMode.CONTROLS)
-    h_before = island.controls.preferred_height()
-    island.controls._toggle_devices()
-    assert island.controls.preferred_height() > h_before
+    assert not hasattr(island.controls, "slider")  # o volume mora na aba Áudio
     app_ctx.caffeine._apply = lambda _flags: True
     island.controls.caffeine.clicked.emit()
     assert app_ctx.caffeine.active and island.controls.caffeine.on
@@ -732,22 +730,20 @@ def test_oculta_mode_and_win_launcher_dock_sync(qapp, app_ctx, island, shell):
     assert wait_for(qapp, lambda: not ln.isVisible() and dock.slid)
 
 
-def test_controls_tray_icon_right_click_menu_and_close(qapp, app_ctx, island, monkeypatch):
+def test_background_apps_in_launcher_menu_and_close(qapp, app_ctx, shell, monkeypatch):
     from PySide6.QtTest import QTest
 
     from ventude.services import apps
-    from ventude.ui.shell.controls import TrayIcon
+    from ventude.ui.shell.background import BackgroundTile, BackgroundView
 
     seen_menus: list[list[str]] = []
     closed_exes: list[tuple[str, bool]] = []
     errors: list[tuple[str, str]] = []
     app_ctx.tray_message.connect(lambda t, m: errors.append((t, m)))
-
-    controls = island.controls
     monkeypatch.setattr(
-        controls,
+        BackgroundView,
         "_exec_menu",
-        lambda menu, _pos: seen_menus.append([a.text() for a in menu.actions() if a.text()]),
+        lambda _self, menu, _pos: seen_menus.append([a.text() for a in menu.actions() if a.text()]),
     )
 
     def fake_close(exe, *, force=False, **_kw):
@@ -757,18 +753,48 @@ def test_controls_tray_icon_right_click_menu_and_close(qapp, app_ctx, island, mo
     monkeypatch.setattr(apps, "close_background_app", fake_close)
     monkeypatch.setattr(apps, "tray_apps", lambda: [])
 
-    controls.set_tray_apps([apps.TrayApp("Discord", r"C:\Apps\Discord.exe", b"")])
-    icons_found = [w for w in controls._tray_widgets if isinstance(w, TrayIcon)]
-    assert len(icons_found) == 1
-    QTest.mouseClick(icons_found[0], Qt.MouseButton.RightButton)
+    shell.open_page("background")  # botão da ponta direita da Doca
+    ln = shell.launcher
+    assert wait_for(qapp, ln.isVisible) and ln.current_page() == "background"
+    view = ln.background_view
+    view.set_apps([apps.TrayApp("Discord", r"C:\Apps\Discord.exe", b"")])
+    assert view.title.text() == "Em segundo plano · 1" and ln.status.background_btn.count == 1
+    assert len(view.tiles) == 1 and isinstance(view.tiles[0], BackgroundTile)
+    QTest.mouseClick(view.tiles[0], Qt.MouseButton.RightButton)
     assert seen_menus and "Fechar aplicativo" in seen_menus[0] and "Encerrar processo" in seen_menus[0]
 
     app_item = apps.TrayApp("Discord", r"C:\Apps\Discord.exe", b"")
-    controls._close_tray_app(app_item, force=False)
+    view.close_app(app_item, force=False)
     assert wait_for(qapp, lambda: len(closed_exes) == 1)
-    controls._close_tray_app(app_item, force=True)
+    view.close_app(app_item, force=True)
     assert wait_for(qapp, lambda: len(closed_exes) == 2 and len(errors) == 1)
     assert closed_exes == [(r"C:\Apps\Discord.exe", False), (r"C:\Apps\Discord.exe", True)]
+    shell.open_page("background")  # de novo na mesma página: fecha
+    assert wait_for(qapp, lambda: not ln.isVisible())
+
+
+def test_notifications_center_page_and_dock_bell(qapp, app_ctx, island, shell):
+    from ventude.ui.toast import Toast
+
+    center = app_ctx.notifications
+    center.clear()
+    island.show_toast(Toast("Claude em 95%", "Sessão de 5h", icon="gauge", kind="limits"))
+    island.show_toast(Toast("Música", "Artista", kind="music"))  # passageira: não entra
+    app_ctx.tray_message.emit("Claude em 95%", "Sessão de 5h")  # o mesmo aviso pela bandeja conta 1 vez
+    assert [n.title for n in center.items] == ["Claude em 95%"] and center.unread == 1
+
+    shell.open_page("notifications")
+    ln = shell.launcher
+    assert wait_for(qapp, ln.isVisible) and ln.current_page() == "notifications"
+    assert center.unread == 0 and ln.status.notif_btn.count == 0  # abriu, viu
+    view = ln.notifications_view
+    assert any(type(w).__name__ == "NoticeCard" for w in view.cards)
+    view.quiet_btn.click()
+    assert app_ctx.settings.quiet_mode
+    view.quiet_btn.click()
+    view.clear_btn.click()
+    assert not center.items and view.empty.isVisibleTo(view)
+    ln.hide()
 
 
 def test_quit_closes_island_and_dock_and_restores_taskbar(qapp, app_ctx, island, shell):
@@ -831,11 +857,10 @@ def test_controls_fit_their_content_and_menus_stay_on_top(qapp, app_ctx, island)
     from ventude.ui import brand
 
     controls = island.controls
-    controls.set_tray_apps([apps.TrayApp(f"App {n}", rf"C:\Apps\a{n}.exe", b"") for n in range(12)])
     layout = controls.layout()
     layout.activate()
     assert controls.preferred_height() >= layout.totalMinimumSize().height()  # nada espremido
-    assert controls.tray_title.text() == "Em segundo plano · 12"
+    assert apps  # a lista de apps em segundo plano foi para o Lançador
     menu = brand.ink_menu(controls)
     assert menu.windowFlags() & QtNs.WindowType.WindowStaysOnTopHint
     menu.deleteLater()

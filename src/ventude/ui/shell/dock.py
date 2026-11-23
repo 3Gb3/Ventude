@@ -23,7 +23,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QWidget
 
 from ventude.services import dwm, winutil
-from ventude.ui import brand, motion, theme
+from ventude.ui import brand, icons, motion, theme
 from ventude.ui.shell.common import app_pixmap, draw_pixmap, shell_font
 from ventude.ui.shell.dock_model import (
     BOTTOM_MARGIN,
@@ -46,6 +46,7 @@ HOVER_LIFT_PX = 4.0
 HOVER_SCALE = 0.10
 PINNED_IDLE_OPACITY = 0.9  # fixado sem janela: cor normal, só um pouco mais discreto
 EDGE_STRIP_PX = 4
+END_BUTTONS = ("background", "notifications")
 
 
 class Dock(QWidget):
@@ -60,6 +61,7 @@ class Dock(QWidget):
     pin_unpinned = Signal(int)  # pin_id removido via Puf
     pin_dropped = Signal(str, str, str, int)  # (kind, label, target, insert_index)
     start_clicked = Signal()  # botão Iniciar: abre/fecha o Lançador sem precisar da tecla Windows
+    end_clicked = Signal(str)  # "background" | "notifications": abre o Lançador nessa página
 
     def __init__(self, ctx: object, shell: object, screen: object) -> None:
         super().__init__(
@@ -93,6 +95,8 @@ class Dock(QWidget):
         self._hovered_overflow = False
         self._pressed_key = ""
         self._hovered_start = False
+        self._hovered_end = ""
+        self._pressed_end = ""
         self._pressed_start = False
         self._start_halo = 0.0
         self._show_hover_label = False
@@ -352,6 +356,7 @@ class Dock(QWidget):
             insert_index=insert_idx,
             insert_section=self._drag_section if self._dragging_internal else "pinned",
             start_button=True,
+            end_buttons=END_BUTTONS,
         )
         reduced = motion.reduced_motion(getattr(self.ctx, "settings", None))
         for slot in self._layout.slots:
@@ -455,7 +460,7 @@ class Dock(QWidget):
 
     def _reveal_hover_label(self) -> None:
         if (
-            (self._hovered_key or self._hovered_start)
+            (self._hovered_key or self._hovered_start or self._hovered_end)
             and not self.suppress_hover_label
             and not self._dragging_internal
             and not self._menus_open()
@@ -488,7 +493,9 @@ class Dock(QWidget):
         for slot in lay.slots:
             self._paint_slot(p, slot, now, reduced)
 
-        for sep_x in (lay.start_separator_x, lay.separator_x):
+        self._paint_ends(p)
+
+        for sep_x in (lay.start_separator_x, lay.separator_x, lay.end_separator_x):
             if sep_x is not None:
                 p.setPen(QPen(QColor(theme.HAIRLINE), 1.0))
                 p.drawLine(QPointF(sep_x, cap.top() + 12), QPointF(sep_x, cap.bottom() - 12))
@@ -513,6 +520,10 @@ class Dock(QWidget):
         ):
             sx, _sy, sw, _sh = lay.start_rect
             self._paint_label_pill(p, sx + sw / 2.0, "Iniciar")
+        end = lay.end_rect(self._hovered_end) if self._hovered_end else None
+        label_ok = self._show_hover_label and not self.suppress_hover_label and not self._menus_open()
+        if label_ok and end is not None:
+            self._paint_label_pill(p, end[0] + end[2] / 2.0, self._end_label(self._hovered_end))
         if (
             self._show_hover_label
             and self._hovered_key
@@ -658,6 +669,62 @@ class Dock(QWidget):
             p.setBrush(QColor(theme.DOT_FOCUS))
             p.drawRoundedRect(QRectF(cx - 7.0, rect.bottom() - 4.0, 14.0, 3.0), 1.5, 1.5)
 
+    def _unread(self) -> int:
+        center = getattr(self.ctx, "notifications", None)
+        return int(getattr(center, "unread", 0) or 0)
+
+    def _end_label(self, name: str) -> str:
+        if name == "notifications":
+            unread = self._unread()
+            return f"Notificações · {unread} nova{'s' if unread > 1 else ''}" if unread else "Notificações"
+        return "Em segundo plano"
+
+    def _launcher_page(self) -> str:
+        launcher = getattr(self.shell, "launcher", None)
+        if not self._launcher_open() or launcher is None or not hasattr(launcher, "current_page"):
+            return ""
+        return str(launcher.current_page())
+
+    def _paint_ends(self, p: QPainter) -> None:
+        """Ponta direita: apps em segundo plano (seta) e Notificações (sino com selo)."""
+        page = self._launcher_page()
+        for name, raw in self._layout.end_rects:
+            rect = QRectF(*raw)
+            active = page == name
+            if self._pressed_end == name or self._hovered_end == name or active:
+                p.setPen(Qt.PenStyle.NoPen)
+                if self._pressed_end == name:
+                    p.setBrush(QColor(theme.HALO_PRESS))
+                elif self._hovered_end == name:
+                    p.setBrush(QColor(255, 255, 255, 20))
+                else:
+                    p.setBrush(QColor(255, 255, 255, 10))
+                p.drawRoundedRect(rect.adjusted(0, 1, 0, -1), theme.R_ITEM, theme.R_ITEM)
+            icon_name = "chevron-up" if name == "background" else "bell"
+            color = theme.ACCENT if active else theme.TEXT_2
+            size = 16.0
+            draw_pixmap(
+                p,
+                icons.pixmap(icon_name, color, int(size)),
+                QRectF(rect.center().x() - size / 2, rect.center().y() - size / 2, size, size),
+            )
+            if name == "notifications" and self._unread():
+                p.setPen(QPen(QColor(theme.INK), 1.5))
+                p.setBrush(QColor(theme.ACCENT))
+                p.drawEllipse(QPointF(rect.center().x() + 5.5, rect.center().y() - 6.0), 3.6, 3.6)
+
+    def _set_end_hover(self, name: str) -> None:
+        if name == self._hovered_end:
+            return
+        self._hovered_end = name
+        if name:
+            self._show_hover_label = False
+            self._hover_label_timer.start()
+        elif not (self._hovered_key or self._hovered_start):
+            self._show_hover_label = False
+            self._hover_label_timer.stop()
+        self.update()
+
     def _paint_hover_label(self, p: QPainter, slot: SlotRect) -> None:
         text = slot.item.label
         if slot.item.other_monitor:
@@ -735,7 +802,9 @@ class Dock(QWidget):
     def leaveEvent(self, _event: object) -> None:
         self._pressed_key = ""
         self._pressed_start = False
+        self._pressed_end = ""
         self._set_start_hover(False)
+        self._set_end_hover("")
         if not self._dragging_internal:
             self._set_hover(None, False)
 
@@ -764,17 +833,25 @@ class Dock(QWidget):
                 self._ensure_tick()
                 self.update()
                 return
+        on_end = self._layout.hit_end(pos.x(), pos.y())
         on_start = self._layout.hit_start(pos.x(), pos.y())
-        slot = None if on_start else self._layout.hit(pos.x(), pos.y())
+        slot = None if (on_start or on_end) else self._layout.hit(pos.x(), pos.y())
         overflow = False if (slot is not None or on_start) else self._layout.hit_overflow(pos.x(), pos.y())
         self._set_hover(slot, overflow)
         self._set_start_hover(on_start)
+        self._set_end_hover(on_end)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         pos = event.position()
         if event.button() == Qt.MouseButton.LeftButton and self._layout.hit_start(pos.x(), pos.y()):
             self._pressed_start = True
             self.update()
+            return
+        end = self._layout.hit_end(pos.x(), pos.y())
+        if end:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._pressed_end = end
+                self.update()
             return
         slot = self._layout.hit(pos.x(), pos.y())
         if event.button() == Qt.MouseButton.LeftButton and slot is not None:
@@ -793,6 +870,13 @@ class Dock(QWidget):
             self._pressed_start = False
             if event.button() == Qt.MouseButton.LeftButton and self._layout.hit_start(pos.x(), pos.y()):
                 self.start_clicked.emit()
+            self.update()
+            return
+        if self._pressed_end:
+            pressed, self._pressed_end = self._pressed_end, ""
+            same = self._layout.hit_end(pos.x(), pos.y()) == pressed
+            if event.button() == Qt.MouseButton.LeftButton and same:
+                self.end_clicked.emit(pressed)
             self.update()
             return
         if self._dragging_internal and self._drag_slot is not None:

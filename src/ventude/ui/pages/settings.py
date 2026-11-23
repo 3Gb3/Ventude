@@ -11,13 +11,14 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from ventude import __version__
 from ventude.core import updates
-from ventude.core.config import MODULES, Settings
+from ventude.core.config import LOCK_MAX_MIN, LOCK_PRESETS_MIN, MODULES, Settings
 from ventude.core.paths import app_data_dir
 from ventude.limits import claude, codex, copilot, cursor, grok
 from ventude.limits.model import PROVIDERS
@@ -25,6 +26,7 @@ from ventude.services import system
 from ventude.services.news import FEEDS
 from ventude.ui import icons, theme
 from ventude.ui.context import AppContext
+from ventude.ui.lockscreen import timeout_label
 from ventude.ui.pages.base import Page, scroller
 from ventude.ui.widgets import Card, Switch, hbox, label, repolish, vbox
 
@@ -493,7 +495,7 @@ class SettingsPage(Page):
         body.addWidget(
             setting_row(
                 "Win + A abre Controles",
-                "Abre volume, microfone, ferramentas e bandeja direto na ilha.",
+                "Abre as teclas rápidas (rede, Cafeína, microfone, Foco, Silêncio) direto na ilha.",
                 self.hotkey_controls,
             )
         )
@@ -545,6 +547,9 @@ class SettingsPage(Page):
             )
         )
         column.addWidget(card)
+
+        # ---------- bloqueio ----------
+        column.addWidget(self._lock_card(s))
 
         # ---------- abas ----------
         card, body = section("Abas")
@@ -850,6 +855,77 @@ class SettingsPage(Page):
                 box.blockSignals(False)
 
     # ---------- ações ----------
+    def _lock_card(self, s: Settings) -> Card:
+        """Tela de bloqueio: tempo parado até bloquear (prontos, personalizado ou nunca) e a senha."""
+        card, body = section("Bloqueio")
+        body.addWidget(
+            label(
+                "Depois do tempo sem mexer no PC, a tela de bloqueio do Ventude cobre todas as telas "
+                "(relógio, clima, música e avisos). Não bloqueia com Cafeína, vídeo tocando "
+                "ou jogo em tela cheia.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        options: list[tuple[str, object]] = [(timeout_label(m), m) for m in LOCK_PRESETS_MIN]
+        options += [("Personalizado…", -1), ("Nunca", 0)]
+        custom = s.lock_after_min > 0 and s.lock_after_min not in LOCK_PRESETS_MIN
+        self.lock_after = combo(options, -1 if custom else s.lock_after_min)
+        self.lock_custom = QSpinBox()
+        self.lock_custom.setRange(1, LOCK_MAX_MIN)
+        self.lock_custom.setSuffix(" min")
+        self.lock_custom.setFixedWidth(110)
+        self.lock_custom.setValue(s.lock_after_min if custom else 20)
+        self.lock_custom.setVisible(custom)
+        self.lock_custom.editingFinished.connect(lambda: self._set(lock_after_min=self.lock_custom.value()))
+        self.lock_after.currentIndexChanged.connect(self._lock_choice)
+        controls = QWidget()
+        row = QHBoxLayout(controls)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        row.addWidget(self.lock_custom)
+        row.addWidget(self.lock_after)
+        body.addWidget(setting_row("Bloquear depois de", "Padrão: 5 minutos.", controls))
+        self.lock_password = self._switch(s.lock_require_password, "lock_require_password")
+        body.addWidget(
+            setting_row(
+                "Pedir a senha do Windows",
+                "Ao mexer na tela de bloqueio, o Windows pede a senha, o PIN ou o Windows Hello. "
+                "Mexer nos primeiros 5 segundos depois de ela aparecer sozinha não pede.",
+                self.lock_password,
+            )
+        )
+        self.win_triple = self._switch(s.win_triple_hide, "win_triple_hide")
+        body.addWidget(
+            setting_row(
+                "Windows 3× esconde a ilha",
+                "Aperte a tecla Windows três vezes seguidas: a ilha é sugada para o meio e some. "
+                "Mais três vezes e ela volta.",
+                self.win_triple,
+            )
+        )
+        test = QPushButton("Ver a tela de bloqueio")
+        test.setCursor(Qt.CursorShape.PointingHandCursor)
+        test.clicked.connect(self._preview_lock)
+        body.addWidget(test, 0, Qt.AlignmentFlag.AlignLeft)
+        return card
+
+    def _lock_choice(self) -> None:
+        value = int(self.lock_after.currentData())
+        self.lock_custom.setVisible(value < 0)
+        if value < 0:
+            self.lock_custom.setFocus()
+            self._set(lock_after_min=self.lock_custom.value())
+        else:
+            self._set(lock_after_min=value)
+
+    def _preview_lock(self) -> None:
+        """Mostra a tela sem pedir senha (é só uma prévia): qualquer toque volta."""
+        lock = getattr(self.ctx, "lock_screen", None)
+        if lock is None:
+            return
+        lock.show_lock(preview=True)
+
     def _switch(self, value: bool, field: str) -> Switch:
         switch = Switch()
         switch.setChecked(value)

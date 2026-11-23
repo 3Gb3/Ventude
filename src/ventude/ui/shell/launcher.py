@@ -31,8 +31,10 @@ from PySide6.QtWidgets import (
 
 from ventude.services import apps, power, winutil
 from ventude.ui import brand, icons, motion, theme
+from ventude.ui.shell.background import BackgroundView
 from ventude.ui.shell.common import Avatar, HoverButton, ShellWindow, app_pixmap, draw_pixmap, shell_font
 from ventude.ui.shell.items import find_matching_pin
+from ventude.ui.shell.notifications import NotificationsView
 from ventude.ui.shell.results import SearchResults
 from ventude.ui.shell.tiles import AppList, Tile, TileGrid
 
@@ -637,8 +639,39 @@ class PersonButton(HoverButton):
         p.drawText(self.rect().adjusted(34, 0, -6, 0), Qt.AlignmentFlag.AlignVCenter, self.text)
 
 
+class BadgeButton(HoverButton):
+    """Botão de ícone com um selo de número (notificações novas, apps em segundo plano)."""
+
+    def __init__(self, icon: str, tip: str, accent: bool = True) -> None:
+        super().__init__(icon, "", tip, QSize(30, 30), 15, theme.R_ITEM)
+        self.count = 0
+        self.accent = accent
+        self.base_tip = tip
+
+    def set_count(self, count: int) -> None:
+        self.count = max(0, int(count))
+        self.setToolTip(f"{self.base_tip} · {self.count}" if self.count else self.base_tip)
+        self.update()
+
+    def paintEvent(self, event: object) -> None:
+        super().paintEvent(event)
+        if not self.count:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        text = str(self.count) if self.count < 10 else "9+"
+        p.setFont(shell_font(8, QFont.Weight.Bold))
+        w = max(13.0, p.fontMetrics().horizontalAdvance(text) + 6.0)
+        rect = QRectF(self.width() - w - 1, 1, w, 13)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(theme.ACCENT if self.accent else theme.INK_KEY))
+        p.drawRoundedRect(rect, 6.5, 6.5)
+        p.setPen(QColor(theme.ACCENT_TEXT if self.accent else theme.TEXT_2))
+        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+
+
 class StatusLine(QWidget):
-    """Linha inferior de 34 px: conta à esquerda; Ajustes e Energia à direita."""
+    """Linha inferior: conta à esquerda; segundo plano, notificações, ferramentas, Ajustes e Energia."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -647,10 +680,21 @@ class StatusLine(QWidget):
         row.setContentsMargins(6, 2, 6, 0)
         row.setSpacing(6)
         self.person = PersonButton()
+        self.background_btn = BadgeButton("apps", "Em segundo plano", accent=False)
+        self.notif_btn = BadgeButton("bell", "Notificações")
+        small = QSize(30, 30)
+        self.color_btn = HoverButton("pipette", "", "Conta-gotas (copia a cor)", small, 15, theme.R_ITEM)
+        self.ocr_btn = HoverButton("scan", "", "Capturar texto da tela (OCR)", small, 15, theme.R_ITEM)
         self.settings_btn = HoverButton("settings", "", "Ajustes do Ventude", QSize(30, 30), 15, theme.R_ITEM)
         self.power_btn = HoverButton("power", "", "Energia (Ctrl+P)", QSize(30, 30), 15, theme.R_ITEM)
         row.addWidget(self.person)
         row.addStretch(1)
+        row.addWidget(self.background_btn)
+        row.addWidget(self.notif_btn)
+        row.addSpacing(6)
+        row.addWidget(self.color_btn)
+        row.addWidget(self.ocr_btn)
+        row.addSpacing(6)
         row.addWidget(self.settings_btn)
         row.addWidget(self.power_btn)
 
@@ -764,11 +808,24 @@ class LauncherWindow(ShellWindow):
         self.power_view.action_triggered.connect(self._run_power)
         self.power_view.back_requested.connect(self.show_home)
 
+        self.background_view = BackgroundView(ctx, shell)
+        self.background_view.back_requested.connect(self.show_home)
+        self.background_view.finished.connect(self.dismiss)
+
+        self.notifications_view = NotificationsView(ctx)
+        self.notifications_view.back_requested.connect(self.show_home)
+        self.notifications_view.finished.connect(self.dismiss)
+
         self.pages = QStackedWidget()
         self.pages.addWidget(self.home_view)
         self.pages.addWidget(self.results)
         self.pages.addWidget(self.all_apps)
         self.pages.addWidget(self.power_view)
+        self.pages.addWidget(self.background_view)
+        self.pages.addWidget(self.notifications_view)
+        repaint = getattr(shell, "_repaint_docks", None)
+        if callable(repaint):
+            self.pages.currentChanged.connect(lambda _i: repaint())  # realce dos botões da Doca
 
         # Rodapé
         self.status = StatusLine()
@@ -777,6 +834,15 @@ class LauncherWindow(ShellWindow):
             lambda: (self.dismiss(), shell.open_settings())  # type: ignore[attr-defined]
         )
         self.status.power_btn.clicked.connect(self.toggle_power)
+        self.status.background_btn.clicked.connect(self.toggle_background)
+        self.status.notif_btn.clicked.connect(self.toggle_notifications)
+        self.status.color_btn.clicked.connect(lambda: self._tool("color"))
+        self.status.ocr_btn.clicked.connect(lambda: self._tool("ocr"))
+        self.background_view.count_changed.connect(self.status.background_btn.set_count)
+        center = getattr(ctx, "notifications", None)
+        if center is not None:
+            center.changed.connect(self._sync_badges)
+        self._sync_badges()
 
         body = QVBoxLayout(self._content)
         body.setContentsMargins(20, 18, 20, 10)
@@ -855,7 +921,7 @@ class LauncherWindow(ShellWindow):
             self.setGeometry(rect)
 
     # ---------- abrir & fechar ----------
-    def open_launcher(self, screen_rect: QRect, text: str = "") -> None:
+    def open_launcher(self, screen_rect: QRect, text: str = "", page: str = "") -> None:
         self._anchor_screen_rect = screen_rect
         self._closing = False
         self._reveal.stop()
@@ -877,6 +943,9 @@ class LauncherWindow(ShellWindow):
             rect = self.target_geometry(screen_rect, active=False)
 
         self.refresh()
+        if page and not text:
+            self._open_page(page)
+            rect = self.target_geometry(screen_rect, active=self._active_height)
         self._reveal_target = rect.topLeft()
         self.opened_at = time.monotonic()
 
@@ -958,6 +1027,63 @@ class LauncherWindow(ShellWindow):
         self.pages.setCurrentWidget(self.power_view)
         self._sync_height(active=False)
         self.power_view.setFocus()
+
+    def _open_page(self, page: str) -> None:
+        if page == "background":
+            self.show_background()
+        elif page == "notifications":
+            self.show_notifications()
+        elif page == "power":
+            self.show_power()
+        elif page == "apps":
+            self.show_all_apps()
+
+    def current_page(self) -> str:
+        current = self.pages.currentWidget()
+        names = {
+            self.home_view: "home",
+            self.results: "search",
+            self.all_apps: "apps",
+            self.power_view: "power",
+            self.background_view: "background",
+            self.notifications_view: "notifications",
+        }
+        return names.get(current, "home")
+
+    def toggle_background(self) -> None:
+        if self.pages.currentWidget() is self.background_view:
+            self.show_home()
+        else:
+            self.show_background()
+
+    def show_background(self) -> None:
+        self.background_view.refresh()
+        self.pages.setCurrentWidget(self.background_view)
+        self._sync_height(active=False)
+        self.background_view.setFocus()
+
+    def toggle_notifications(self) -> None:
+        if self.pages.currentWidget() is self.notifications_view:
+            self.show_home()
+        else:
+            self.show_notifications()
+
+    def show_notifications(self) -> None:
+        self.notifications_view.refresh()
+        self.pages.setCurrentWidget(self.notifications_view)
+        self._sync_height(active=True)
+        self.notifications_view.setFocus()
+        self.notifications_view.mark_read()  # viu: o selo some (os cartões mantêm o risquinho até reabrir)
+
+    def _sync_badges(self) -> None:
+        center = getattr(self.ctx, "notifications", None)
+        self.status.notif_btn.set_count(center.unread if center is not None else 0)
+
+    def _tool(self, name: str) -> None:
+        self.dismiss()
+        signal = getattr(self.ctx, "tool_requested", None)
+        if signal is not None:
+            QTimer.singleShot(220, lambda: signal.emit(name))
 
     def set_person(self, name: str, picture: str) -> None:
         self.status.person.set_person(name, picture)
@@ -1209,7 +1335,12 @@ class LauncherWindow(ShellWindow):
         if key == Qt.Key.Key_Escape:
             if self.input.text():
                 self.input.clear()
-            elif self.pages.currentWidget() in (self.all_apps, self.power_view):
+            elif self.pages.currentWidget() in (
+                self.all_apps,
+                self.power_view,
+                self.background_view,
+                self.notifications_view,
+            ):
                 self.show_home()
             else:
                 self.dismiss()
@@ -1240,7 +1371,7 @@ class LauncherWindow(ShellWindow):
             self.dismiss()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if self.pages.currentWidget() is not self.power_view:
+        if self.pages.currentWidget() not in (self.power_view, self.background_view, self.notifications_view):
             self.input.setFocus()
         super().mousePressEvent(event)
 

@@ -230,7 +230,7 @@ class HourlyChart(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h, col, n = self.width(), self.height(), self._column(), len(self.hours)
-        step = 1 if col >= 44 else 2  # rótulos a cada 1 ou 2 horas, conforme a largura
+        roomy = col >= 44  # com 24 colunas estreitas, tudo continua hora a hora, só menor
         top_curve, bottom_curve = 62.0, h - 78.0
         rain_top, rain_bottom = h - 64.0, h - 30.0
         hum_y = h - 20.0
@@ -280,28 +280,28 @@ class HourlyChart(QWidget):
             x = self._x(i)
             past = 0 <= self.now_index and i < self.now_index
             fade = 0.45 if past else 1.0
-            labelled = i % step == 0 or i == self.hover
-            # hora
-            if labelled:
-                is_now = i == self.now_index
-                p.setFont(theme.font(10, theme.SEMI))
-                p.setPen(theme.color(theme.ACCENT if is_now else theme.MUTED, fade))
-                text = "Agora" if is_now else f"{_hhmm(hour['time'])[:2]}h"
-                p.drawText(QRectF(x - 24, 0, 48, 14), Qt.AlignmentFlag.AlignCenter, text)
-                glyph = icon_for(hour["code"], hour.get("is_day", True))
-                p.setOpacity(fade)
-                p.drawPixmap(QPointF(x - 9, 18), icons.pixmap(glyph, _tint(glyph), 18))
-                p.setOpacity(1.0)
-                p.setFont(theme.font(11, theme.SEMI))
-                p.setPen(theme.color(theme.TEXT, fade))
-                pt = points[i]
-                p.drawText(
-                    QRectF(x - 22, pt.y() - 22, 44, 16), Qt.AlignmentFlag.AlignCenter, f"{hour['temp']:.0f}°"
-                )
+            # hora, ícone e temperatura em todas as horas (antes, de 2 em 2 quando apertado)
+            is_now = i == self.now_index
+            p.setFont(theme.font(10 if roomy else 9, theme.SEMI))
+            p.setPen(theme.color(theme.ACCENT if is_now else theme.MUTED, fade))
+            hh = _hhmm(hour["time"])[:2]
+            text = "Agora" if is_now else (f"{hh}h" if roomy else hh)
+            p.drawText(QRectF(x - 24, 0, 48, 14), Qt.AlignmentFlag.AlignCenter, text)
+            glyph = icon_for(hour["code"], hour.get("is_day", True))
+            size = 18 if roomy else 15
+            p.setOpacity(fade)
+            p.drawPixmap(QPointF(x - size / 2, 18), icons.pixmap(glyph, _tint(glyph), size))
+            p.setOpacity(1.0)
+            p.setFont(theme.font(11 if roomy else 9, theme.SEMI))
+            p.setPen(theme.color(theme.TEXT, fade))
+            pt = points[i]
+            p.drawText(
+                QRectF(x - 22, pt.y() - 20, 44, 16), Qt.AlignmentFlag.AlignCenter, f"{hour['temp']:.0f}°"
+            )
             # ponto
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.color(theme.SUN if i != self.hover else theme.TEXT))
-            radius = 3.6 if i == self.hover else (2.4 if labelled else 1.6)
+            radius = 3.6 if i == self.hover else 2.4
             p.drawEllipse(points[i], radius, radius)
             # chuva
             chance = max(0, min(100, int(hour.get("rain") or 0)))
@@ -312,8 +312,8 @@ class HourlyChart(QWidget):
                 p.setBrush(theme.color(theme.SKY, 0.9 * fade if chance >= 20 else 0.45 * fade))
                 p.drawRoundedRect(QRectF(x - bar_w / 2, rain_bottom - height, bar_w, height), 3, 3)
             # umidade
-            if labelled and hour.get("humidity") is not None:
-                p.setFont(theme.font(10))
+            if hour.get("humidity") is not None:
+                p.setFont(theme.font(10 if roomy else 8))
                 p.setPen(theme.color(theme.TEXT_2, fade))
                 p.drawText(
                     QRectF(x - 24, hum_y - 8, 48, 16),
