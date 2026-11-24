@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from functools import lru_cache
 
-from PySide6.QtCore import QAbstractAnimation, QVariantAnimation, Signal
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPointF, QVariantAnimation, Signal
 
 from ventude.services import system
 
@@ -27,7 +28,7 @@ DURATIONS: dict[str, int] = {
     "espaco": 160,
     "assentar": 220,
     "puf": 200,
-    "desdobrar": 180,
+    "desdobrar": 220,
     "desdobrar_fade": 120,
     "desdobrar_close": 120,
     "gota": 300,
@@ -39,13 +40,29 @@ DURATIONS: dict[str, int] = {
     "linha": 140,
     "trilho": 200,
     "voo": 360,
-    "morfose_open": 260,
-    "morfose_close": 220,
+    "morfose_open": 340,
+    "morfose_close": 230,
     "volume_in": 140,
     "volume_out": 160,
     "ponto": 200,
     "eco": 200,
-    "tab": 220,
+    "tab": 260,
+    "indicador": 320,
+    "pagina": 240,
+    "anel": 720,
+    "barra": 520,
+    "interruptor": 220,
+}
+
+# Curvas cúbicas (as mesmas do CSS: cubic-bezier(x1, y1, x2, y2)). "enfase" é a curva principal do Ventude 3:
+# arranca rápido e assenta devagar; "mola" passa um pouco do ponto e volta, como a Dynamic Island.
+BEZIERS: dict[str, tuple[float, float, float, float]] = {
+    "padrao": (0.2, 0.0, 0.0, 1.0),
+    "enfase": (0.05, 0.7, 0.1, 1.0),
+    "saida": (0.3, 0.0, 0.8, 0.15),
+    "suave": (0.4, 0.0, 0.2, 1.0),
+    "mola": (0.3, 1.36, 0.55, 1.0),
+    "mola_leve": (0.34, 1.12, 0.64, 1.0),
 }
 
 
@@ -97,6 +114,59 @@ def mola(t: float) -> float:
     if t >= 1.0:
         return 1.0
     return 1.0 - math.exp(-7.0 * t) * math.cos(9.0 * t)
+
+
+def bezier(x1: float, y1: float, x2: float, y2: float) -> Callable[[float], float]:
+    """Curva cubic-bezier do CSS como função t -> progresso (para o Tween, pintado em Python)."""
+
+    def sample(a1: float, a2: float, t: float) -> float:
+        return ((1.0 - 3.0 * a2 + 3.0 * a1) * t + (3.0 * a2 - 6.0 * a1)) * t * t + 3.0 * a1 * t
+
+    def slope(a1: float, a2: float, t: float) -> float:
+        return 3.0 * (1.0 - 3.0 * a2 + 3.0 * a1) * t * t + 2.0 * (3.0 * a2 - 6.0 * a1) * t + 3.0 * a1
+
+    def curve(x: float) -> float:
+        x = clamp(x)
+        if x <= 0.0 or x >= 1.0:
+            return x
+        t = x
+        for _ in range(8):  # Newton: acha o t cujo x é o pedido
+            err = sample(x1, x2, t) - x
+            if abs(err) < 1e-5:
+                break
+            d = slope(x1, x2, t)
+            if abs(d) < 1e-6:
+                break
+            t -= err / d
+        if not 0.0 <= t <= 1.0:  # bisseção de reserva
+            lo, hi, t = 0.0, 1.0, x
+            for _ in range(24):
+                if sample(x1, x2, t) < x:
+                    lo = t
+                else:
+                    hi = t
+                t = (lo + hi) / 2.0
+        return sample(y1, y2, t)
+
+    return curve
+
+
+@lru_cache(maxsize=16)
+def named(name: str) -> Callable[[float], float]:
+    return bezier(*BEZIERS.get(name, BEZIERS["padrao"]))
+
+
+def easing(name: str) -> QEasingCurve:
+    """QEasingCurve nativa (BezierSpline): a interpolação roda no C++, sem chamar Python a cada quadro."""
+    x1, y1, x2, y2 = BEZIERS.get(name, BEZIERS["padrao"])
+    curve = QEasingCurve(QEasingCurve.Type.BezierSpline)
+    curve.addCubicBezierSegment(QPointF(x1, y1), QPointF(x2, y2), QPointF(1.0, 1.0))
+    return curve
+
+
+def out_expo(t: float) -> float:
+    t = clamp(t)
+    return 1.0 if t >= 1.0 else 1.0 - 2.0 ** (-10.0 * t)
 
 
 def reduced_motion(settings: object | None = None) -> bool:

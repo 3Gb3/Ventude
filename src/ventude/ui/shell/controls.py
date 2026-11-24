@@ -1,13 +1,12 @@
-"""Corpo do modo Controles da ilha: teclas rápidas (rede, Bluetooth, Cafeína, microfone, Foco...)."""
+"""Corpo do modo Controles da ilha: teclas rápidas (rede, Cafeína, microfone, Foco, ferramentas...)."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -23,36 +22,9 @@ from ventude.ui.shell.common import HoverButton, draw_pixmap
 
 CONTROLS_WIDTH = 480
 CONTROLS_MIN_HEIGHT = 200
-CARD_QSS = (
-    "QFrame#CtlCard { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07);"
-    " border-radius: 16px; }"
-)
-
-
-def volume_icon(level: float | None, muted: bool) -> str:
-    if muted or level is None or level <= 0.001:
-        return "volume-x"
-    return "volume-1" if level < 0.5 else "volume"
-
-
-def _section_label(text: str) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet(f"color: {theme.TEXT_2}; font-size: 11px; font-weight: 600; letter-spacing: 0.3px;")
-    return lbl
-
-
-def _card() -> tuple[QFrame, QVBoxLayout]:
-    frame = QFrame()
-    frame.setObjectName("CtlCard")
-    frame.setStyleSheet(CARD_QSS)
-    box = QVBoxLayout(frame)
-    box.setContentsMargins(12, 10, 12, 10)
-    box.setSpacing(6)
-    return frame, box
-
 
 class QuickTile(QWidget):
-    """Tecla de Controles (104×54): ícone, nome e o estado embaixo; ligada fica com fundo menta."""
+    """Tecla de Controles (104×66): ícone numa bolinha, nome e estado; ligada ganha o gradiente da marca."""
 
     clicked = Signal()
 
@@ -63,7 +35,7 @@ class QuickTile(QWidget):
         self.detail = ""
         self.on = False
         self._pressed = False
-        self.setFixedSize(104, 54)
+        self.setFixedSize(104, 66)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.setAccessibleName(title)
@@ -91,28 +63,43 @@ class QuickTile(QWidget):
             p.translate(cx, cy)
             p.scale(0.96, 0.96)
             p.translate(-cx, -cy)
-        radius = 14.0
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.color(theme.TOGGLE_ON_BG if self.on else theme.INK_KEY))
+        radius = 15.0
+        hover = self.underMouse()
+        p.setPen(QPen(theme.color("#FFFFFF", 0.10 if hover else 0.06), 1.0))
+        p.setBrush(theme.color(theme.INK_KEY))
         p.drawRoundedRect(rect, radius, radius)
+        if self.on:  # ligada: um véu do gradiente da marca
+            p.setPen(QPen(theme.color(theme.ACCENT, 0.35), 1.0))
+            p.setBrush(theme.accent_gradient(rect.left(), rect.top(), rect.right(), rect.bottom(), 0.16))
+            p.drawRoundedRect(rect, radius, radius)
         if self._pressed:
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.HALO_PRESS)
             p.drawRoundedRect(rect, radius, radius)
-        elif self.underMouse():
+        elif hover:
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.HALO)
             p.drawRoundedRect(rect, radius, radius)
-        fg = theme.TOGGLE_ON_FG if self.on else theme.TEXT_2
-        draw_pixmap(p, icons.pixmap(self.icon_name, fg, 16), QRectF(11, 9, 16, 16))
+        # ícone numa bolinha: cheia com o gradiente quando ligada
+        badge = QRectF(10, 9, 24, 24)
+        p.setPen(Qt.PenStyle.NoPen)
+        if self.on:
+            p.setBrush(theme.accent_gradient(badge.left(), badge.top(), badge.right(), badge.bottom()))
+        else:
+            p.setBrush(theme.color(theme.SURFACE_3))
+        p.drawEllipse(badge)
+        icon_fg = theme.ACCENT_TEXT if self.on else theme.TEXT_2
+        draw_pixmap(p, icons.pixmap(self.icon_name, icon_fg, 14), QRectF(15, 14, 14, 14))
         width = int(rect.width() - 20)
-        p.setPen(QColor(fg if self.on else theme.TEXT))
-        p.setFont(theme.font(12, theme.SEMI if self.on else QFont.Weight.Medium))
+        p.setPen(QColor(theme.TEXT))
+        p.setFont(theme.font(12, theme.SEMI))
         title = p.fontMetrics().elidedText(self.title, Qt.TextElideMode.ElideRight, width)
-        p.drawText(QRectF(11, 27, width, 14), Qt.AlignmentFlag.AlignVCenter, title)
+        p.drawText(QRectF(11, 36, width, 14), Qt.AlignmentFlag.AlignVCenter, title)
         if self.detail:
-            p.setPen(QColor(fg if self.on else theme.MUTED))
-            p.setFont(theme.font(10))
+            p.setPen(QColor(theme.ACCENT if self.on else theme.MUTED))
+            p.setFont(theme.font(10, QFont.Weight.Medium))
             detail = p.fontMetrics().elidedText(self.detail, Qt.TextElideMode.ElideRight, width)
-            p.drawText(QRectF(11, 40, width, 12), Qt.AlignmentFlag.AlignVCenter, detail)
+            p.drawText(QRectF(11, 50, width, 12), Qt.AlignmentFlag.AlignVCenter, detail)
 
     def enterEvent(self, _event: object) -> None:
         self.update()
@@ -138,8 +125,6 @@ class QuickTile(QWidget):
             self.clicked.emit()
 
 
-
-
 def _link_btn(text: str, tip: str = "") -> QPushButton:
     btn = QPushButton(text)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -154,11 +139,12 @@ def _link_btn(text: str, tip: str = "") -> QPushButton:
 
 
 class ControlsBody(QWidget):
-    """Estado Controles da ilha (480 px): só as teclas rápidas.
+    """Estado Controles da ilha (480 px): teclas rápidas e as ferramentas de tela.
 
-    Som (volume, saída e microfone) mora na aba Áudio; apps em segundo plano, notificações e as
-    ferramentas (conta-gotas, texto da tela) foram para o Lançador e para a ponta direita da Doca.
-    A altura vem do conteúdo (`preferred_height`).
+    Som (volume, saída e microfone) mora na aba Áudio; apps em segundo plano e notificações ficam no
+    Lançador e na ponta direita da Doca. As ferramentas que agem sobre a tela (conta-gotas e texto da
+    tela) vieram do Lançador para cá, junto das outras teclas. A altura vem do conteúdo
+    (`preferred_height`).
     """
 
     close_requested = Signal()
@@ -166,6 +152,7 @@ class ControlsBody(QWidget):
     open_audio = Signal()
     caffeine_clicked = Signal()
     mic_clicked = Signal()
+    tool_requested = Signal(str)  # "color" | "ocr"
 
     def __init__(self, ctx: object, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -196,9 +183,6 @@ class ControlsBody(QWidget):
         # ---------- teclas rápidas (4 × 2) ----------
         self.network = QuickTile("ethernet", "Rede")
         self.network.clicked.connect(lambda: self._open("ms-settings:network-status"))
-        self.bluetooth = QuickTile("bluetooth", "Bluetooth")
-        self.bluetooth.set_state(False, "Configurar")
-        self.bluetooth.clicked.connect(lambda: self._open("ms-settings:bluetooth"))
         self.caffeine = QuickTile("coffee", "Cafeína")
         self.caffeine.clicked.connect(self._toggle_caffeine)
         self.mic = QuickTile("mic", "Microfone")
@@ -208,11 +192,14 @@ class ControlsBody(QWidget):
         self.night = QuickTile("night", "Luz noturna")
         self.night.set_state(False, "Configurar")
         self.night.clicked.connect(self._toggle_night)
-        self.project = QuickTile("monitor", "Projetar")
-        self.project.set_state(False, "Win + P")
-        self.project.clicked.connect(self._project)
         self.quiet = QuickTile("bell-off", "Silêncio")
         self.quiet.clicked.connect(self._toggle_quiet)
+        self.color = QuickTile("pipette", "Conta-gotas")
+        self.color.set_state(False, "Copia uma cor")
+        self.color.clicked.connect(lambda: self._tool("color"))
+        self.ocr = QuickTile("scan", "Texto da tela")
+        self.ocr.set_state(False, "Copia o texto")
+        self.ocr.clicked.connect(lambda: self._tool("ocr"))
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
@@ -220,13 +207,13 @@ class ControlsBody(QWidget):
         for index, tile in enumerate(
             (
                 self.network,
-                self.bluetooth,
                 self.caffeine,
                 self.mic,
                 self.focus,
                 self.night,
-                self.project,
                 self.quiet,
+                self.color,
+                self.ocr,
             )
         ):
             grid.addWidget(tile, index // 4, index % 4)
@@ -361,6 +348,6 @@ class ControlsBody(QWidget):
         if not ok:
             apps.send_keys(0x5B, 0x4E)  # Win + N
 
-    def _project(self) -> None:
-        self.close_requested.emit()
-        apps.send_keys(0x5B, 0x50)  # Win + P
+    def _tool(self, mode: str) -> None:
+        """Conta-gotas e texto da tela: a ilha recolhe antes de congelar a tela."""
+        self.tool_requested.emit(mode)

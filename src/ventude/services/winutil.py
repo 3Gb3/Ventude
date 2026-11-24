@@ -214,12 +214,6 @@ def keep_topmost(hwnd: int) -> bool:
         return False
 
 
-def foreground_window() -> int:
-    if not is_windows():
-        return 0
-    return int(_user32().GetForegroundWindow() or 0)
-
-
 def force_foreground(hwnd: int) -> bool:
     """Traz a janela para a frente mesmo quando outro app está em foco (trava de primeiro plano)."""
     if not is_windows() or not hwnd:

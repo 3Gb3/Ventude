@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtGui import QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 from ventude.ui import theme
@@ -190,19 +191,48 @@ PATHS: dict[str, str] = {
     "admin": '<path d="M12 21.5s7.5-3.5 7.5-9.5V5.5L12 2.5l-7.5 3V12c0 6 7.5 9.5 7.5 9.5Z"/><path d="m9 12 2 2 4-4"/>',
     "folder-open": '<path d="M3 19.5V6a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V10"/>'
     '<path d="M3 19.5 6 11h16l-3 8.5Z"/>',
+    # ---------- Ventude 3: variantes da aba ativa (duas tintas: corpo translúcido + traço) ----------
+    "home-fill": '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1Z" '
+    'fill="currentColor" fill-opacity=".22"/>',
+    "gauge-fill": '<path d="M3.3 17A9.9 9.9 0 0 1 2 12a10 10 0 0 1 20 0 9.9 9.9 0 0 1-1.3 5Z" '
+    'fill="currentColor" fill-opacity=".18"/><path d="M12 14l4-5"/><circle cx="12" cy="14" r="1.8" '
+    'fill="currentColor"/>',
+    "cpu-fill": '<rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" fill-opacity=".2"/>'
+    '<rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor"/>'
+    '<path d="M9.5 2v3M14.5 2v3M9.5 19v3M14.5 19v3M2 9.5h3M2 14.5h3M19 9.5h3M19 14.5h3"/>',
+    "inbox-fill": '<path d="M3 13.5 5.5 5A2 2 0 0 1 7.4 3.5h9.2A2 2 0 0 1 18.5 5L21 13.5V19a2 2 0 0 1-2 2H5a2 '
+    '2 0 0 1-2-2Z" fill="currentColor" fill-opacity=".2"/><path d="M3 13.5h5l1.5 2.5h5l1.5-2.5h5"/>',
+    "calendar-fill": '<rect x="3" y="4.5" width="18" height="16.5" rx="3" fill="currentColor" '
+    'fill-opacity=".2"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/><path d="M7.5 14h.01M12 14h.01M16.5 14h.01'
+    'M7.5 17.5h.01M12 17.5h.01" stroke-width="2.4"/>',
+    "sun-fill": '<circle cx="12" cy="12" r="4.4" fill="currentColor"/><path d="M12 2v2.2M12 19.8V22'
+    'M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2 12h2.2M19.8 12H22M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6"/>',
+    "chart-fill": '<path d="M3 3v18h18"/><path d="m7 15 4-5 3.5 3L20 6v15H7Z" fill="currentColor" '
+    'fill-opacity=".2" stroke="none"/><path d="m7 15 4-5 3.5 3L20 6"/>',
+    "settings-fill": '<path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 '
+    "1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 "
+    "0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 "
+    "0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 "
+    "2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5"
+    " 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 "
+    '1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="currentColor" fill-opacity=".2"/>'
+    '<circle cx="12" cy="12" r="3" fill="currentColor"/>',
+    "sliders-fill": '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2" '
+    'fill="currentColor"/><circle cx="10" cy="17" r="2.2" fill="currentColor"/>',
 }
 
 
-@lru_cache(maxsize=512)
-def pixmap(name: str, color: str | None = None, size: int = 18, stroke: float = 1.8) -> QPixmap:
-    color = color or theme.TEXT_2
-    body = PATHS.get(name, PATHS["dot"]).replace("currentColor", color)
-    svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
-        f'stroke="{color}" stroke-width="{stroke}" stroke-linecap="round" '
-        f'stroke-linejoin="round">{body}</svg>'
-    )
-    scale = 3
+def _render_scale() -> int:
+    """Densidade em que os ícones são desenhados: a maior tela (no mínimo 2x, para ficar nítido)."""
+    app = QGuiApplication.instance()
+    ratio = 1.0
+    if app is not None:
+        ratio = max((s.devicePixelRatio() for s in QGuiApplication.screens()), default=1.0)
+    return max(2, min(4, math.ceil(ratio)))
+
+
+def _render(svg: str, size: int) -> QPixmap:
+    scale = _render_scale()
     pm = QPixmap(size * scale, size * scale)
     pm.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pm)
@@ -213,5 +243,157 @@ def pixmap(name: str, color: str | None = None, size: int = 18, stroke: float = 
     return pm
 
 
+@lru_cache(maxsize=768)
+def pixmap(name: str, color: str | None = None, size: int = 18, stroke: float = 1.8) -> QPixmap:
+    color = color or theme.TEXT_2
+    body = PATHS.get(name, PATHS["dot"]).replace("currentColor", color)
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        f'stroke="{color}" stroke-width="{stroke}" stroke-linecap="round" '
+        f'stroke-linejoin="round">{body}</svg>'
+    )
+    return _render(svg, size)
+
+
 def icon(name: str, color: str | None = None, size: int = 18) -> QIcon:
     return QIcon(pixmap(name, color, size))
+
+
+# ---------- clima em cores (sol dourado, nuvem clara, chuva azul, raio âmbar) ----------
+_CLOUD = "#D5DDEB"
+_CLOUD_FILL = "#283042"
+_MOON = "#DCE3F7"
+_CLOUD_BIG = "M7 19a5 5 0 0 1-.6-9.96A6.5 6.5 0 0 1 19 10.5a4.3 4.3 0 0 1-.5 8.5Z"
+_CLOUD_HIGH = "M7 15.5a4.5 4.5 0 0 1-.6-8.96A6.5 6.5 0 0 1 19 8a4 4 0 0 1-.5 7.5Z"
+_CLOUD_LOW = "M8.5 20a4.5 4.5 0 0 1-.5-8.97 5.8 5.8 0 0 1 11.2 1.47A3.8 3.8 0 0 1 18.8 20Z"
+_SUN_RAYS = (
+    "M12 2v2.2M12 19.8V22M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2 12h2.2M19.8 12H22M4.9 19.1l1.6-1.6"
+    "M17.5 6.5l1.6-1.6"
+)
+
+
+def _cloud(d: str) -> tuple[str, str]:
+    return (f'<path d="{d}" fill="{_CLOUD_FILL}"/>', _CLOUD)
+
+
+WEATHER: dict[str, list[tuple[str, str]]] = {
+    "sun": [
+        (f'<circle cx="12" cy="12" r="4.4" fill="SUN" fill-opacity=".92"/><path d="{_SUN_RAYS}"/>', "SUN")
+    ],
+    "moon": [
+        (
+            '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.6 8.6 0 1 0 20.5 14.2Z" fill="MOON" '
+            'fill-opacity=".28"/>',
+            "MOON",
+        )
+    ],
+    "cloud": [_cloud(_CLOUD_BIG)],
+    "cloud-sun": [
+        (
+            '<circle cx="8.8" cy="8.8" r="3.7" fill="SUN" fill-opacity=".92"/>'
+            '<path d="M8.8 2.3v1.4M3.8 4l1 1M2.2 8.8h1.4M13.8 4l-1 1"/>',
+            "SUN",
+        ),
+        _cloud(_CLOUD_LOW),
+    ],
+    "cloud-moon": [
+        (
+            '<path d="M12.6 3.4a4.6 4.6 0 0 0 5.2 5.4 5 5 0 1 1-5.2-5.4Z" fill="MOON" fill-opacity=".3"/>',
+            "MOON",
+        ),
+        _cloud(_CLOUD_LOW),
+    ],
+    "rain": [_cloud(_CLOUD_HIGH), ('<path d="m8.5 18-1 2.5M12.5 18l-1 2.5M16.5 18l-1 2.5"/>', "SKY")],
+    "snow": [
+        _cloud(_CLOUD_HIGH),
+        ('<path d="M8 19h.01M12 18h.01M16 19h.01M10 21.5h.01M14 21.5h.01" stroke-width="2.8"/>', "SNOW"),
+    ],
+    "storm": [
+        _cloud(_CLOUD_HIGH),
+        ('<path d="m12.5 12-3 5h4l-2.5 4.5" fill="none"/>', "BOLT"),
+    ],
+    "fog": [('<path d="M4 9h16M3 13h18M5 17h14"/>', "CLOUD")],
+}
+
+
+def _tone(key: str) -> str:
+    return {
+        "SUN": theme.SUN,
+        "SKY": theme.SKY,
+        "MOON": _MOON,
+        "CLOUD": _CLOUD,
+        "SNOW": "#E6F1FF",
+        "BOLT": theme.WARN,
+    }.get(key, key)
+
+
+@lru_cache(maxsize=128)
+def weather(name: str, size: int = 18, stroke: float = 1.8) -> QPixmap:
+    """Ícone do clima em cores; nomes desconhecidos caem no ícone de traço comum."""
+    layers = WEATHER.get(name)
+    if layers is None:
+        return pixmap(name, theme.SKY, size, stroke)
+    groups = []
+    for body, tone in layers:
+        c = _tone(tone)
+        for key in ("SUN", "MOON", "SKY"):
+            body = body.replace(f'"{key}"', f'"{_tone(key)}"')
+        groups.append(f'<g stroke="{c}">{body}</g>')
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        f'stroke-width="{stroke}" stroke-linecap="round" stroke-linejoin="round">{"".join(groups)}</svg>'
+    )
+    return _render(svg, size)
+
+
+# ---------- monograma: o "ícone" de um app enquanto o ícone real carrega (ou quando não existe) ----------
+_MONO_COLORS = (
+    ("#5EE6C1", "#2F9F8C"),
+    ("#42B8F6", "#2A6FD1"),
+    ("#B79EFF", "#7258D8"),
+    ("#F592BC", "#C4527F"),
+    ("#F7C76A", "#D08A2E"),
+    ("#E8916D", "#B5583A"),
+    ("#7CA8FF", "#4B63D6"),
+)
+
+
+def monogram_letter(target: str) -> str:
+    """Letra que representa o app: o nome do .exe/.lnk, ou o nome do pacote da Loja."""
+    text = (target or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    if "!" in text or "_" in text:  # Pacote.Nome_hash!App
+        text = text.split("_", 1)[0].split("!", 1)[0].rsplit(".", 1)[-1]
+    else:
+        text = text.rsplit(".", 1)[0] if "." in text else text
+    letter = next((ch for ch in text if ch.isalnum()), "")
+    return letter.upper() or "•"
+
+
+@lru_cache(maxsize=256)
+def monogram(target: str, size: int = 24) -> QPixmap:
+    """Quadrado arredondado com o gradiente de uma cor estável (pelo nome) e a inicial do app."""
+    from PySide6.QtGui import QColor, QFont, QLinearGradient
+
+    letter = monogram_letter(target)
+    top, bottom = _MONO_COLORS[sum(map(ord, target or "")) % len(_MONO_COLORS)]
+    scale = _render_scale()
+    side = size * scale
+    pm = QPixmap(side, side)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    grad = QLinearGradient(0, 0, side, side)
+    grad.setColorAt(0.0, QColor(top))
+    grad.setColorAt(1.0, QColor(bottom))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(grad)
+    p.drawRoundedRect(QRectF(side * 0.04, side * 0.04, side * 0.92, side * 0.92), side * 0.26, side * 0.26)
+    font = QFont(theme.ui_family())
+    font.setPixelSize(round(side * 0.5))
+    font.setWeight(QFont.Weight.Bold)
+    p.setFont(font)
+    p.setPen(QColor(theme.ACCENT_TEXT if top in ("#5EE6C1", "#F7C76A") else "#FFFFFF"))
+    p.drawText(QRectF(0, 0, side, side), Qt.AlignmentFlag.AlignCenter, letter)
+    p.end()
+    pm.setDevicePixelRatio(scale)
+    return pm

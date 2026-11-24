@@ -39,10 +39,6 @@ from ventude.ui.widgets import (
 PLACE_ROLE = Qt.ItemDataRole.UserRole
 
 
-def _tint(icon_name: str) -> str:
-    return theme.SUN if icon_name in ("sun", "cloud-sun") else theme.SKY
-
-
 def _chip(icon_name: str, text: str) -> QWidget:
     holder = QWidget()
     glyph = label()
@@ -115,7 +111,7 @@ class DayRow(QWidget):
         name_label.setFixedWidth(66)
         glyph = label()
         glyph.setFixedWidth(22)
-        glyph.setPixmap(icons.pixmap(icon_for(day["code"]), _tint(icon_for(day["code"])), 20))
+        glyph.setPixmap(icons.weather(icon_for(day["code"]), 20))
         chance = int(day.get("rain") or 0)
         rain = label(f"{chance}%", "")  # sempre visível; chance baixa fica mais apagada
         rain_color = theme.SKY if chance >= 20 else theme.MUTED
@@ -290,7 +286,7 @@ class HourlyChart(QWidget):
             glyph = icon_for(hour["code"], hour.get("is_day", True))
             size = 18 if roomy else 15
             p.setOpacity(fade)
-            p.drawPixmap(QPointF(x - size / 2, 18), icons.pixmap(glyph, _tint(glyph), size))
+            p.drawPixmap(QPointF(x - size / 2, 18), icons.weather(glyph, size))
             p.setOpacity(1.0)
             p.setFont(theme.font(11 if roomy else 9, theme.SEMI))
             p.setPen(theme.color(theme.TEXT, fade))
@@ -382,7 +378,7 @@ class DayDetail(Card):
     ) -> None:
         when = date.fromisoformat(day["date"])
         glyph = icon_for(day["code"])
-        self.icon.setPixmap(icons.pixmap(glyph, _tint(glyph), 34))
+        self.icon.setPixmap(icons.weather(glyph, 34))
         self.title.setText(day_title(when, today))
         self.desc.setText(describe(day["code"]))
         self.temps.setText(f"{day['max']:.0f}°  /  {day['min']:.0f}°")
@@ -542,7 +538,7 @@ class WeatherPage(Page):
     def _show(self, forecast: Forecast) -> None:
         self._loaded_at = time.time()
         self.forecast = forecast
-        self.icon.setPixmap(icons.pixmap(forecast.icon, _tint(forecast.icon), 60))
+        self.icon.setPixmap(icons.weather(forecast.icon, 60))
         self.temp.setText(f"{forecast.temp:.0f}°")
         self.place.setText(forecast.place)
         self.desc.setText(forecast.description)

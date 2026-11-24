@@ -51,7 +51,7 @@ class VolumeOverlay(QWidget):
         self.raise_()
         if not was_visible or self._alpha < 0.95:
             dur = motion.ms("volume_in", settings)
-            self._tween.play(dur, self._alpha, 1.0, motion.out_cubic)
+            self._tween.play(dur, self._alpha, 1.0, motion.named("enfase"))
         else:
             self._alpha = 1.0
             self.update()

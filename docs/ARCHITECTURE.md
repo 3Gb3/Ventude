@@ -53,11 +53,14 @@ src/ventude/
     shellicons.py      ícones reais do Windows (IShellItemImageFactory) numa thread própria
     dwm.py             prévias ao vivo das janelas, vidro (acrylic) e cantos do Windows 11
   ui/
-    theme.py           paleta, fonte do sistema e folha de estilo única
-    icons.py           ícones SVG de traço (sem fontes de ícones)
+    theme.py           paleta "Brisa" (grafite azulado + gradiente menta → céu), fontes/cores em cache, folha de estilo
+    icons.py           ícones SVG de traço, variantes preenchidas das abas, clima em cores e monograma de apps
+    motion.py          linguagem de movimento: curvas cubic-bezier (Python e QEasingCurve nativa), mola e durações
+    tabs.py            abas da ilha: grupos de páginas irmãs e o indicador que desliza até a aba ativa
     widgets.py         Card, Ring, UsageBar, Sparkline, Switch, CheckCircle, Equalizer...
+    brand.py           material Tinta (fundo, fio de luz, brilho "aurora"), tornadinho, sombras e menus
     context.py         AppContext: serviços + ajustes vivos + sinais compartilhados + clima central
-    island.py          janela da ilha: pílula (zonas), painel, avisos, animação, arraste, hover, atalho
+    island.py          janela da ilha: pílula (zonas), painel, Controles, avisos, animação, arraste, hover, atalho
     toast.py           avisos na ilha e lembretes da Agenda
     command.py         CommandEngine (motor da busca, usado em todo lugar) + barra de comandos da ilha
     capture.py         sobreposição de tela: conta-gotas e seleção para OCR
@@ -65,21 +68,29 @@ src/ventude/
     power_menu.py      menu da Central de Energia na ilha (sem o Shell)
     lockscreen.py      tela de bloqueio do Ventude e bloqueio por inatividade (a senha fica com o Windows)
     blackhole.py       efeito "buraco negro" da ilha (tecla Windows 3 vezes)
+    echo.py            Eco: relógio passivo no topo dos outros monitores
+    pill_overlay.py    barra de volume desenhada na própria pílula
     tray.py            ícone e menu da bandeja, avisos
-    pages/             uma classe por aba, criada só quando a aba é aberta
-    shell/             Ventude Shell (2.0)
-      controller.py    ShellController: barras, Iniciar, Pesquisa, painéis, hook da tecla Windows, restauração
-      taskbar.py       barra de tarefas (uma por monitor), agrupamento das janelas, botões animados
-      start_menu.py    Menu Iniciar: Fixado, Recente, Todos (Categoria/Grade/Lista), conta e Energia
-      search.py        Pesquisa: recentes, resultados por seção e painel de ações (também dentro do Iniciar)
-      flyouts.py       painel rápido, calendário, ícones ocultos da bandeja e menu de Energia
+    update_dialog.py   pergunta e download da atualização, no visual da ilha
+    pages/             uma classe por página, criada só quando é aberta (Ajustes com navegação por seções)
+    shell/             Ventude Shell
+      controller.py    ShellController: Doca, Eco, Lançador, prévias, hook da tecla Windows, energia e restauração
+      dock.py          Doca flutuante (uma por monitor): fixados, apps abertos, Iniciar e a ponta direita
+      dock_model.py    modelo puro da Doca: layout, overflow, esquiva e borda de revelação
+      items.py         agrupamento das janelas por app, fixados e filtro por monitor
+      launcher.py      Lançador: Início (fixados + continuar), busca, Todos os apps, Energia, segundo plano e avisos
+      results.py       lista de resultados da busca com verbos e o ponto deslizante
+      tiles.py         grades desenhadas à mão (blocos e linhas)
+      controls.py      Controles da ilha (Win + A): teclas rápidas e as ferramentas de tela
+      notifications.py Notificações do Ventude e do Windows (página do Lançador e sino da Doca)
+      background.py    apps em segundo plano (bandeja) como página do Lançador
       thumbs.py        prévias ao vivo das janelas (DWM)
-      tiles.py         grades desenhadas à mão do Iniciar (entram em cascata)
-      curtain.py       PowerFx: "Até logo!" antes de desligar/reiniciar/suspender/bloquear e "Bom dia!"
-      common.py        janela de vidro com animação de abrir/fechar, botões, ícones reais, avatar
+      fly.py           ícone voador do Lançador até a Doca ao fixar
+      curtain.py       Interruptor: "Até logo!" antes de desligar/reiniciar/suspender/bloquear e "Bom dia!"
+      common.py        janela Tinta com abrir/fechar animado, botões com halo, ícone real (ou monograma), avatar
 ```
 
-## Ventude Shell (2.0)
+## Ventude Shell
 
 - **Ligar/desligar**: `replace_taskbar` (barra) e `replace_start_menu` (tecla Windows). A primeira abertura da 2.0 (layout 6) liga os dois e tira data e clima da ilha. O `ShellController` só existe no app (os testes passam uma barra do Windows de mentira e uma energia falsa).
 - **Espaço da barra**: o `TaskbarHider` esconde `Shell_TrayWnd`/`Shell_SecondaryTrayWnd` e define a área útil de cada monitor como a tela menos a altura da barra do Ventude (48 px × escala do monitor). Com "ocultar automaticamente", a área útil é a tela toda e a barra desce até o mouse encostar embaixo. Em tela cheia (jogos, vídeos), a barra some de vez e não volta ao encostar o mouse embaixo. Tela cheia = janela não maximizada cuja área cliente cobre o monitor (ou sem barra de título cobrindo o monitor), ou Direct3D exclusivo/apresentação pelo `SHQueryUserNotificationState`.
@@ -118,8 +129,26 @@ A tabela de Ajustes guarda quais IAs têm anel (`ring_providers`) e qual janela 
 ## Interface
 
 - A ilha é uma única janela sem moldura, translúcida e sempre no topo (`Qt.Tool`, fora do Alt+Tab).
-- A geometria anima entre pílula (38 px) e painel (860×568). Ao abrir, o painel já fica no tamanho final, recortado pela ilha que cresce, e aparece com um fade junto da animação.
-- Trocar de aba desliza a página nova do lado da aba clicada, com fade.
+- A geometria anima entre pílula (38 px) e painel (860×568) numa curva de mola (`motion.easing("mola")`, passa
+  um tiquinho do tamanho e assenta); fechando, recolhe direto. Ao abrir, o painel já fica no tamanho final,
+  recortado pela ilha que cresce, e aparece com um fade junto da animação.
+- Parada, a superfície da ilha (fundo, brilho "aurora" e fio de luz) fica num pixmap: os filhos que se
+  repintam (equalizador, relógio, barras) não refazem gradientes a cada quadro.
+- **Abas em grupos** (`config.TAB_GROUPS`): Sistema + Áudio, Estante + Atalhos, Agenda + Tarefas e Mercado +
+  Notícias dividem uma aba. A aba ativa cresce com os nomes lado a lado (o tracinho em gradiente marca a página
+  aberta) e o indicador desliza até ela. Cada página continua sendo um módulo que liga e desliga sozinho.
+- Trocar de página desliza a página nova do lado da aba clicada, com fade.
+- **Controles** (Win + A, botão do cabeçalho, botão da ponta direita da Doca e do rodapé do Lançador): Rede,
+  Cafeína, Microfone, Foco 25, Luz noturna, Silêncio, Conta-gotas e Texto da tela.
 - A ilha inteira aceita arrastar arquivos: abre nos Atalhos e não fecha enquanto o arraste dura.
-- As abas são criadas sob demanda. Abas desligadas nos Ajustes não são criadas e não fazem rede.
-- Fonte: a do sistema (Segoe UI Variable no Windows 11, Segoe UI no 10). Ícones em SVG.
+- As páginas são criadas sob demanda. Páginas desligadas nos Ajustes não são criadas e não fazem rede.
+- Fonte: a do sistema (Segoe UI Variable no Windows 11, Segoe UI no 10). Ícones em SVG, desenhados na
+  densidade da maior tela (no mínimo 2x); `theme.font()` e `theme.color()` ficam em cache.
+
+## Movimento
+
+`motion.BEZIERS` guarda as curvas da casa (as mesmas do CSS `cubic-bezier`): `padrao`, `enfase` (arranca rápido
+e assenta devagar), `saida`, `suave`, `mola` e `mola_leve`. `motion.easing(nome)` devolve uma `QEasingCurve`
+nativa (a interpolação roda no C++) e `motion.named(nome)` a mesma curva em Python para o `Tween`. Todas as
+durações passam por `motion.ms()`, que respeita a velocidade escolhida nos Ajustes e o "sem animações" do
+Windows.

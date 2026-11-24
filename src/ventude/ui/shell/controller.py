@@ -241,7 +241,7 @@ class ShellController(QObject):
             dock.pin_unpinned.connect(self._unpin_taskbar_pin)
             dock.pin_dropped.connect(self._drop_pin_on_dock)
             dock.start_clicked.connect(self.start_button_clicked)
-            dock.end_clicked.connect(self.open_page)
+            dock.end_clicked.connect(self.end_clicked)
             self._apply_items_to_dock(dock)
             dock.start_bar(entrance=True, start_hidden=start_hidden)
             self.docks.append(dock)
@@ -791,6 +791,19 @@ class ShellController(QObject):
     def _suspend_island_hover(self, on: bool) -> None:
         if self.island is not None and hasattr(self.island, "suspend_hover"):
             self.island.suspend_hover(on)  # type: ignore[attr-defined]
+
+    def end_clicked(self, name: str) -> None:
+        """Ponta direita da Doca: Controles abre/fecha na ilha; o resto é uma página do Lançador."""
+        if name != "controls":
+            self.open_page(name)
+            return
+        island = self.island
+        mode = getattr(getattr(island, "mode", None), "value", "")
+        if island is not None and mode == "controls" and hasattr(island, "collapse"):
+            island.collapse()  # type: ignore[attr-defined]
+        else:
+            self.open_controls()
+        self._repaint_docks()
 
     def open_page(self, page: str) -> None:
         """Botões da ponta direita da Doca: abre o Lançador na página (ou fecha, se já está nela)."""

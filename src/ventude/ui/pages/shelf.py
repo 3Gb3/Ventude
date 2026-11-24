@@ -102,7 +102,8 @@ class ShelfGrid(QListWidget):
             f"QListWidget::item {{ background: {theme.SURFACE}; border: 1px solid {theme.STROKE};"
             " border-radius: 14px; padding-top: 10px; margin: 0px; }"
             f"QListWidget::item:hover {{ background: {theme.SURFACE_2}; border-color: {theme.STROKE_2}; }}"
-            f"QListWidget::item:selected {{ background: {theme.SURFACE_2}; border-color: #3C8C70; }}"
+            f"QListWidget::item:selected {{ background: {theme.SURFACE_2};"
+            f" border-color: {theme.ACCENT_LINE}; }}"
         )
 
     def mimeData(self, items: list[QListWidgetItem]) -> QMimeData:  # noqa: N802

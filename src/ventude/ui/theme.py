@@ -2,34 +2,38 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
-from PySide6.QtGui import QColor, QFont, QFontDatabase
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient
 from PySide6.QtWidgets import QApplication
 
 from ventude.core.paths import app_data_dir
 
-BG = "#0C0D10"
+# ---------- Ventude 3 ("Brisa"): grafite azulado + o gradiente do tornadinho (menta → céu) ----------
+BG = "#08090D"
 INK = BG
-INK_RAISED = "#111317"
-INK_KEY = "#191C22"
-SURFACE = "#15171C"
-SURFACE_2 = "#1C1F25"
-SURFACE_3 = "#262A31"
-STROKE = "#22252B"
-STROKE_2 = "#30343C"
-TEXT = "#ECEEF2"
-TEXT_2 = "#A3A9B5"
-MUTED = "#6E7480"
-ACCENT = "#6EE7B7"
-ACCENT_SOFT = "#15362C"
-ACCENT_TEXT = "#062A1E"
-WARN = "#F4C152"
-DANGER = "#F27A7A"
+INK_RAISED = "#0F1118"
+INK_KEY = "#161922"
+SURFACE = "#11141B"
+SURFACE_2 = "#181C25"
+SURFACE_3 = "#222734"
+STROKE = "#1B1F29"
+STROKE_2 = "#2A303D"
+TEXT = "#F2F4F8"
+TEXT_2 = "#A8AFBF"
+MUTED = "#697084"
+ACCENT = "#5EE6C1"
+ACCENT_2 = "#42B8F6"  # segunda cor do gradiente da marca (as voltas de baixo do tornadinho)
+ACCENT_SOFT = "#0F302C"
+ACCENT_LINE = "#2C7F6C"  # contorno de foco e de itens marcados
+ACCENT_TEXT = "#03201A"
+WARN = "#F6C35B"
+DANGER = "#F57B83"
 UP = "#5FD99B"
-DOWN = "#F27A7A"
-SUN = "#F6C86B"
-SKY = "#8EB8F5"
+DOWN = "#F57B83"
+SUN = "#F7C76A"
+SKY = "#8DBBF7"
 LIVE_MIC = "#FF9F43"
 LIVE_CAM = "#34D399"
 DOT_OPEN = TEXT_2
@@ -37,20 +41,23 @@ DOT_FOCUS = ACCENT
 DOT_ATTENTION = WARN
 TOGGLE_ON_BG = ACCENT_SOFT
 TOGGLE_ON_FG = ACCENT
-HAIRLINE = QColor(255, 255, 255, 20)
-HALO = QColor(255, 255, 255, 15)
+HAIRLINE = QColor(255, 255, 255, 18)
+HALO = QColor(255, 255, 255, 14)
 HALO_PRESS = QColor(255, 255, 255, 26)
-R_SHEET = 26
+# Os mesmos, escritos para folhas de estilo (um QColor dentro de uma f-string vira texto inválido).
+HAIRLINE_QSS = "rgba(255,255,255,0.07)"
+HALO_QSS = "rgba(255,255,255,0.055)"
+R_SHEET = 28
 R_CARD = 18
 R_MENU = 14
 R_ITEM = 10
 PROVIDER_COLORS = {
-    "claude": "#E38B67",
-    "antigravity": "#78A6FF",
-    "grok": "#B49BFF",
-    "codex": "#D7DCE3",
-    "cursor": "#F58FB8",
-    "copilot": "#5ED3E6",
+    "claude": "#E8916D",
+    "antigravity": "#7CA8FF",
+    "grok": "#B79EFF",
+    "codex": "#D9DEE6",
+    "cursor": "#F592BC",
+    "copilot": "#5ED6E8",
 }
 ISLAND_RADIUS = 26
 SEMI = QFont.Weight.DemiBold
@@ -72,12 +79,8 @@ def ui_family() -> str:
     return _pick(_UI_FONTS)
 
 
-def font(
-    size: int,
-    weight: QFont.Weight = QFont.Weight.Normal,
-    display: bool = False,
-    tabular: bool = False,
-) -> QFont:
+@lru_cache(maxsize=256)
+def _font(size: int, weight: QFont.Weight, display: bool, tabular: bool) -> QFont:
     f = QFont(_pick(_DISPLAY_FONTS) if display else ui_family())
     f.setPixelSize(size)
     f.setWeight(weight)
@@ -93,10 +96,48 @@ def font(
     return f
 
 
-def color(value: str, alpha: float = 1.0) -> QColor:
+def font(
+    size: int,
+    weight: QFont.Weight = QFont.Weight.Normal,
+    display: bool = False,
+    tabular: bool = False,
+) -> QFont:
+    """Fonte do sistema; montada uma vez por combinação (os paintEvent chamam isto a cada quadro)."""
+    return QFont(_font(int(size), weight, bool(display), bool(tabular)))
+
+
+@lru_cache(maxsize=512)
+def _color(value: str, alpha: float) -> QColor:
     c = QColor(value)
-    c.setAlphaF(alpha)
+    c.setAlphaF(max(0.0, min(1.0, alpha)))
     return c
+
+
+def color(value: str, alpha: float = 1.0) -> QColor:
+    if not isinstance(value, str):  # QColor pronta (ex.: HAIRLINE)
+        c = QColor(value)
+        c.setAlphaF(max(0.0, min(1.0, alpha)))
+        return c
+    return QColor(_color(value, round(float(alpha), 3)))
+
+
+def mix(a: str, b: str, t: float) -> QColor:
+    """Cor entre a e b (0 = a, 1 = b)."""
+    t = max(0.0, min(1.0, float(t)))
+    ca, cb = QColor(a), QColor(b)
+    return QColor(
+        round(ca.red() + (cb.red() - ca.red()) * t),
+        round(ca.green() + (cb.green() - ca.green()) * t),
+        round(ca.blue() + (cb.blue() - ca.blue()) * t),
+    )
+
+
+def accent_gradient(x1: float, y1: float, x2: float, y2: float, alpha: float = 1.0) -> QLinearGradient:
+    """O gradiente da marca (menta → céu) entre dois pontos."""
+    g = QLinearGradient(x1, y1, x2, y2)
+    g.setColorAt(0.0, color(ACCENT, alpha))
+    g.setColorAt(1.0, color(ACCENT_2, alpha))
+    return g
 
 
 def provider_color(provider: str) -> str:
@@ -126,81 +167,98 @@ def _assets() -> Path:
     return folder
 
 
+def _grad(a: str, b: str, *, vertical: bool = False) -> str:
+    x2, y2 = (0, 1) if vertical else (1, 0)
+    return f"qlineargradient(x1:0, y1:0, x2:{x2}, y2:{y2}, stop:0 {a}, stop:1 {b})"
+
+
 def stylesheet() -> str:
     chevron = (_assets() / "chevron.svg").as_posix()
+    brand = _grad(ACCENT, ACCENT_2)
+    brand_hover = _grad("#7BEFCF", "#63C7FA")
+    card = _grad("#141821", SURFACE, vertical=True)
+    card_hover = _grad("#181D27", "#131720", vertical=True)
     return f"""
 QWidget {{ color: {TEXT}; background: transparent; }}
-QToolTip {{ background: {SURFACE_3}; color: {TEXT}; border: 1px solid {STROKE_2};
-    border-radius: 10px; padding: 6px 10px; }}
+QToolTip {{ background: {INK_KEY}; color: {TEXT}; border: 1px solid {STROKE_2};
+    border-radius: 9px; padding: 5px 9px; }}
 QLabel {{ background: transparent; }}
-QLabel#H1 {{ font-size: 19px; font-weight: 600; }}
+QLabel#H1 {{ font-size: 20px; font-weight: 700; }}
 QLabel#H2 {{ font-size: 15px; font-weight: 600; }}
 QLabel#Muted {{ color: {TEXT_2}; font-size: 12px; }}
 QLabel#Faint {{ color: {MUTED}; font-size: 11px; }}
-QLabel#Caption {{ color: {MUTED}; font-size: 11px; font-weight: 600; }}
+QLabel#Caption {{ color: {MUTED}; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; }}
 QLabel#Error {{ color: {DANGER}; font-size: 12px; }}
 QLabel#Warn {{ color: {WARN}; font-size: 12px; }}
-QFrame#Card {{ background: {SURFACE}; border: 1px solid {STROKE}; border-radius: 16px; }}
-QFrame#Card[clickable="true"]:hover {{ border-color: {STROKE_2}; background: #181A20; }}
+QFrame#Card {{ background: {card}; border: 1px solid {STROKE}; border-top-color: #232835;
+    border-radius: {R_CARD}px; }}
+QFrame#Card[clickable="true"]:hover {{ background: {card_hover}; border-color: {STROKE_2}; }}
 QFrame#Divider {{ background: {STROKE}; max-height: 1px; min-height: 1px; border: none; }}
-QPushButton {{ background: {SURFACE_2}; border: 1px solid {STROKE_2}; border-radius: 10px;
-    padding: 7px 13px; color: {TEXT}; }}
-QPushButton:hover {{ background: {SURFACE_3}; }}
+QPushButton {{ background: {SURFACE_2}; border: 1px solid {STROKE_2}; border-radius: 11px;
+    padding: 7px 14px; color: {TEXT}; font-weight: 500; }}
+QPushButton:hover {{ background: {SURFACE_3}; border-color: #353B4A; }}
 QPushButton:pressed {{ background: {STROKE_2}; }}
+QPushButton:focus {{ border-color: {ACCENT_LINE}; }}
 QPushButton:disabled {{ color: {MUTED}; background: {SURFACE}; border-color: {STROKE}; }}
-QPushButton#Primary {{ background: {ACCENT}; color: {ACCENT_TEXT}; border: none; font-weight: 600; }}
-QPushButton#Primary:hover {{ background: #86EDC4; }}
-QPushButton#Danger {{ color: {DANGER}; background: #24171A; border-color: #43252A; }}
-QPushButton#Danger:hover {{ background: #2E1B1F; }}
-QPushButton#Icon {{ background: transparent; border: none; border-radius: 9px; padding: 0; }}
-QPushButton#Icon:hover {{ background: {SURFACE_2}; }}
-QPushButton#Icon:pressed {{ background: {SURFACE_3}; }}
-QPushButton#Icon:checked {{ background: {SURFACE_3}; }}
-QPushButton#Tab {{ background: transparent; border: none; border-radius: 10px;
-    padding: 0 9px; color: {TEXT_2}; font-weight: 600; }}
-QPushButton#Tab:hover {{ background: {SURFACE}; color: {TEXT}; }}
-QPushButton#Tab:checked {{ background: {SURFACE_2}; color: {TEXT}; }}
-QPushButton#Chip {{ background: transparent; border: 1px solid {STROKE_2}; border-radius: 13px;
-    padding: 4px 11px; color: {TEXT_2}; }}
-QPushButton#Chip:hover {{ color: {TEXT}; }}
-QPushButton#Chip:checked {{ background: {ACCENT_SOFT}; border-color: #2B6B55; color: {ACCENT}; }}
+QPushButton#Primary {{ background: {brand}; color: {ACCENT_TEXT}; border: none; font-weight: 700; }}
+QPushButton#Primary:hover {{ background: {brand_hover}; }}
+QPushButton#Primary:pressed {{ background: {ACCENT}; }}
+QPushButton#Danger {{ color: {DANGER}; background: #22141A; border-color: #452530; }}
+QPushButton#Danger:hover {{ background: #2C1820; }}
+QPushButton#Icon {{ background: transparent; border: none; border-radius: 10px; padding: 0; }}
+QPushButton#Icon:hover {{ background: rgba(255,255,255,0.06); }}
+QPushButton#Icon:pressed {{ background: rgba(255,255,255,0.10); }}
+QPushButton#Icon:checked {{ background: rgba(255,255,255,0.08); }}
+QPushButton#Tab {{ background: transparent; border: none; border-radius: 11px;
+    padding: 0 10px; color: {TEXT_2}; font-weight: 600; }}
+QPushButton#Tab:hover {{ color: {TEXT}; }}
+QPushButton#Tab:checked {{ color: {TEXT}; }}
+QPushButton#Chip {{ background: rgba(255,255,255,0.03); border: 1px solid {STROKE_2}; border-radius: 12px;
+    padding: 3px 12px; min-height: 18px; color: {TEXT_2}; font-weight: 500; }}
+QPushButton#Chip:hover {{ color: {TEXT}; border-color: #3A4050; }}
+QPushButton#Chip:checked {{ background: {ACCENT_SOFT}; border-color: {ACCENT_LINE}; color: {ACCENT}; }}
 QPushButton#Link {{ background: transparent; border: none; padding: 0; color: {ACCENT};
-    text-align: left; }}
-QPushButton#Link:hover {{ color: #9CF0CF; }}
-QLineEdit {{ background: {SURFACE_2}; border: 1px solid {STROKE_2}; border-radius: 10px;
-    padding: 7px 10px; selection-background-color: {ACCENT_SOFT}; color: {TEXT}; }}
-QLineEdit:focus {{ border-color: #3C8C70; }}
+    text-align: left; font-weight: 600; }}
+QPushButton#Link:hover {{ color: #A3F3DD; }}
+QLineEdit, QSpinBox {{ background: {INK_RAISED}; border: 1px solid {STROKE_2}; border-radius: 11px;
+    padding: 7px 11px; selection-background-color: {ACCENT_SOFT}; color: {TEXT}; }}
+QLineEdit:hover, QSpinBox:hover {{ border-color: #353B4A; }}
+QLineEdit:focus, QSpinBox:focus {{ border-color: {ACCENT_LINE}; background: {SURFACE}; }}
 QLineEdit#Inline {{ background: transparent; border: 1px solid transparent; padding: 4px 6px; }}
-QLineEdit#Inline:focus {{ background: {SURFACE_2}; border-color: #3C8C70; }}
-QComboBox {{ background: {SURFACE_2}; border: 1px solid {STROKE_2}; border-radius: 10px;
-    padding: 6px 10px; min-height: 18px; }}
-QComboBox:hover {{ border-color: #3D424C; }}
+QLineEdit#Inline:focus {{ background: {INK_RAISED}; border-color: {ACCENT_LINE}; }}
+QPlainTextEdit {{ background: {INK_RAISED}; border: 1px solid {STROKE_2}; border-radius: 11px;
+    padding: 6px; selection-background-color: {ACCENT_SOFT}; }}
+QPlainTextEdit:focus {{ border-color: {ACCENT_LINE}; }}
+QComboBox {{ background: {SURFACE_2}; border: 1px solid {STROKE_2}; border-radius: 11px;
+    padding: 6px 11px; min-height: 18px; }}
+QComboBox:hover {{ border-color: #3A4050; background: {SURFACE_3}; }}
 QComboBox::drop-down {{ border: none; width: 26px; }}
 QComboBox::down-arrow {{ image: url({chevron}); width: 14px; height: 14px; }}
-QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {STROKE_2};
-    selection-background-color: {SURFACE_3}; outline: none; padding: 4px; }}
+QComboBox QAbstractItemView {{ background: {INK_RAISED}; border: 1px solid {STROKE_2};
+    selection-background-color: rgba(255,255,255,0.08); outline: none; padding: 4px; border-radius: 10px; }}
 QListWidget {{ background: transparent; border: none; outline: none; }}
 QListWidget::item {{ border-radius: 10px; padding: 6px; color: {TEXT}; }}
-QListWidget::item:hover {{ background: {SURFACE_2}; }}
-QListWidget::item:selected {{ background: {SURFACE_3}; color: {TEXT}; }}
+QListWidget::item:hover {{ background: rgba(255,255,255,0.05); }}
+QListWidget::item:selected {{ background: rgba(255,255,255,0.09); color: {TEXT}; }}
 QMenu {{ background: {INK_RAISED}; border: 1px solid {STROKE_2}; border-radius: {R_MENU}px; padding: 6px; }}
 QMenu::item {{ padding: 7px 22px 7px 12px; border-radius: {R_ITEM}px; }}
-QMenu::item:selected {{ background: {SURFACE_3}; }}
+QMenu::item:selected {{ background: rgba(255,255,255,0.08); }}
 QMenu::separator {{ height: 1px; background: {STROKE_2}; margin: 4px 6px; }}
 QScrollArea {{ border: none; background: transparent; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
-QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {STROKE_2}; min-height: 28px; border-radius: 3px; }}
-QScrollBar::handle:vertical:hover {{ background: #3D424C; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 4px 2px; }}
+QScrollBar::handle:vertical {{ background: rgba(255,255,255,0.10); min-height: 32px; border-radius: 2px; }}
+QScrollBar::handle:vertical:hover {{ background: rgba(255,255,255,0.20); }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QScrollBar:horizontal {{ height: 0; }}
 QProgressBar {{ background: {SURFACE_3}; border: none; border-radius: 3px; }}
-QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
+QProgressBar::chunk {{ background: {brand}; border-radius: 3px; }}
 QSlider::groove:horizontal {{ height: 4px; background: {STROKE_2}; border-radius: 2px; }}
-QSlider::sub-page:horizontal {{ background: {TEXT}; border-radius: 2px; }}
-QSlider::handle:horizontal {{ width: 10px; height: 10px; margin: -3px 0; background: {TEXT};
-    border-radius: 5px; }}
+QSlider::sub-page:horizontal {{ background: {brand}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -5px 0; background: {TEXT};
+    border-radius: 7px; }}
+QSlider::handle:horizontal:hover {{ background: #FFFFFF; }}
 QSlider::handle:horizontal:disabled {{ background: transparent; }}
 QSlider::sub-page:horizontal:disabled {{ background: {MUTED}; }}
 """

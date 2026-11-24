@@ -14,7 +14,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 
 from ventude.services import dwm, shellicons
 from ventude.ui import brand, icons, motion, theme
@@ -42,8 +42,10 @@ def app_pixmap(ctx: object, kind: str, target: str, size: int, fallback: str = "
         pixmap = cache.pixmap(name, size)
         if pixmap is not None:
             return pixmap
-    glyph = {"url": "globe", "web": "globe", "folder": "folder", "file": "file"}.get(kind, fallback)
-    return icons.pixmap(glyph, theme.TEXT_2, size)
+    glyph = {"url": "globe", "web": "globe", "folder": "folder", "file": "file"}.get(kind)
+    if glyph is None and kind in ("app", "uwp") and target:
+        return icons.monogram(target, size)  # inicial colorida enquanto o ícone real não chega
+    return icons.pixmap(glyph or fallback, theme.TEXT_2, size)
 
 
 def draw_pixmap(p: QPainter, pixmap: QPixmap, rect: QRectF) -> None:
@@ -139,21 +141,7 @@ class ShellWindow(QWidget):
         self.move(rect.topLeft() + offset)
         self.show()
         self.raise_()
-        self._tween.play(duration, 0.0, 1.0, motion.out_cubic)
-
-    def close_animated(self, offset: QPoint = QPoint(0, 12)) -> None:
-        if not self.isVisible() or self._closing:
-            return
-        self._closing = True
-        self._tween.stop()
-        settings = getattr(self.ctx, "settings", None)
-        duration = motion.ms("desdobrar_close", settings)
-        if duration <= 0:
-            self._finish_close()
-            return
-        self._target_pos = self.pos()
-        self._offset = offset
-        self._tween.play(duration, 1.0, 0.0, motion.in_cubic)
+        self._tween.play(duration, 0.0, 1.0, motion.named("enfase"))
 
     def _on_anim(self, value: float) -> None:
         self.setWindowOpacity(max(0.0, min(1.0, value)))
@@ -215,10 +203,6 @@ class HoverButton(QWidget):
         self.icon_name = name
         if color:
             self.icon_color = color
-        self.update()
-
-    def set_checked(self, on: bool) -> None:
-        self.checked = on
         self.update()
 
     def background(self) -> QColor | None:
@@ -325,15 +309,5 @@ class Avatar(QLabel):
         self.setPixmap(canvas)
 
 
-def screen_at_cursor():  # noqa: ANN201
-    from PySide6.QtGui import QCursor, QGuiApplication
-
-    return QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
-
-
 def later(ms: int, fn: Callable[[], object]) -> None:
     QTimer.singleShot(ms, fn)
-
-
-def process_events() -> None:
-    QApplication.processEvents()

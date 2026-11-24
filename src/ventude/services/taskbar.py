@@ -600,20 +600,6 @@ def list_windows(own_pid: int | None = None) -> list[WindowInfo]:
     return out
 
 
-def window_icon(hwnd: int) -> int:
-    """HICON da janela (0 se não tiver). Não espera janelas travadas."""
-    if sys.platform != "win32":
-        return 0
-    user32 = _user32()
-    result = ctypes.c_size_t()
-    for kind in (ICON_BIG, ICON_SMALL2):
-        if user32.SendMessageTimeoutW(hwnd, WM_GETICON, kind, 0, SMTO_ABORTIFHUNG, 80, ctypes.byref(result)):
-            if result.value:
-                return int(result.value)
-    get_class = getattr(user32, "GetClassLongPtrW", None) or user32.GetClassLongW
-    return int(get_class(hwnd, GCLP_HICON) or 0)
-
-
 def activate(hwnd: int) -> bool:
     from ventude.services.winutil import force_foreground
 

@@ -93,7 +93,7 @@ class EchoPill(QWidget):
                 return
             self.setWindowOpacity(0.0)
             self.show()
-            self._fade.play(dur, 0.0, 1.0, motion.out_cubic)
+            self._fade.play(dur, 0.0, 1.0, motion.named("enfase"))
         else:
             self._timer.stop()
             if dur <= 0:

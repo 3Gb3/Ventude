@@ -46,7 +46,8 @@ HOVER_LIFT_PX = 4.0
 HOVER_SCALE = 0.10
 PINNED_IDLE_OPACITY = 0.9  # fixado sem janela: cor normal, só um pouco mais discreto
 EDGE_STRIP_PX = 4
-END_BUTTONS = ("background", "notifications")
+END_BUTTONS = ("background", "notifications", "controls")
+END_ICONS = {"background": "chevron-up", "notifications": "bell", "controls": "sliders"}
 
 
 class Dock(QWidget):
@@ -61,7 +62,7 @@ class Dock(QWidget):
     pin_unpinned = Signal(int)  # pin_id removido via Puf
     pin_dropped = Signal(str, str, str, int)  # (kind, label, target, insert_index)
     start_clicked = Signal()  # botão Iniciar: abre/fecha o Lançador sem precisar da tecla Windows
-    end_clicked = Signal(str)  # "background" | "notifications": abre o Lançador nessa página
+    end_clicked = Signal(str)  # "background" | "notifications" (Lançador nessa página) | "controls" (ilha)
 
     def __init__(self, ctx: object, shell: object, screen: object) -> None:
         super().__init__(
@@ -225,7 +226,7 @@ class Dock(QWidget):
             self.show()
             self.raise_()
             self._keep_on_top()
-            self._entrance_tween.play(dur, 0.0, 1.0, motion.out_cubic)
+            self._entrance_tween.play(dur, 0.0, 1.0, motion.named("enfase"))
         else:
             self._slide_offset = 0.0
             self._opacity = 1.0
@@ -282,7 +283,7 @@ class Dock(QWidget):
                 self.shell.raise_launcher_above_dock()
         settings = getattr(self.ctx, "settings", None)
         dur = motion.ms("esquiva" if hide else "volta", settings)
-        curve = motion.in_cubic if hide else motion.out_cubic
+        curve = motion.named("saida") if hide else motion.named("enfase")
         start_y = float(self.y())
         end_y = float(self._hidden_top() if hide else self.shown_rect().top())
         if dur <= 0:
@@ -677,7 +678,14 @@ class Dock(QWidget):
         if name == "notifications":
             unread = self._unread()
             return f"Notificações · {unread} nova{'s' if unread > 1 else ''}" if unread else "Notificações"
+        if name == "controls":
+            return "Controles · Win + A"
         return "Em segundo plano"
+
+    def _controls_open(self) -> bool:
+        island = getattr(self.shell, "island", None)
+        mode = getattr(getattr(island, "mode", None), "value", "")
+        return mode == "controls" and bool(island is not None and island.isVisible())
 
     def _launcher_page(self) -> str:
         launcher = getattr(self.shell, "launcher", None)
@@ -686,11 +694,12 @@ class Dock(QWidget):
         return str(launcher.current_page())
 
     def _paint_ends(self, p: QPainter) -> None:
-        """Ponta direita: apps em segundo plano (seta) e Notificações (sino com selo)."""
+        """Ponta direita: segundo plano (seta), Notificações (sino com selo) e Controles da ilha."""
         page = self._launcher_page()
+        controls = self._controls_open()
         for name, raw in self._layout.end_rects:
             rect = QRectF(*raw)
-            active = page == name
+            active = controls if name == "controls" else page == name
             if self._pressed_end == name or self._hovered_end == name or active:
                 p.setPen(Qt.PenStyle.NoPen)
                 if self._pressed_end == name:
@@ -700,7 +709,7 @@ class Dock(QWidget):
                 else:
                     p.setBrush(QColor(255, 255, 255, 10))
                 p.drawRoundedRect(rect.adjusted(0, 1, 0, -1), theme.R_ITEM, theme.R_ITEM)
-            icon_name = "chevron-up" if name == "background" else "bell"
+            icon_name = END_ICONS.get(name, "dot")
             color = theme.ACCENT if active else theme.TEXT_2
             size = 16.0
             draw_pixmap(

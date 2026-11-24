@@ -206,7 +206,7 @@ class LockPane(QWidget):
             p.setFont(theme.font(15, QFont.Weight.Medium))
             tw = p.fontMetrics().horizontalAdvance(text)
             x = (w - tw - 30) / 2
-            p.drawPixmap(QPointF(x, y + 2), icons.pixmap(forecast.icon, theme.SUN, 22))
+            p.drawPixmap(QPointF(x, y + 2), icons.weather(forecast.icon, 22))
             p.setPen(QColor(theme.TEXT_2))
             p.drawText(QRectF(x + 30, y, tw + 4, 26), Qt.AlignmentFlag.AlignVCenter, text)
             y += 40
@@ -372,7 +372,7 @@ class LockScreen(QObject):
         if dur <= 0:
             self._on_fade(1.0)
         else:
-            self._fade.play(dur, 0.0, 1.0, motion.out_cubic)
+            self._fade.play(dur, 0.0, 1.0, motion.named("suave"))
         self.shown.emit()
 
     def hint_text(self) -> str:

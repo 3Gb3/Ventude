@@ -58,6 +58,47 @@ def test_compact_width_grows_with_music(qapp, island, app_ctx):
     assert island.pill.title.full_text() == "Song  ·  Band"
 
 
+def test_sibling_pages_share_one_tab(qapp, island, app_ctx):
+    from ventude.core.config import TAB_GROUPS
+
+    island.expand()
+    settle(qapp, 300)
+    panel = island.panel
+    assert list(panel.tabs) == [group[0] for group in TAB_GROUPS]  # 8 abas para 12 páginas
+    panel.select("tasks")
+    tab = panel.tabs["agenda"]
+    assert panel.current == "tasks" and tab.isChecked() and tab.current == "tasks"
+    assert [k for k, _ in tab.members] == ["agenda", "tasks"]
+    settle(qapp, 450)  # a aba ativa cresce até mostrar os dois nomes
+    agenda_x = next(rect for key, _t, rect in tab._segment_rects() if key == "agenda").center().x()
+    assert tab.segment_at(agenda_x) == "agenda"
+    tab.picked.emit(tab.segment_at(agenda_x))
+    assert panel.current == "agenda" and not panel.tabs["market"].isChecked()
+    panel.select_index(2)  # Ctrl + 3: a terceira aba (Sistema)
+    assert panel.current == "hardware"
+    assert panel.strip.indicator_rect() is not None
+    app_ctx.update_settings(modules="limits,tasks")  # só Tarefas ligada: a aba do grupo é dela
+    assert list(panel.tabs) == ["home", "limits", "tasks", "settings"]
+    panel.select("tasks")
+    assert panel.current == "tasks"
+
+
+def test_settings_sections_nav_scrolls_and_follows(qapp, island, app_ctx):
+    island.expand("settings")
+    settle(qapp, 300)
+    page = island.panel.pages["settings"]
+    assert list(page.section_cards) == ["geral", "ias", "abas", "shell", "bloqueio", "sobre"]
+    assert page.nav.current == "geral"
+    page.scroll_to("bloqueio", animate=False)
+    bar = page.area.verticalScrollBar()
+    assert page.nav.current == "bloqueio" and bar.value() > 0
+    bar.setValue(0)  # rolar de volta para o topo marca Geral de novo
+    assert page.nav.current == "geral"
+    page.nav.buttons["ias"].click()
+    settle(qapp, 600)
+    assert page.nav.current == "ias" and bar.value() > 0
+
+
 def test_disabling_modules_rebuilds_tabs(qapp, island, app_ctx):
     app_ctx.update_settings(modules="limits")
     assert list(island.panel.tabs) == ["home", "limits", "settings"]

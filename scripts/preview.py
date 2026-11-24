@@ -478,7 +478,13 @@ def main() -> None:
     from ventude.ui.toast import Toast
 
     ctx.shelf.add_text("Endereço da reunião: Av. Paulista, 1000")
-    ctx.shelf.add_paths([str(Path.home()), sys.executable, "https://github.com/3Gb3/Ventude"])
+    # Só arquivos de demonstração: nada da pasta pessoal de quem gera as capturas.
+    demo_dir = Path(tempfile.mkdtemp(prefix="ventude-estante-"))
+    (demo_dir / "Fotos da viagem").mkdir()
+    (demo_dir / "Relatório Q4.pdf").write_bytes(b"%PDF-1.4\n")
+    ctx.shelf.add_paths(
+        [str(demo_dir / "Fotos da viagem"), str(demo_dir / "Relatório Q4.pdf"), "https://github.com/3Gb3/Ventude"]
+    )
     ctx.timer.start_pomodoro()
     media.state = state
     media.state_changed.emit(state)
@@ -690,6 +696,11 @@ def demo_catalog() -> list:
     """Apps de demonstração com os ícones reais do Windows (só os desta lista fixa, se instalados)."""
     from ventude.services import indexer
 
+    if sys.platform != "win32":  # fora do Windows: os mesmos apps com caminhos de mentira (ícone = inicial)
+        return sorted(
+            (indexer.entry(name, rf"C:\Apps\{name.replace(' ', '')}.exe", "app") for name in DEMO_APPS),
+            key=lambda e: e.key,
+        )
     found = indexer.scan_apps(indexer.start_menu_dirs())
     found += indexer.scan_store_apps({a.key for a in found})
     wanted = {name.lower(): name for name in DEMO_APPS}
@@ -919,6 +930,10 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     taskbar_service.covering_window = lambda *a, **k: False  # type: ignore[assignment]
     taskbar_service.foreground_rect = lambda *a, **k: None  # type: ignore[assignment]
     fx = PowerFx(ctx, runner=lambda key: (True, ""), island=island)
+    if sys.platform != "win32":  # fora do Windows, a Doca só existe nas capturas
+        ShellController.taskbar_wanted = property(  # type: ignore[assignment]
+            lambda self: bool(self.ctx.settings.replace_taskbar)
+        )
     shell = ShellController(ctx, island, hider, fx=fx)
     store = ctx.store
     shell.seed_start_pins()
@@ -1002,7 +1017,7 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     desktop.copy(W // 2 - 440, H - 120, 880, 120).save(str(out / "71-doca-zoom.png"))
 
     # Doca com rótulo mini-ilha em hover
-    if dock.current_layout.slots:
+    if len(dock.current_layout.slots) > 1:
         dock._hovered_key = dock.current_layout.slots[1].key
         dock._show_hover_label = True
         dock.update()
@@ -1024,9 +1039,6 @@ def shell_v3_screens(ctx, island, media, out: Path) -> None:  # noqa: ANN001
     island.open_controls(by_key=False)
     settle(island, 450)
     shot(island, out / "73-ilha-controles.png", 16)
-    island.controls._toggle_devices()
-    settle(island, 250)
-    shot(island, out / "74-ilha-controles-saidas.png", 16)
     island.collapse()
     settle(island, 350)
 

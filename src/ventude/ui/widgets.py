@@ -5,10 +5,11 @@ from __future__ import annotations
 import math
 import time
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QConicalGradient,
     QFont,
     QLinearGradient,
     QMouseEvent,
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ventude.ui import icons, theme
+from ventude.ui import icons, motion, theme
 
 Semi = QFont.Weight.DemiBold
 
@@ -64,6 +65,12 @@ def label(text: str = "", name: str = "", *, wrap: bool = False, parent: QWidget
     widget.setWordWrap(wrap)
     widget.setTextFormat(Qt.TextFormat.PlainText)
     return widget
+
+
+def set_qss(widget: QWidget, qss: str) -> None:
+    """setStyleSheet só quando muda: cada troca faz o Qt recalcular o estilo do widget e dos filhos."""
+    if widget.styleSheet() != qss:
+        widget.setStyleSheet(qss)
 
 
 def repolish(widget: QWidget) -> None:
@@ -234,8 +241,8 @@ class Ring(QWidget):
         self._text = ""
         self._dim = False
         self._anim = QVariantAnimation(self)
-        self._anim.setDuration(650)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.setDuration(motion.DURATIONS["anel"])
+        self._anim.setEasingCurve(motion.easing("enfase"))
         self._anim.valueChanged.connect(self._on_anim)
 
     def _on_anim(self, value: float) -> None:
@@ -289,9 +296,17 @@ class Ring(QWidget):
         p.setPen(pen)
         p.drawEllipse(rect)
         if self._target is not None and self._shown > 0.4:
-            pen.setColor(theme.color(self._color, 0.5 if self._dim else 1.0))
+            span = int(-self._shown / 100 * 360 * 16)
+            if self.width() >= 28 and not self._dim:
+                # anel grande: um gradiente suave da cor, mais clara na ponta
+                grad = QConicalGradient(rect.center(), 90)
+                grad.setColorAt(0.0, theme.mix(self._color, "#FFFFFF", 0.18))
+                grad.setColorAt(1.0, theme.color(self._color, 0.8))
+                pen.setBrush(QBrush(grad))
+            else:
+                pen.setColor(theme.color(self._color, 0.5 if self._dim else 1.0))
             p.setPen(pen)
-            p.drawArc(rect, 90 * 16, int(-self._shown / 100 * 360 * 16))
+            p.drawArc(rect, 90 * 16, span)
         if self._marker and self._base:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.color(self._base, 0.6 if self._dim else 1.0))
@@ -314,6 +329,15 @@ class UsageBar(QWidget):
         self._note = ""  # aviso em destaque depois do subtexto (ex.: ritmo alto)
         self._used: float | None = None
         self._dim = False
+        self._fill = 0.0  # o que está desenhado (anima até self._used)
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(motion.DURATIONS["barra"])
+        self._anim.setEasingCurve(motion.easing("enfase"))
+        self._anim.valueChanged.connect(self._on_fill)
+
+    def _on_fill(self, value: object) -> None:
+        self._fill = float(value)  # type: ignore[arg-type]
+        self.update()
 
     def set_data(
         self,
@@ -325,6 +349,15 @@ class UsageBar(QWidget):
         dim: bool = False,
         note: str = "",
     ) -> None:
+        target = float(min(max(used or 0.0, 0.0), 100.0))
+        if used != self._used:
+            self._anim.stop()
+            if self.isVisible() and abs(target - self._fill) > 0.5:
+                self._anim.setStartValue(self._fill)
+                self._anim.setEndValue(target)
+                self._anim.start()
+            else:
+                self._fill = target
         self._label, self._used, self._color, self._sub, self._dim = label_text, used, color, sub, dim
         self._note = note
         self.setToolTip(tip)
@@ -351,9 +384,15 @@ class UsageBar(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(theme.color(theme.SURFACE_3))
         p.drawRoundedRect(bar, 3, 3)
-        if self._used is not None and self._used > 0:
-            fill = QRectF(bar.x(), bar.y(), max(6.0, bar.width() * min(self._used, 100) / 100), 6)
-            p.setBrush(theme.color(self._color, 0.55 if self._dim else 1.0))
+        if self._used is not None and self._fill > 0.05:
+            fill = QRectF(bar.x(), bar.y(), max(6.0, bar.width() * self._fill / 100), 6)
+            if self._dim:
+                p.setBrush(theme.color(self._color, 0.55))
+            else:
+                grad = QLinearGradient(fill.left(), 0, fill.right(), 0)
+                grad.setColorAt(0.0, theme.color(self._color, 0.85))
+                grad.setColorAt(1.0, theme.mix(self._color, "#FFFFFF", 0.15))
+                p.setBrush(QBrush(grad))
             p.drawRoundedRect(fill, 3, 3)
         if self._sub or self._note:
             p.setFont(theme.font(11))
@@ -425,41 +464,53 @@ class Switch(QAbstractButton):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setCheckable(True)
-        self.setFixedSize(40, 22)
+        self.setFixedSize(42, 24)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self._anim = QVariantAnimation(self)
-        self._anim.setDuration(150)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.setDuration(motion.DURATIONS["interruptor"])
+        self._anim.setEasingCurve(motion.easing("mola_leve"))
         self._anim.valueChanged.connect(lambda _v: self.update())
         self.toggled.connect(self._animate)
 
     def _animate(self, checked: bool) -> None:
         self._anim.stop()
+        if not self.isVisible():
+            self.update()
+            return
         self._anim.setStartValue(0.0 if checked else 1.0)
         self._anim.setEndValue(1.0 if checked else 0.0)
         self._anim.start()
 
     def sizeHint(self) -> QSize:  # noqa: N802
-        return QSize(40, 22)
+        return QSize(42, 24)
 
     def paintEvent(self, _event: object) -> None:
         running = self._anim.state() == QVariantAnimation.State.Running
         pos = float(self._anim.currentValue()) if running else (1.0 if self.isChecked() else 0.0)
+        on = max(0.0, min(1.0, pos))
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        off, on = QColor(theme.STROKE_2), QColor(theme.ACCENT)
-        track = QColor(
-            int(off.red() + (on.red() - off.red()) * pos),
-            int(off.green() + (on.green() - off.green()) * pos),
-            int(off.blue() + (on.blue() - off.blue()) * pos),
-        )
-        if not self.isEnabled():
-            track.setAlphaF(0.4)
+        track = QRectF(0.5, 0.5, 41, 23)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(track)
-        p.drawRoundedRect(QRectF(0, 0, 40, 22), 11, 11)
-        p.setBrush(QColor("#FFFFFF") if pos > 0.5 else QColor(theme.TEXT))
-        p.drawEllipse(QRectF(3 + pos * 18, 3, 16, 16))
+        p.setBrush(theme.color(theme.SURFACE_3 if self.underMouse() else theme.STROKE_2))
+        p.drawRoundedRect(track, 11.5, 11.5)
+        if on > 0.01:
+            p.setOpacity(on if self.isEnabled() else on * 0.4)
+            p.setBrush(theme.accent_gradient(0, 0, 42, 0))
+            p.drawRoundedRect(track, 11.5, 11.5)
+            p.setOpacity(1.0)
+        # o botão estica um pouco no meio do caminho (dá sensação de mola)
+        stretch = 5.0 * math.sin(math.pi * on) if running else 0.0
+        width = 18.0 + stretch
+        left = max(3.0, min(39.0 - width, 12.0 + pos * 18.0 - width / 2.0))
+        knob = QRectF(left, 3, width, 18)
+        p.setBrush(QColor(0, 0, 0, 60))
+        p.drawRoundedRect(knob.translated(0, 1), 9, 9)
+        p.setBrush(QColor("#FFFFFF") if on > 0.5 else theme.color(theme.TEXT, 0.92))
+        if not self.isEnabled():
+            p.setOpacity(0.5)
+        p.drawRoundedRect(knob, 9, 9)
 
 
 class CheckCircle(QAbstractButton):
@@ -469,14 +520,36 @@ class CheckCircle(QAbstractButton):
         self.setFixedSize(22, 22)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+        self._pop = 1.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(motion.DURATIONS["interruptor"])
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.setEasingCurve(motion.easing("mola"))
+        self._anim.valueChanged.connect(self._on_pop)
+        self.toggled.connect(self._toggled)
+
+    def _on_pop(self, value: object) -> None:
+        self._pop = float(value)  # type: ignore[arg-type]
+        self.update()
+
+    def _toggled(self, checked: bool) -> None:
+        if checked and self.isVisible():
+            self._anim.stop()
+            self._anim.start()
+        else:
+            self._pop = 1.0
 
     def paintEvent(self, _event: object) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(2, 2, 18, 18)
         if self.isChecked():
+            k = 0.6 + 0.4 * self._pop
+            c = r.center()
+            r = QRectF(c.x() - 9 * k, c.y() - 9 * k, 18 * k, 18 * k)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(theme.color(theme.ACCENT))
+            p.setBrush(theme.accent_gradient(r.left(), r.top(), r.right(), r.bottom()))
             p.drawEllipse(r)
             pen = QPen(theme.color(theme.ACCENT_TEXT), 2)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -485,11 +558,15 @@ class CheckCircle(QAbstractButton):
             path = QPainterPath(QPointF(7, 11.2))
             path.lineTo(9.8, 14)
             path.lineTo(15, 8.4)
+            if self._pop < 1.0:  # o risco do check se desenha junto com o pop
+                length = path.length() * min(1.0, self._pop * 1.4)
+                pen.setDashPattern([max(0.01, length / 2), 100.0])
+                p.setPen(pen)
             p.drawPath(path)
         else:
             hover = self.underMouse()
-            p.setPen(QPen(theme.color(theme.TEXT_2 if hover else theme.MUTED), 1.6))
-            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(theme.color(theme.ACCENT if hover else theme.MUTED, 0.9 if hover else 1.0), 1.6))
+            p.setBrush(theme.color(theme.ACCENT, 0.08) if hover else Qt.BrushStyle.NoBrush)
             p.drawEllipse(r)
 
 

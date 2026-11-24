@@ -5,7 +5,16 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QRadialGradient,
+)
 from PySide6.QtWidgets import QMenu, QWidget
 
 from ventude.services import dwm
@@ -48,11 +57,38 @@ def paint_ink(
         grad.setColorAt(1.0, QColor(255, 255, 255, 0))
         p.fillPath(path, grad)
     if hairline:
-        p.setPen(QPen(QColor(255, 255, 255, int(20 * alpha)), 1.0))
+        # Fio de luz: mais claro no topo e quase sumindo embaixo, como uma borda de vidro.
+        rim = QLinearGradient(0, inner.top(), 0, inner.bottom())
+        rim.setColorAt(0.0, QColor(255, 255, 255, int(34 * alpha)))
+        rim.setColorAt(0.35, QColor(255, 255, 255, int(16 * alpha)))
+        rim.setColorAt(1.0, QColor(255, 255, 255, int(9 * alpha)))
+        p.setPen(QPen(QBrush(rim), 1.0))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(path)
     p.restore()
     return path
+
+
+def paint_aurora(p: QPainter, path: QPainterPath, rect: QRectF, strength: float = 1.0) -> None:
+    """Brilho bem fraco das cores da marca no alto da superfície (a "brisa" do Ventude 3)."""
+    if strength <= 0.01 or rect.height() < 60:
+        return
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setClipPath(path)
+    p.setPen(Qt.PenStyle.NoPen)
+    radius = max(rect.width(), rect.height()) * 0.55
+    for cx, color, alpha in ((0.16, theme.ACCENT, 30), (0.86, theme.ACCENT_2, 24)):
+        center = QPointF(rect.left() + rect.width() * cx, rect.top() - radius * 0.35)
+        glow = QRadialGradient(center, radius)
+        c = QColor(color)
+        c.setAlpha(round(alpha * strength))
+        glow.setColorAt(0.0, c)
+        c.setAlpha(0)
+        glow.setColorAt(1.0, c)
+        p.setBrush(QBrush(glow))
+        p.drawRect(rect)
+    p.restore()
 
 
 # Tornadinho do ícone: (y, largura, deslocamento x) de cada volta, num quadro de 64×64.
@@ -72,9 +108,15 @@ def paint_tornado(p: QPainter, rect: QRectF, *, background: bool = True) -> None
         box = QRectF(ox, oy, side, side)
         path = rounded_path(box, 15.0 * s)
         grad = QLinearGradient(0, box.top(), 0, box.bottom())
-        grad.setColorAt(0.0, QColor("#1A1E25"))
+        grad.setColorAt(0.0, QColor("#1A1F2A"))
         grad.setColorAt(1.0, QColor(theme.BG))
         p.fillPath(path, grad)
+        if side >= 32:  # brilho da marca atrás do redemoinho (só onde dá para ver)
+            glow = QRadialGradient(QPointF(ox + side * 0.5, oy + side * 0.36), side * 0.62)
+            glow.setColorAt(0.0, theme.color(theme.ACCENT, 0.16))
+            glow.setColorAt(0.55, theme.color(theme.ACCENT_2, 0.06))
+            glow.setColorAt(1.0, theme.color(theme.ACCENT_2, 0.0))
+            p.fillPath(path, QBrush(glow))
         if side >= 32:
             p.setPen(QPen(QColor(255, 255, 255, 26), max(1.0, s)))
             p.setBrush(Qt.BrushStyle.NoBrush)
@@ -82,7 +124,7 @@ def paint_tornado(p: QPainter, rect: QRectF, *, background: bool = True) -> None
     small = side < 28
     turns = _TORNADO_SMALL if small else _TORNADO
     stroke = (7.5 if small else 5.6) * s
-    top, bottom = QColor(theme.ACCENT), QColor("#38BDF8")
+    top, bottom = QColor(theme.ACCENT), QColor(theme.ACCENT_2)
     for index, (y, width, dx) in enumerate(turns):
         t = index / max(1, len(turns) - 1)
         color = _mix_color(top, bottom, t)

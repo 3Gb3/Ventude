@@ -12,7 +12,6 @@ from datetime import datetime
 from enum import Enum
 
 from PySide6.QtCore import (
-    QEasingCurve,
     QEvent,
     QParallelAnimationGroup,
     QPoint,
@@ -44,19 +43,17 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ventude.core.config import MODULES, Settings
+from ventude.core.config import MODULES, TAB_GROUPS, Settings
 from ventude.core.timefmt import WEEKDAYS_SHORT, clock
 from ventude.services import hardware, system, winutil
 from ventude.services.hardware import Snapshot
@@ -85,8 +82,18 @@ from ventude.ui.pill_overlay import VolumeOverlay
 from ventude.ui.power_menu import PowerMenu
 from ventude.ui.qr import QrCard
 from ventude.ui.shell.controls import CONTROLS_WIDTH, ControlsBody
+from ventude.ui.tabs import TabButton, TabStrip
 from ventude.ui.toast import TOAST_HEIGHT, TOAST_WIDTH, Toast, ToastView, event_toast
-from ventude.ui.widgets import BadgeButton, ElidedLabel, Equalizer, IconButton, Ring, label, rounded_pixmap
+from ventude.ui.widgets import (
+    BadgeButton,
+    ElidedLabel,
+    Equalizer,
+    IconButton,
+    Ring,
+    label,
+    rounded_pixmap,
+    set_qss,
+)
 
 log = logging.getLogger(__name__)
 
@@ -425,7 +432,7 @@ class Pill(QWidget):
         self.metrics_chip.setVisible(self._has_metrics and "metrics" not in self._overflow_hidden)
         if snap is not None:
             alert = (snap.gpu.temp or 0) >= hardware.TEMP_LIMIT or (snap.ram_pct or 0) >= hardware.RAM_LIMIT
-            self.metrics_chip.setStyleSheet(f"color: {theme.WARN if alert else theme.TEXT_2};")
+            set_qss(self.metrics_chip, f"color: {theme.WARN if alert else theme.TEXT_2};")
 
     def set_upcoming_event(self, event: object | None) -> bool:
         before = not self.event_chip.isHidden()
@@ -497,7 +504,7 @@ class Pill(QWidget):
             self.row.setStretch(index, 0 if shown else 1)
         if state:
             color = theme.TEXT if playing else theme.TEXT_2
-            self.title.setStyleSheet(f"color: {color};")
+            set_qss(self.title, f"color: {color};")
             self.title.setText(f"{state.title}  ·  {state.artist}" if state.artist else state.title)
             self.art.setGraphicsEffect(None if playing else self._dim_effect())
             self.setToolTip("" if playing else "Pausado")
@@ -543,7 +550,7 @@ class Pill(QWidget):
         color = theme.SKY if state.kind == "break" else theme.ACCENT
         self.timer_ring.set_value(state.progress(), color, dim=not state.running, animate=False)
         self.timer_text.setText(countdown(state.left()))
-        self.timer_text.setStyleSheet(f"color: {color if state.running else theme.TEXT_2};")
+        set_qss(self.timer_text, f"color: {color if state.running else theme.TEXT_2};")
         self.timer_chip.setToolTip(f"{state.label}" + ("" if state.running else " (pausado)"))
         self.timer_chip.show()
 
@@ -556,8 +563,7 @@ class Pill(QWidget):
         self._has_weather = True
         rain = forecast.rain_soon()
         glyph = "rain" if rain else forecast.icon
-        color = theme.SUN if glyph in ("sun", "cloud-sun") else theme.SKY
-        self.weather_icon.setPixmap(icons.pixmap(glyph, color, 16))
+        self.weather_icon.setPixmap(icons.weather(glyph, 16))
         self.weather_temp.setText(f"{forecast.temp:.0f}°")
         self.weather_rain.setText(f"{rain}%" if rain else "")
         self.weather_rain.setVisible(bool(rain))
@@ -692,7 +698,10 @@ class Pill(QWidget):
         p.drawLine(QPointF(left, y), QPointF(right, y))
         done = max(0.0, min(1.0, state.position_at() / state.duration_s))
         if done > 0:
-            pen.setColor(theme.color(theme.ACCENT if state.is_playing else theme.TEXT_2, 0.9))
+            if state.is_playing:
+                pen.setBrush(theme.accent_gradient(left, 0, right, 0, 0.95))
+            else:
+                pen.setColor(theme.color(theme.TEXT_2, 0.9))
             p.setPen(pen)
             p.drawLine(QPointF(left, y), QPointF(left + (right - left) * done, y))
 
@@ -787,38 +796,27 @@ class Panel(QWidget):
         root.setSpacing(10)
         header = QHBoxLayout()
         header.setSpacing(4)
-        self.tab_row = QHBoxLayout()
-        self.tab_row.setSpacing(2)
-        header.addLayout(self.tab_row)
-        header.addStretch(1)
-        self.color_btn = IconButton("pipette", "Conta-gotas: copia a cor de qualquer ponto da tela", 30, 15)
-        self.ocr_btn = IconButton("scan", "Capturar texto (OCR): copia o texto de uma região da tela", 30, 15)
-        self.color_btn.clicked.connect(lambda: self.tool_requested.emit("color"))
-        self.ocr_btn.clicked.connect(lambda: self.tool_requested.emit("ocr"))
-        header.addWidget(self.color_btn)
-        header.addWidget(self.ocr_btn)
-        self.coffee_btn = IconButton("coffee", "", 30, 15)
-        self.coffee_btn.clicked.connect(ctx.caffeine.toggle)
-        ctx.caffeine.changed.connect(lambda _on: self._coffee_changed())
-        header.addWidget(self.coffee_btn)
-        self.power_btn = BadgeButton("power", "Energia: bloquear, suspender, reiniciar, desligar…", 30, 15)
+        self.strip = TabStrip(self)
+        self.strip.picked.connect(self.select)
+        header.addWidget(self.strip, 1)
+        # Ferramentas (cafeína, conta-gotas, texto da tela) moram em Controles; aqui fica só a porta.
+        self.controls_btn = IconButton("sliders", "Controles: cafeína, foco, ferramentas…", 32, 16)
+        self.controls_btn.clicked.connect(self.controls_requested.emit)
+        header.addWidget(self.controls_btn)
+        self.power_btn = BadgeButton("power", "Energia: bloquear, suspender, reiniciar, desligar…", 32, 16)
         self.power_btn.clicked.connect(self.show_power)
         ctx.power.changed.connect(self._power_changed)
         header.addWidget(self.power_btn)
-        self.controls_btn = IconButton("sliders", "Controles (Win + A)", 30, 15)
-        self.controls_btn.clicked.connect(self.controls_requested.emit)
-        self.controls_btn.hide()
-        header.addWidget(self.controls_btn)
-        header.addSpacing(4)
+        header.addSpacing(6)
         self.clock = label("", "Muted")
-        self.clock.setFont(theme.font(12, tabular=True))
+        self.clock.setFont(theme.font(12, theme.SEMI, tabular=True))
         self.clock.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         header.addWidget(self.clock)
-        header.addSpacing(6)
-        self.pin = IconButton("pin", "Manter aberto", 30, 15)
+        header.addSpacing(4)
+        self.pin = IconButton("pin", "Manter aberto", 32, 15)
         self.pin.setCheckable(True)
         self.pin.toggled.connect(self._pin_changed)
-        self.close_btn = IconButton("chevron-up", "Fechar (Esc)", 30, 16)
+        self.close_btn = IconButton("chevron-up", "Fechar (Esc)", 32, 16)
         header.addWidget(self.pin)
         header.addWidget(self.close_btn)
         root.addLayout(header)
@@ -828,9 +826,9 @@ class Panel(QWidget):
         body.setContentsMargins(4, 0, 4, 0)
         body.addWidget(self.stack)
         root.addLayout(body, 1)
-        self.group = QButtonGroup(self)
-        self.group.setExclusive(True)
-        self.tabs: dict[str, QPushButton] = {}
+        self.tabs: dict[str, TabButton] = {}
+        self._tab_of: dict[str, str] = {}  # página -> chave da aba (grupo) onde ela mora
+        self._signature: list[tuple[str, ...]] = []
         self.pages: dict[str, Page] = {}
         self.current = "home"
         self._transition: tuple[QParallelAnimationGroup, QWidget] | None = None
@@ -841,29 +839,19 @@ class Panel(QWidget):
         self.qr = QrCard(self)
         self.power_menu: PowerMenu | None = None
         self.rebuild_tabs()
-        self._coffee_changed()
         self._power_changed(ctx.power.pending)
 
     # ---------- Ventude Shell ----------
     def set_shell_mode(self, on: bool) -> None:
-        """Com o Shell ligado, energia, cafeína, conta-gotas e OCR moram em Controles e no Lançador."""
+        """Com o Shell ligado, a Energia mora no Lançador (o botão sai daqui)."""
         self.shell_mode = on
-        for button in (self.color_btn, self.ocr_btn, self.coffee_btn, self.power_btn):
-            button.setVisible(not on)
-        self.controls_btn.setVisible(on)
+        self.power_btn.setVisible(not on)
+        tip = "Controles: cafeína, foco, ferramentas…"
+        self.controls_btn.setToolTip(f"{tip} (Win + A)" if on else tip)
         self.rebuild_tabs()
         self.clock.setVisible(not (on and self.current == "home"))
 
-    # ---------- cafeína e energia ----------
-    def _coffee_changed(self) -> None:
-        on = self.ctx.caffeine.active
-        self.coffee_btn.set_icon("coffee", theme.SUN if on else None)
-        self.coffee_btn.setToolTip(
-            self.ctx.caffeine.describe() + ". Clique para desligar."
-            if on
-            else "Cafeína: não deixa o Windows apagar a tela nem suspender"
-        )
-
+    # ---------- energia ----------
     def _power_changed(self, pending: bool) -> None:
         self.power_btn.set_badge(theme.WARN if pending else "")
         self.power_btn.setToolTip(
@@ -898,30 +886,31 @@ class Panel(QWidget):
             if s.module_enabled(key) and not (hide_shortcuts and key == "shortcuts")
         ]
 
+    def _groups(self) -> list[tuple[str, ...]]:
+        """Grupos de abas só com as páginas ligadas (a aba some quando o grupo fica vazio)."""
+        keys = set(self.enabled_keys())
+        groups = [tuple(k for k in group if k in keys) for group in TAB_GROUPS]
+        grouped = {k for group in TAB_GROUPS for k in group}
+        groups += [(k,) for k in self.enabled_keys() if k not in grouped]  # módulo novo sem grupo
+        return [g for g in groups if g]
+
     def rebuild_tabs(self) -> None:
-        keys = self.enabled_keys()
-        if list(self.tabs) == keys:
+        groups = self._groups()
+        if groups == self._signature:
             return
-        for button in self.tabs.values():
-            self.group.removeButton(button)
-            button.deleteLater()
+        self._signature = groups
+        info = {key: (title, icon_name) for key, title, icon_name in MODULES}
+        self.strip.clear()
         self.tabs.clear()
-        for key, title, icon_name in MODULES:
-            if key not in keys:
-                continue
-            button = QPushButton()
-            button.setObjectName("Tab")
-            button.setCheckable(True)
-            button.setFixedHeight(32)
-            button.setMinimumWidth(36)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setToolTip(title)
-            button.setProperty("title", title)
-            button.setProperty("icon_name", icon_name)
-            button.clicked.connect(lambda _c=False, k=key: self.select(k))
-            self.group.addButton(button)
-            self.tab_row.addWidget(button)
-            self.tabs[key] = button
+        self._tab_of.clear()
+        for group in groups:
+            members = [(k, info[k][0]) for k in group]
+            button = TabButton(info[group[0]][1], members)
+            self.strip.add(button)
+            self.tabs[group[0]] = button
+            for k in group:
+                self._tab_of[k] = group[0]
+        keys = self.enabled_keys()
         for key in list(self.pages):
             if key not in keys:
                 page = self.pages.pop(key)
@@ -941,27 +930,21 @@ class Panel(QWidget):
         return self.pages[key]
 
     def select(self, key: str) -> None:
-        if key not in self.tabs:
+        if key not in self._tab_of:
             key = "home"
         page = self.page(key)
         if page is None:
             return
-        keys = list(self.tabs)
+        order = [k for group in self._signature for k in group]
         previous = self.current
         changed = self.stack.currentWidget() is not page
         self.current = key
         self.stack.setCurrentWidget(page)
         self.clock.setVisible(not (self.shell_mode and key == "home"))
         # Sem animação de aba enquanto o painel ainda está aparecendo (fade da abertura).
-        if changed and previous in keys and self.isVisible() and self.graphicsEffect() is None:
-            self._slide_in(page, 1 if keys.index(key) >= keys.index(previous) else -1)
-        for tab_key, button in self.tabs.items():
-            active = tab_key == key
-            button.setChecked(active)
-            button.setText(f" {button.property('title')}" if active else "")
-            button.setIcon(
-                icons.icon(button.property("icon_name"), theme.TEXT if active else theme.TEXT_2, 17)
-            )
+        if changed and previous in order and self.isVisible() and self.graphicsEffect() is None:
+            self._slide_in(page, 1 if order.index(key) >= order.index(previous) else -1)
+        self.strip.activate(self.tabs.get(self._tab_of[key]), key, self.ctx.settings)
         try:
             page.on_show()
         except Exception:  # noqa: BLE001
@@ -982,14 +965,14 @@ class Panel(QWidget):
         group = QParallelAnimationGroup(self)
         slide = QPropertyAnimation(page, b"pos", group)
         slide.setDuration(duration)
-        slide.setStartValue(end + QPoint(28 * direction, 0))
+        slide.setStartValue(end + QPoint(22 * direction, 0))
         slide.setEndValue(end)
-        slide.setEasingCurve(QEasingCurve.Type.OutCubic)
+        slide.setEasingCurve(motion.easing("enfase"))
         fade = QPropertyAnimation(effect, b"opacity", group)
-        fade.setDuration(int(duration * 0.8))
+        fade.setDuration(int(duration * 0.7))
         fade.setStartValue(0.0)
         fade.setEndValue(1.0)
-        fade.setEasingCurve(QEasingCurve.Type.OutQuad)
+        fade.setEasingCurve(motion.easing("padrao"))
         group.finished.connect(self._end_transition)
         self._transition = (group, page)
         group.start()
@@ -1011,9 +994,9 @@ class Panel(QWidget):
             self.qr.setGeometry(self.rect().adjusted(6, 6, -6, -6))
 
     def select_index(self, index: int) -> None:
-        keys = list(self.tabs)
-        if 0 <= index < len(keys):
-            self.select(keys[index])
+        buttons = list(self.tabs.values())
+        if 0 <= index < len(buttons):
+            self.select(buttons[index].current)
 
     def refresh_clock(self) -> None:
         self.clock.setText(clock(datetime.now(), self.ctx.settings.clock_24h))
@@ -1050,6 +1033,7 @@ class Island(QWidget):
         self._user_hidden = False
         self._hole: object | None = None  # BlackHole rodando (Win 3 vezes)
         self._hole_pixmap: QPixmap | None = None
+        self._surface: tuple[tuple[int, int, bool, float], QPixmap] | None = None
         self._quitting = False
         self._collapsed_at = time.time()
         self._hotkey = False
@@ -1073,8 +1057,9 @@ class Island(QWidget):
         self.controls.open_audio.connect(lambda: self.expand("audio"))
         self.controls.caffeine_clicked.connect(lambda: setattr(self, "_suppress_caffeine_toast", True))
         self.controls.mic_clicked.connect(lambda: setattr(self, "_suppress_mic_toast", True))
+        self.controls.tool_requested.connect(self.run_tool)
         self.anim = QPropertyAnimation(self, b"geometry", self)
-        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.anim.setEasingCurve(motion.easing("padrao"))
         self.anim.finished.connect(self._settled)
         self.fade = QPropertyAnimation(self)
         self.hover_timer = QTimer(self, singleShot=True, interval=0)
@@ -1303,6 +1288,9 @@ class Island(QWidget):
             self._settled()
             return
         self.anim.setDuration(dur)
+        # Abrindo, a ilha passa um tiquinho do tamanho final e assenta (mola); fechando, recolhe direto.
+        growing = target.width() * target.height() >= self.width() * self.height()
+        self.anim.setEasingCurve(motion.easing("mola" if opening and growing else "padrao"))
         self.anim.setStartValue(self.geometry())
         self.anim.setEndValue(target)
         self.anim.start()
@@ -1448,6 +1436,9 @@ class Island(QWidget):
     def _settled(self) -> None:
         if self.anim.state() == QPropertyAnimation.State.Running:
             return
+        repaint = getattr(getattr(self.ctx, "shell", None), "_repaint_docks", None)
+        if callable(repaint):
+            repaint()  # o botão Controles da Doca acompanha a ilha
         self._layout_panel()
         if self.mode == IslandMode.PANEL:
             if not self.panel.isVisible():
@@ -1482,7 +1473,7 @@ class Island(QWidget):
         self.fade.setDuration(duration)
         self.fade.setStartValue(0.0)
         self.fade.setEndValue(1.0)
-        self.fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.fade.setEasingCurve(motion.easing("suave"))
         self.fade.finished.connect(lambda: widget.setGraphicsEffect(None))
         self.fade.start()
 
@@ -1875,11 +1866,32 @@ class Island(QWidget):
             monitor_index=screens.index(screen) if screen in screens else 0,
         )
 
+    def _paint_surface(self, p: QPainter, rect: QRectF, radius: float) -> None:
+        path = brand.paint_ink(p, rect, radius, bg=theme.INK, alpha=1.0)
+        if self.open_body:  # aberta, a ilha ganha o brilho da marca no alto (cresce junto com ela)
+            brand.paint_aurora(p, path, rect, min(1.0, max(0.0, (rect.height() - 60) / 260)))
+
     def paintEvent(self, _event: object) -> None:
         p = QPainter(self)
         rect = QRectF(self.rect())
         radius = min(theme.ISLAND_RADIUS, rect.height() / 2)
-        path = brand.paint_ink(p, rect, radius, bg=theme.INK, alpha=1.0)
+        if self.anim.state() == QPropertyAnimation.State.Running:
+            self._paint_surface(p, rect, radius)  # mudando de tamanho a cada quadro: sem cache
+        else:
+            # Parada, a superfície (fundo, brilho e fio de luz) vira um pixmap: os filhos que se
+            # repintam (equalizador, relógio, barras) não refazem gradientes a cada quadro.
+            ratio = self.devicePixelRatioF()
+            key = (self.width(), self.height(), self.open_body, ratio)
+            if self._surface is None or self._surface[0] != key:
+                pm = QPixmap(round(self.width() * ratio), round(self.height() * ratio))
+                pm.setDevicePixelRatio(ratio)
+                pm.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pm)
+                self._paint_surface(painter, rect, radius)
+                painter.end()
+                self._surface = (key, pm)
+            p.drawPixmap(0, 0, self._surface[1])
+        path = brand.rounded_path(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius)
         if self.pulse.state() == QVariantAnimation.State.Running:
             glow = abs(math.sin(float(self.pulse.currentValue()) * math.pi * 3))
             p.setRenderHint(QPainter.RenderHint.Antialiasing)

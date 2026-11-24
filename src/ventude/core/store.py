@@ -255,9 +255,6 @@ class Store:
             (key, json.dumps(value, ensure_ascii=False), time.time() + ttl),
         )
 
-    def cache_clear(self, prefix: str = "") -> None:
-        self._exec("DELETE FROM cache WHERE key LIKE ?", (prefix + "%",))
-
     # ---------- histórico de uso das IAs ----------
     def add_sample(self, provider: str, key: str, ts: float, used: float) -> None:
         self._exec(

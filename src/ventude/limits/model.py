@@ -79,10 +79,6 @@ class Report:
     def name(self) -> str:
         return PROVIDERS.get(self.provider, self.provider)
 
-    @property
-    def has_data(self) -> bool:
-        return bool(self.windows) and self.state in ("ok", "stale")
-
     def headline(self, now: float | None = None, pinned: str = "") -> Window | None:
         """A janela que vai no anel: a fixada pelo usuário ou a mais apertada.
 
@@ -131,16 +127,6 @@ class ProviderError(Exception):
 
 def is_gemini(window: Window) -> bool:
     return window.group == "Gemini" or (not window.group and "gemini" in window.label.lower())
-
-
-def severity(used: float | None) -> str:
-    if used is None:
-        return "unknown"
-    if used >= 90:
-        return "critical"
-    if used >= 70:
-        return "warning"
-    return "normal"
 
 
 def find_key(node: Any, *names: str) -> Any:
