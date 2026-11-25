@@ -27,6 +27,18 @@ e uma nova barra de tarefas, Menu Iniciar e Pesquisa embaixo.
 
 ---
 
+## Novo no Ventude 3.0
+
+Cara nova e tudo mais organizado:
+
+- 🎨 **Visual "Brisa"**: grafite azulado com o gradiente do tornadinho (menta → céu) nos botões, interruptores, barras e na aba ativa; um brilho suave no alto da ilha aberta e bordas de vidro.
+- 🗂️ **12 páginas em 8 abas**: Sistema + Áudio, Estante + Atalhos, Agenda + Tarefas e Mercado + Notícias dividem uma aba. A aba ativa mostra os nomes lado a lado e um indicador desliza até ela.
+- 🎛️ **Controles em todo lugar**: Win + A, o botão do cabeçalho da ilha, a ponta direita da Doca e o rodapé do Lançador. Conta-gotas e Texto da tela agora moram nos Controles, ao lado de Cafeína, Foco e Silêncio.
+- ✨ **Animações novas**: a ilha abre com uma mola (passa um tiquinho e assenta), páginas deslizam na curva da casa, anéis e barras de uso crescem até o valor, interruptores e checks dão um "pop".
+- 🌤️ **Ícones novos**: clima em cores, ícones preenchidos na aba ativa, inicial colorida enquanto o ícone de um app carrega e tudo desenhado na densidade da sua tela.
+- ⚙️ **Ajustes com atalhos**: pílulas no topo (Geral, IAs, Abas, Shell, Bloqueio, Sobre) rolam até a seção e acompanham a rolagem.
+- ⚡ **Mais leve**: o fundo da ilha fica em cache, fontes e cores não são recriadas a cada quadro e o relógio do Início para quando a aba está escondida.
+
 ## Por que o Ventude?
 
 Quem usa várias IAs no dia a dia vive abrindo abas só para descobrir quanto ainda sobra do limite. O Ventude junta tudo num lugar só, sempre à vista e sem atrapalhar:
@@ -65,20 +77,18 @@ Quem usa várias IAs no dia a dia vive abrindo abas só para descobrir quanto ai
   <img src="docs/screens/ias.webp" alt="Limites das IAs" width="49%">
 </p>
 
-Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta, vira um painel com abas:
+Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta, vira um painel com 8 abas; as que juntam duas páginas mostram os dois nomes quando estão ativas:
 
 | Aba | O que faz |
 |-----|-----------|
 | **Início** | Relógio, semana, próximo compromisso, clima, anéis das IAs, player e tarefas pendentes. |
 | **IAs** | Cada limite, janela por janela, com % usado, quando renova, mini-gráfico das últimas horas e previsão ("Acaba em ~1h 40min"). |
-| **Sistema** | CPU (com os processos que mais usam), GPU NVIDIA, RAM, rede, disco e bateria ao vivo. |
-| **Áudio** | Troca saída e microfone com 1 clique, volume master e mixer por aplicativo. |
-| **Estante** | Guarda arquivos, imagens, links, textos e cores soltos na ilha, além do histórico da área de transferência. |
-| **Atalhos** | Apps, pastas, arquivos e sites a um clique. Arraste do Explorer para a ilha, mesmo fechada. |
-| **Agenda e Tarefas** | Calendário, compromissos com aviso 10 e 5 minutos antes, e listas rápidas. |
+| **Sistema · Áudio** | CPU (com os processos que mais usam), GPU NVIDIA, RAM, rede, disco e bateria ao vivo. No Áudio: troca saída e microfone com 1 clique, volume master e mixer por aplicativo. |
+| **Estante · Atalhos** | Guarda arquivos, imagens, links, textos e cores soltos na ilha, além do histórico da área de transferência. Nos Atalhos: apps, pastas, arquivos e sites a um clique (com o Shell ligado, isso mora no Lançador). |
+| **Agenda · Tarefas** | Calendário, compromissos com aviso 10 e 5 minutos antes, e listas rápidas. |
 | **Clima** | Agora e próximos 7 dias, hora a hora, pelo Open-Meteo. |
-| **Mercado e Notícias** | Ações, índices, moedas e cripto com gráfico do mês; G1, BBC Brasil e Tecnoblog. |
-| **Ajustes** | Tudo salvo na hora. Abas desligadas somem e param de rodar. |
+| **Mercado · Notícias** | Ações, índices, moedas e cripto com gráfico do mês; G1, BBC Brasil e Tecnoblog. |
+| **Ajustes** | Tudo salvo na hora, com atalhos para cada seção. Páginas desligadas somem e param de rodar. |
 
 <p align="center">
   <img src="docs/screens/sistema.webp" alt="Sistema: CPU, GPU, RAM, rede, disco e bateria ao vivo" width="49%">
@@ -102,7 +112,7 @@ Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta
 - **Avisos na própria ilha**: limites das IAs, música nova e lembretes da Agenda aparecem por alguns segundos.
 - **Timer e Pomodoro**, com a contagem na ilha e um pulso ao terminar.
 - **Barra de comandos** (Ctrl + K ou começar a digitar): cria tarefas (`t: revisar PR`), compromissos (`a: dentista amanhã 9h-10h`) e timers (`timer 15m`, `pomodoro`).
-- **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows).
+- **Conta-gotas** (copia a cor em HEX) e **captura de texto** (OCR do próprio Windows), nos Controles ou digitando `cor` / `ocr`.
 - **Busca universal**: apps (inclusive da Loja), pastas e arquivos. Entende apelidos e abreviações: `lol` acha League of Legends, `vava` o Valorant, `zap` o WhatsApp, `vsc` o Visual Studio Code. `/p nome` busca pastas, `1450 * 5,85` calcula e copia, `qr texto` gera um QR Code.
 - **Modo Cafeína**: o Windows não apaga a tela nem suspende.
 - **Privacidade**: ponto laranja com o microfone em uso, verde com a câmera, com o nome do app.
@@ -125,15 +135,15 @@ Fechada, a ilha é uma pílula com hora, clima, música e um anel por IA. Aberta
   <img src="docs/screens/shell-previas.webp" alt="Prévias ao vivo das janelas acima da Doca" width="49%">
 </p>
 <p align="center">
-  <img src="docs/screens/controles.webp" alt="Controles na ilha: som, rede, Cafeína, Foco, Silêncio e apps em segundo plano" width="32%">
+  <img src="docs/screens/controles.webp" alt="Controles na ilha: rede, Cafeína, microfone, Foco, Luz noturna, Silêncio, Conta-gotas e Texto da tela" width="32%">
   <img src="docs/screens/shell-ate-logo.webp" alt="Interruptor de energia: Até logo!" width="66%">
 </p>
 
 | Parte | O que faz |
 |-------|-----------|
-| **Doca flutuante** | Fixados e apps abertos numa cápsula centralizada, com prévias ao vivo das janelas, arrastar para reordenar e **Win + 1..9** para alternar. Modos: esquivar janelas, sempre visível ou oculta. |
+| **Doca flutuante** | Fixados e apps abertos numa cápsula centralizada, com prévias ao vivo das janelas, arrastar para reordenar e **Win + 1..9** para alternar. Na ponta direita: apps em segundo plano, Notificações e Controles. Modos: esquivar janelas, sempre visível ou oculta. |
 | **Lançador (`Win` / `Win + S`)** | Início, Pesquisa instantânea e Todos os apps numa só folha. Escopos: `>` comandos, `@` janelas abertas, `/` projetos e arquivos, `=` calculadora, `?` web, `!` energia. |
-| **Controles (`Win + A`)** | Volume e saída de áudio, microfone, Cafeína, Conta-gotas, OCR, Foco, Silêncio, Luz noturna e apps em segundo plano, direto na ilha. |
+| **Controles (`Win + A`)** | Rede, Cafeína, microfone, Foco 25, Luz noturna, Silêncio, Conta-gotas e Texto da tela, direto na ilha. Também pela Doca, pelo Lançador e pelo cabeçalho da ilha. |
 | **Energia** | Desligar, reiniciar, suspender e bloquear com a animação "Até logo!" em todas as telas (Esc cancela) e uma saudação ao ligar. |
 
 > [!TIP]

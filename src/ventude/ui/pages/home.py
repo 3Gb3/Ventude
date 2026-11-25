@@ -226,7 +226,10 @@ class DayCell(QWidget):
         temps = label(f"{day['max']:.0f}° {day['min']:.0f}°", "")
         temps.setStyleSheet("font-size: 11px; font-weight: 600;")
         glyph = icon_for(day["code"])
-        self.setLayout(hbox(icon_label(glyph, tint(glyph), 16), vbox(name, temps, spacing=0), spacing=6))
+        glyph_label = QLabel()
+        glyph_label.setFixedSize(16, 16)
+        glyph_label.setPixmap(icons.weather(glyph, 16))
+        self.setLayout(hbox(glyph_label, vbox(name, temps, spacing=0), spacing=6))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Ver os detalhes deste dia")
         for child in self.findChildren(QWidget):
@@ -262,7 +265,7 @@ class WeatherCard(Card):
         self.body.addStretch(1)
         self.body.addLayout(self.days)
         self.clicked.connect(lambda: ctx.navigate_requested.emit("weather"))
-        self.icon.setPixmap(icons.pixmap("cloud-sun", theme.SUN, 38))
+        self.icon.setPixmap(icons.weather("cloud-sun", 38))
         ctx.weather_changed.connect(self._changed)
         ctx.weather_failed.connect(self._fail)
 
@@ -296,7 +299,7 @@ class WeatherCard(Card):
         self.city.setText(forecast.place.split(",")[0])
         self.temp.setText(f"{forecast.temp:.0f}°")
         self.desc.setText(forecast.description)
-        self.icon.setPixmap(icons.pixmap(forecast.icon, tint(forecast.icon), 38))
+        self.icon.setPixmap(icons.weather(forecast.icon, 38))
         self._clear_days()
         if not forecast.days:
             return
@@ -315,10 +318,6 @@ class WeatherCard(Card):
     def _fail(self, _error: str) -> None:
         if self.ctx.forecast is None:
             self.desc.setText("Clima indisponível agora")
-
-
-def tint(icon_name: str) -> str:
-    return theme.SUN if icon_name in ("sun", "cloud-sun") else theme.SKY
 
 
 class LimitsCard(Card):
@@ -672,8 +671,7 @@ class HomePage(Page):
         bottom.addWidget(self.tasks, 6)
         self.root.addLayout(top, 11)
         self.root.addLayout(bottom, 10)
-        self.timer = QTimer(self, interval=1000, timeout=self._tick)
-        self.timer.start()
+        self.timer = QTimer(self, interval=1000, timeout=self._tick)  # só corre com a aba à vista
         ctx.settings_changed.connect(lambda _s: self._tick())
         self._tick()
         self.clock.refresh_event()
@@ -681,6 +679,14 @@ class HomePage(Page):
     def _tick(self) -> None:
         if self.isVisible() or not self.clock.time.text():
             self.clock.tick()
+
+    def showEvent(self, event: object) -> None:
+        super().showEvent(event)  # type: ignore[arg-type]
+        self.timer.start()
+
+    def hideEvent(self, event: object) -> None:
+        super().hideEvent(event)  # type: ignore[arg-type]
+        self.timer.stop()
 
     def on_show(self) -> None:
         self._tick()

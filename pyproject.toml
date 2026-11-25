@@ -1,6 +1,6 @@
 [project]
 name = "ventude"
-version = "2.1.0"
+version = "3.0.0"
 description = "Dynamic Island e shell para Windows: barra de tarefas, Menu Iniciar e Pesquisa próprios, limites das suas IAs, mídia, clima, agenda e atalhos"
 readme = "README.md"
 license = "MIT"

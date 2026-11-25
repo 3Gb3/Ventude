@@ -19,6 +19,17 @@ MODULES: list[tuple[str, str, str]] = [
     ("news", "Notícias", "news"),
     ("settings", "Ajustes", "settings"),
 ]
+# Abas da ilha: páginas irmãs dividem uma aba só (ativa, ela mostra os nomes lado a lado).
+TAB_GROUPS: list[tuple[str, ...]] = [
+    ("home",),
+    ("limits",),
+    ("hardware", "audio"),
+    ("shelf", "shortcuts"),
+    ("agenda", "tasks"),
+    ("weather",),
+    ("market", "news"),
+    ("settings",),
+]
 ALWAYS_ON = {"home", "settings"}
 DEFAULT_MODULES = "limits,hardware,audio,shortcuts,shelf,agenda,tasks,weather,market,news"
 LAYOUT_VERSION = 9  # 5: Sistema/Áudio · 6: Shell 2.0 · 7: Shell 3.0 · 8: dedupe · 9: some em tela cheia
@@ -80,14 +91,10 @@ class Settings:
     hotkey_dock_numbers: bool = True  # Win + 1..9 e Win + Shift + 1..9 acionam a Doca
     quiet_mode: bool = False  # Silêncio: só deixa passar timer, agenda e limite >= 95%
     agent_command: str = "claude"  # comando executado por "Agente aqui"
-    taskbar_autohide: bool = False  # legado (usado na migração v6->v7)
-    taskbar_align: str = "center"  # legado
-    taskbar_weather: bool = True  # legado
+    taskbar_autohide: bool = False  # só lido na migração v6 -> v7 (virou dock_mode="oculta")
     taskbar_all_monitors: bool = True  # uma Doca em cada monitor
-    shell_glass: bool = True  # legado
     power_animation: bool = True  # "Até logo!": escurece as telas antes de desligar, reiniciar...
     shell_greeting: bool = True  # "Bom dia!" ao ligar o PC
-    start_view: str = "category"  # legado
     pill_date: bool = True  # data na ilha fechada (única data no Shell 3.0)
     lock_after_min: int = 5  # tela de bloqueio do Ventude depois de N min parado (0 = nunca)
     lock_require_password: bool = True  # mexer na tela de bloqueio bloqueia o Windows (pede a senha)
@@ -201,10 +208,6 @@ class Settings:
             s.dock_mode = "esquivar"
         if not s.agent_command.strip():
             s.agent_command = "claude"
-        if s.taskbar_align not in ("center", "left"):
-            s.taskbar_align = "center"
-        if s.start_view not in ("category", "grid", "list"):
-            s.start_view = "category"
         if "layout_version" not in data or int(data.get("layout_version") or 0) < 3:
             # Versões antigas tinham outro tamanho de ilha e uma IA própria.
             s.layout_version = 3

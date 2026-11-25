@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QPropertyAnimation, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -24,7 +23,7 @@ from ventude.limits import claude, codex, copilot, cursor, grok
 from ventude.limits.model import PROVIDERS
 from ventude.services import system
 from ventude.services.news import FEEDS
-from ventude.ui import icons, theme
+from ventude.ui import icons, motion, theme
 from ventude.ui.context import AppContext
 from ventude.ui.lockscreen import timeout_label
 from ventude.ui.pages.base import Page, scroller
@@ -253,6 +252,51 @@ class ProviderTable(QWidget):
         self.ctx.update_settings(pinned_limits_json=self.ctx.settings.with_pinned(provider, key))
 
 
+NAV_TITLES = {
+    "geral": "Geral",
+    "ias": "IAs",
+    "abas": "Abas",
+    "shell": "Shell",
+    "bloqueio": "Bloqueio",
+    "sobre": "Sobre",
+}
+
+
+class SectionNav(QWidget):
+    """Pílulas no topo dos Ajustes: um clique rola até a seção; a marcada segue a rolagem."""
+
+    picked = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.row = QHBoxLayout(self)
+        self.row.setContentsMargins(0, 0, 0, 0)
+        self.row.setSpacing(6)
+        self.buttons: dict[str, QPushButton] = {}
+        self.current = ""
+
+    def set_sections(self, sections: list[tuple[str, str]]) -> None:
+        for key, title in sections:
+            button = QPushButton(title)
+            button.setObjectName("Chip")
+            button.setCheckable(True)
+            button.setFixedHeight(26)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _c=False, k=key: self.picked.emit(k))
+            self.row.addWidget(button)
+            self.buttons[key] = button
+        self.row.addStretch(1)
+        if sections:
+            self.set_current(sections[0][0])
+
+    def set_current(self, key: str) -> None:
+        if key == self.current and self.buttons.get(key, None) is not None and self.buttons[key].isChecked():
+            return
+        self.current = key
+        for k, button in self.buttons.items():
+            button.setChecked(k == key)
+
+
 class SettingsPage(Page):
     def __init__(self, ctx: AppContext) -> None:
         super().__init__(ctx)
@@ -260,9 +304,13 @@ class SettingsPage(Page):
         column = QVBoxLayout(content)
         column.setContentsMargins(0, 0, 8, 0)
         column.setSpacing(12)
-        self.root.addWidget(scroller(content), 1)
+        self.nav = SectionNav()
+        self.root.addWidget(self.nav)
+        self.area = scroller(content)
+        self.root.addWidget(self.area, 1)
         s = ctx.settings
         self._building = True
+        blocks: dict[str, list[QWidget]] = {}
 
         # ---------- geral ----------
         card, body = section("Geral")
@@ -434,7 +482,7 @@ class SettingsPage(Page):
                 self.lyrics,
             )
         )
-        column.addWidget(card)
+        blocks["geral"] = [card]
 
         # ---------- Ventude Shell (3.0) ----------
         card, body = section("Ventude Shell", theme.ACCENT)
@@ -555,10 +603,10 @@ class SettingsPage(Page):
                 self.agent_command,
             )
         )
-        column.addWidget(card)
+        blocks["shell"] = [card]
 
         # ---------- bloqueio ----------
-        column.addWidget(self._lock_card(s))
+        blocks["bloqueio"] = [self._lock_card(s)]
 
         # ---------- abas ----------
         card, body = section("Abas")
@@ -591,7 +639,7 @@ class SettingsPage(Page):
             self.news_switches[name] = switch
         news_row.addStretch(1)
         body.addLayout(news_row)
-        column.addWidget(card)
+        blocks["abas"] = [card]
 
         # ---------- IAs ----------
         card, body = section("Limites das IAs")
@@ -627,7 +675,7 @@ class SettingsPage(Page):
         body.addWidget(
             setting_row("Atualizar a cada", "Todas menos o Gemini, que é lido a cada 2 min.", self.interval)
         )
-        column.addWidget(card)
+        blocks["ias"] = [card]
 
         self.mode_combos: dict[str, QComboBox] = {}
         self.sections: dict[str, Card] = {
@@ -638,8 +686,7 @@ class SettingsPage(Page):
             "cursor": self._provider_cursor(),
             "copilot": self._provider_copilot(),
         }
-        for card in self.sections.values():
-            column.addWidget(card)
+        blocks["ias"] += list(self.sections.values())
 
         # ---------- sobre ----------
         card, body = section("Ventude")
@@ -663,8 +710,19 @@ class SettingsPage(Page):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
         body.addLayout(hbox(self.update_btn, self.update_status, None, spacing=10))
         body.addLayout(hbox(folder, reset, None, quit_btn, spacing=8))
-        column.addWidget(card)
+        blocks["sobre"] = [card]
+        # Ordem da página: o que mais se mexe primeiro (as IAs são o coração do Ventude).
+        self.section_cards: dict[str, QWidget] = {}
+        for key in ("geral", "ias", "abas", "shell", "bloqueio", "sobre"):
+            for card in blocks[key]:
+                column.addWidget(card)
+            self.section_cards[key] = blocks[key][0]
         column.addStretch(1)
+        self.nav.set_sections([(key, NAV_TITLES[key]) for key in self.section_cards])
+        self.nav.picked.connect(self.scroll_to)
+        self.area.verticalScrollBar().valueChanged.connect(self._spy)
+        self._scroll_anim = QPropertyAnimation(self.area.verticalScrollBar(), b"value", self)
+        self._scroll_anim.setEasingCurve(motion.easing("enfase"))
         self._building = False
         ctx.settings_changed.connect(self.sync)
         ctx.settings_changed.connect(self._sync_providers)
@@ -1002,9 +1060,49 @@ class SettingsPage(Page):
 
     def scroll_to_shell(self) -> None:
         """Abre os Ajustes já na seção do Ventude Shell (menu da barra, painel rápido)."""
-        area = self.findChild(QScrollArea)
-        if area is not None:
-            area.verticalScrollBar().setValue(max(0, self.shell_card.y() - 8))
+        self.scroll_to("shell", animate=False)
+
+    def scroll_to(self, key: str, animate: bool = True) -> None:
+        """Rola até a seção (animado, na curva da casa) e marca a pílula dela."""
+        card = self.section_cards.get(key)
+        if card is None:
+            return
+        bar = self.area.verticalScrollBar()
+        target = max(0, min(bar.maximum(), card.y() - 8))
+        self.nav.set_current(key)
+        duration = motion.ms("pagina", self.ctx.settings) + 120
+        self._scroll_anim.stop()
+        if not animate or duration <= 0 or not self.isVisible():
+            self._scrolling_to = key  # a seção pedida fica marcada, mesmo no fim da rolagem
+            bar.setValue(target)
+            self._scrolling_to = ""
+            return
+        self._scrolling_to = key
+        self._scroll_anim.setDuration(duration)
+        self._scroll_anim.setStartValue(bar.value())
+        self._scroll_anim.setEndValue(target)
+        self._scroll_anim.finished.connect(self._scroll_done)
+        self._scroll_anim.start()
+
+    def _scroll_done(self) -> None:
+        self._scrolling_to = ""
+        try:
+            self._scroll_anim.finished.disconnect(self._scroll_done)
+        except (RuntimeError, TypeError):
+            pass
+
+    def _spy(self, value: int) -> None:
+        """A pílula marcada acompanha a seção que está no alto da rolagem."""
+        if getattr(self, "_scrolling_to", ""):
+            return
+        bar = self.area.verticalScrollBar()
+        current = next(iter(self.section_cards), "")
+        for key, card in self.section_cards.items():
+            if card.y() - 40 <= value:
+                current = key
+        if value >= bar.maximum() - 4 and bar.maximum() > 0:
+            current = list(self.section_cards)[-1]
+        self.nav.set_current(current)
 
     def on_show(self) -> None:
         self._fill_monitors()

@@ -25,7 +25,7 @@ DEVICE_STYLE = (
     "QPushButton#Device { text-align: left; padding: 7px 10px; background: transparent;"
     f" border: 1px solid transparent; border-radius: 10px; color: {theme.TEXT_2}; }}"
     f"QPushButton#Device:hover {{ background: {theme.SURFACE_2}; }}"
-    f"QPushButton#Device:checked {{ background: {theme.ACCENT_SOFT}; border-color: #2B6B55;"
+    f"QPushButton#Device:checked {{ background: {theme.ACCENT_SOFT}; border-color: {theme.ACCENT_LINE};"
     f" color: {theme.ACCENT}; }}"
 )
 

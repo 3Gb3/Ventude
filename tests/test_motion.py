@@ -78,3 +78,18 @@ def test_tween_timed_reaches_end(qapp):
         time.sleep(0.01)
     assert done == [True]
     assert vals and abs(vals[-1] - 1.0) < 1e-6
+
+
+def test_bezier_curves_match_css_and_native_easing(qapp):
+    linear = motion.bezier(0.0, 0.0, 1.0, 1.0)
+    assert abs(linear(0.3) - 0.3) < 1e-3  # cubic-bezier(0,0,1,1) é linear
+    for name in motion.BEZIERS:
+        curve = motion.named(name)
+        assert curve(0.0) == 0.0 and curve(1.0) == 1.0
+        native = motion.easing(name)
+        for t in (0.1, 0.35, 0.6, 0.9):
+            assert abs(native.valueForProgress(t) - curve(t)) < 0.02  # Python e Qt na mesma curva
+    assert motion.named("enfase")(0.25) > 0.75  # arranca rápido
+    assert motion.named("saida")(0.25) < 0.1  # sai devagar e acelera
+    assert max(motion.named("mola")(t / 100) for t in range(101)) > 1.0  # passa do ponto e volta
+    assert motion.out_expo(0.0) == 0.0 and motion.out_expo(1.0) == 1.0

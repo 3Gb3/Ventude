@@ -120,7 +120,7 @@ class LauncherField(QWidget):
             icons.icon("search", theme.ACCENT, 15), QLineEdit.ActionPosition.LeadingPosition
         )
         self.input.setStyleSheet(
-            f"QLineEdit {{ background: {theme.INK_RAISED}; border: 1px solid {theme.HAIRLINE};"
+            f"QLineEdit {{ background: {theme.INK_RAISED}; border: 1px solid {theme.HAIRLINE_QSS};"
             f" border-radius: 20px; padding: 0 12px 0 10px; font-size: 13px; color: {theme.TEXT}; }}"
             f"QLineEdit:focus {{ border: 1px solid {theme.ACCENT}; }}"
         )
@@ -396,16 +396,16 @@ class AllAppsView(QWidget):
             on = name == self._selected_cat
             if on:
                 btn.setStyleSheet(
-                    f"QPushButton {{ background: rgba(110,231,183,0.16); color: {theme.ACCENT};"
-                    f" border: 1px solid {theme.ACCENT}; border-radius: 13px; padding: 0 10px;"
-                    " font-size: 11px; font-weight: 600; }}"
+                    f"QPushButton {{ background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};"
+                    f" border: 1px solid {theme.ACCENT_LINE}; border-radius: 13px; padding: 0 10px;"
+                    " font-size: 11px; font-weight: 600; }"
                 )
             else:
                 btn.setStyleSheet(
                     f"QPushButton {{ background: {theme.INK_KEY}; color: {theme.TEXT_2};"
-                    f" border: 1px solid {theme.HAIRLINE}; border-radius: 13px; padding: 0 10px;"
-                    " font-size: 11px; }}"
-                    f"QPushButton:hover {{ background: {theme.HALO}; color: {theme.TEXT}; }}"
+                    f" border: 1px solid {theme.HAIRLINE_QSS}; border-radius: 13px; padding: 0 10px;"
+                    " font-size: 11px; }"
+                    f"QPushButton:hover {{ background: {theme.HALO_QSS}; color: {theme.TEXT}; }}"
                 )
 
     def _select_category(self, category: str) -> None:
@@ -671,7 +671,7 @@ class BadgeButton(HoverButton):
 
 
 class StatusLine(QWidget):
-    """Linha inferior: conta à esquerda; segundo plano, notificações, ferramentas, Ajustes e Energia."""
+    """Linha inferior: conta à esquerda; segundo plano, notificações, Controles, Ajustes e Energia."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -683,8 +683,8 @@ class StatusLine(QWidget):
         self.background_btn = BadgeButton("apps", "Em segundo plano", accent=False)
         self.notif_btn = BadgeButton("bell", "Notificações")
         small = QSize(30, 30)
-        self.color_btn = HoverButton("pipette", "", "Conta-gotas (copia a cor)", small, 15, theme.R_ITEM)
-        self.ocr_btn = HoverButton("scan", "", "Capturar texto da tela (OCR)", small, 15, theme.R_ITEM)
+        controls_tip = "Controles: cafeína, foco, conta-gotas, texto da tela (Win + A)"
+        self.controls_btn = HoverButton("sliders", "", controls_tip, small, 15, theme.R_ITEM)
         self.settings_btn = HoverButton("settings", "", "Ajustes do Ventude", QSize(30, 30), 15, theme.R_ITEM)
         self.power_btn = HoverButton("power", "", "Energia (Ctrl+P)", QSize(30, 30), 15, theme.R_ITEM)
         row.addWidget(self.person)
@@ -692,9 +692,7 @@ class StatusLine(QWidget):
         row.addWidget(self.background_btn)
         row.addWidget(self.notif_btn)
         row.addSpacing(6)
-        row.addWidget(self.color_btn)
-        row.addWidget(self.ocr_btn)
-        row.addSpacing(6)
+        row.addWidget(self.controls_btn)
         row.addWidget(self.settings_btn)
         row.addWidget(self.power_btn)
 
@@ -720,7 +718,7 @@ class LauncherWindow(ShellWindow):
         self._expanded_pins = False
         self._active_height = False
         self._reveal_target = QPoint()
-        self._reveal_offset = 14
+        self._reveal_offset = 18
 
         self._reveal = motion.Tween(self)
         self._reveal.progressed.connect(self._on_reveal_step)
@@ -782,7 +780,7 @@ class LauncherWindow(ShellWindow):
         tip_row.addWidget(tip_lbl, 1)
         tip_row.addWidget(tip_close)
         self.tip_bar.setStyleSheet(
-            f"background: {theme.INK_RAISED}; border: 1px solid {theme.HAIRLINE}; border-radius: 10px;"
+            f"background: {theme.INK_RAISED}; border: 1px solid {theme.HAIRLINE_QSS}; border-radius: 10px;"
         )
 
         home_col = QVBoxLayout(self.home_view)
@@ -836,8 +834,7 @@ class LauncherWindow(ShellWindow):
         self.status.power_btn.clicked.connect(self.toggle_power)
         self.status.background_btn.clicked.connect(self.toggle_background)
         self.status.notif_btn.clicked.connect(self.toggle_notifications)
-        self.status.color_btn.clicked.connect(lambda: self._tool("color"))
-        self.status.ocr_btn.clicked.connect(lambda: self._tool("ocr"))
+        self.status.controls_btn.clicked.connect(self._open_controls)
         self.background_view.count_changed.connect(self.status.background_btn.set_count)
         center = getattr(ctx, "notifications", None)
         if center is not None:
@@ -970,7 +967,7 @@ class LauncherWindow(ShellWindow):
         self.activateWindow()
         # Foco no frame 0
         self.input.setFocus(Qt.FocusReason.ShortcutFocusReason)
-        self._reveal.play(dur, 0.0, 1.0, motion.out_cubic)
+        self._reveal.play(dur, 0.0, 1.0, motion.named("enfase"))
 
     def _on_reveal_step(self, t: float) -> None:
         self.setWindowOpacity(min(1.0, t * 1.15))
@@ -996,7 +993,7 @@ class LauncherWindow(ShellWindow):
             return
         self._target_pos = self.pos()
         self._offset = QPoint(0, 10)
-        self._tween.play(dur, 1.0, 0.0, motion.in_cubic)
+        self._tween.play(dur, 1.0, 0.0, motion.named("saida"))
 
     # ---------- modos ----------
     def show_home(self) -> None:
@@ -1079,11 +1076,11 @@ class LauncherWindow(ShellWindow):
         center = getattr(self.ctx, "notifications", None)
         self.status.notif_btn.set_count(center.unread if center is not None else 0)
 
-    def _tool(self, name: str) -> None:
+    def _open_controls(self) -> None:
         self.dismiss()
-        signal = getattr(self.ctx, "tool_requested", None)
-        if signal is not None:
-            QTimer.singleShot(220, lambda: signal.emit(name))
+        opener = getattr(self.shell, "open_controls", None)
+        if callable(opener):
+            QTimer.singleShot(120, opener)
 
     def set_person(self, name: str, picture: str) -> None:
         self.status.person.set_person(name, picture)

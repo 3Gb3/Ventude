@@ -1,5 +1,24 @@
 # Progresso
 
+## Versão 3.0.0: cara nova ("Brisa")
+
+- [x] **Identidade visual**: paleta grafite azulado com o gradiente do tornadinho (menta → céu) em botões principais, interruptores, barras, sliders, checks e na aba ativa. Cards com leve gradiente e fio de luz no topo; a ilha aberta ganha um brilho "aurora" bem fraco no alto; bordas de vidro (mais claras em cima) em todas as superfícies Tinta.
+- [x] **Abas em grupos**: 12 páginas em 8 abas (Sistema + Áudio, Estante + Atalhos, Agenda + Tarefas, Mercado + Notícias). A aba ativa cresce com os nomes lado a lado e um tracinho em gradiente sob a página aberta; o indicador (pílula atrás da aba) desliza até a aba nova. Ctrl + 1..9 segue a ordem das abas. Cada página continua ligando e desligando sozinha em Ajustes > Abas.
+- [x] **Ilha ↔ Doca ↔ Lançador**: conta-gotas e texto da tela saíram do Lançador e do cabeçalho da ilha e viraram teclas dos Controles. Os Controles ganharam porta em todo lugar: botão no cabeçalho da ilha (também sem o Shell), botão na ponta direita da Doca (realçado com os Controles abertos; clique de novo recolhe) e botão no rodapé do Lançador. O cabeçalho da ilha ficou com Controles, Energia (só sem o Shell), hora, alfinete e fechar.
+- [x] **Funções enxutas**: saíram as teclas Bluetooth (só abria as Configurações; continua na busca: "bluetooth") e Projetar (só mandava Win + P), os ajustes legados `taskbar_align`, `taskbar_weather`, `shell_glass` e `start_view` e funções sem uso (`enable_glass`, `window_icon`, `foreground_window`, `severity`, `cache_clear`...).
+- [x] **Animações**: curvas cubic-bezier da casa (`padrao`, `enfase`, `saida`, `suave`, `mola`), nativas no Qt (`QEasingCurve` BezierSpline, sem Python a cada quadro). A ilha abre com mola (passa um tiquinho e assenta) e recolhe direto; páginas deslizam na curva `enfase`; Lançador, painéis, Doca, Eco e volume usam as mesmas curvas. Anéis e barras de uso crescem até o valor; interruptor com o botão "esticando" no meio do caminho; check com "pop" e o risco se desenhando.
+- [x] **Ícones**: variantes preenchidas na aba ativa; clima em cores (sol dourado, nuvem clara, chuva azul, raio âmbar, lua) no Início, na aba Clima, na pílula e na tela de bloqueio; inicial colorida (monograma) enquanto o ícone real de um app carrega; SVG desenhado na densidade da maior tela (mínimo 2x) em vez de sempre 3x. Ícone do app e prévia social com o brilho da marca.
+- [x] **Ajustes organizados**: pílulas no topo (Geral, IAs, Abas, Shell, Bloqueio, Sobre) rolam animado até a seção e acompanham a rolagem; as IAs subiram para logo depois de Geral.
+- [x] **Performance**: superfície da ilha em cache quando parada (o equalizador e o relógio não refazem gradientes), `theme.font()`/`theme.color()` em cache (os `paintEvent` chamavam a cada quadro), `setStyleSheet` só quando muda na pílula (métricas a cada 1,5 s, timer a cada 1 s) e o relógio do Início para com a aba escondida.
+- [x] **Correções**: folhas de estilo inválidas no Lançador (um `QColor` dentro de f-string e `}}` em string comum deixavam a dica e os chips de categoria sem estilo); chips quadrados (raio maior que meia altura); capturas da Estante usavam a pasta pessoal e o Python de quem gerava as imagens; o script de capturas chamava um método removido dos Controles.
+- [x] Testes novos (abas em grupo, navegação dos Ajustes, Controles com ferramentas e os botões de Controles na Doca e no Lançador) e capturas do README refeitas. As do Shell (`shell-*.webp`) continuam as antigas, com os ícones reais do Windows.
+
+### A validar no seu PC
+
+- Abrir e fechar a ilha com a mola no Windows (janela translúcida mudando de tamanho): conferir se fica suave nos seus monitores e escalas.
+- Botão Controles da ponta direita da Doca e do rodapé do Lançador.
+- Regerar as capturas do Shell com ícones reais: `uv run python scripts/preview.py preview --shell` e trocar `docs/screens/shell-*.webp`.
+
 ## Iniciar mais completo, Notificações, tela de bloqueio e Windows 3×
 
 - [x] **Em segundo plano no Iniciar**: os apps da bandeja saíram dos Controles da ilha e viraram uma página do Lançador (grade com nome; clique abre, botão direito: abrir local, fechar, encerrar; atalho para a bandeja do Windows).

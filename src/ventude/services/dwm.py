@@ -140,25 +140,6 @@ def _color_ref(argb: int) -> int:
     return (a << 24) | (b << 16) | (g << 8) | r
 
 
-def enable_glass(hwnd: int, tint: int = 0xB0101216) -> bool:
-    """Desfoque acrylic atrás da janela (Windows 10 1803+ e 11). `tint` em 0xAARRGGBB."""
-    if sys.platform != "win32" or not hwnd or windows_build() < 17134:
-        return False
-    try:
-        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-        apply = user32.SetWindowCompositionAttribute
-        apply.argtypes = [wintypes.HWND, ctypes.POINTER(WINDOWCOMPOSITIONATTRIBDATA)]
-        apply.restype = wintypes.BOOL
-        accent = ACCENT_POLICY(ACCENT_ENABLE_ACRYLICBLURBEHIND, 0, _color_ref(tint), 0)
-        data = WINDOWCOMPOSITIONATTRIBDATA(
-            WCA_ACCENT_POLICY, ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p), ctypes.sizeof(accent)
-        )
-        return bool(apply(hwnd, ctypes.byref(data)))
-    except (OSError, AttributeError):
-        log.debug("Vidro indisponível", exc_info=True)
-        return False
-
-
 def disable_glass(hwnd: int) -> None:
     if sys.platform != "win32" or not hwnd:
         return

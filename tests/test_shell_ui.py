@@ -14,6 +14,7 @@ from ventude.services.hardware import Gpu, Snapshot
 from ventude.services.lyrics import Lyrics
 from ventude.services.media import MediaState
 from ventude.services.privacy import PrivacyState
+from ventude.ui import theme
 
 
 def key(code, mods=Qt.KeyboardModifier.NoModifier, text=""):
@@ -105,7 +106,8 @@ def test_hardware_page_shows_live_data_and_pins(qapp, island, app_ctx):
     app_ctx.hardware._done(snap)
     assert page.lines["cpu"].value.text() == "42%"
     assert (
-        page.lines["gpu_temp"].value.text() == "88°" and "F27A7A" in page.lines["gpu_temp"].value.styleSheet()
+        page.lines["gpu_temp"].value.text() == "88°"
+        and theme.DANGER in page.lines["gpu_temp"].value.styleSheet()
     )
     assert page.lines["ping"].value.text() == "20 ms" and page.cpu_top.rows[0][0].full_text() == "Chrome"
     assert page.no_battery.isVisibleTo(page)
@@ -208,7 +210,7 @@ def test_caffeine_button_command_and_pill(qapp, island, app_ctx, monkeypatch):
     command.run()
     assert app_ctx.caffeine.active and not island.pill.caffeine_icon.isHidden()
     assert bar.commands("cafeina off")[0].title == "Desligar a Cafeína"
-    island.panel.coffee_btn.click()  # o botão do cabeçalho desliga
+    island.controls.caffeine.clicked.emit()  # a tecla de Controles desliga
     assert not app_ctx.caffeine.active and island.pill.caffeine_icon.isHidden()
     app_ctx.power.pending = True
     app_ctx.power.changed.emit(True)
@@ -771,6 +773,36 @@ def test_background_apps_in_launcher_menu_and_close(qapp, app_ctx, shell, monkey
     assert closed_exes == [(r"C:\Apps\Discord.exe", False), (r"C:\Apps\Discord.exe", True)]
     shell.open_page("background")  # de novo na mesma página: fecha
     assert wait_for(qapp, lambda: not ln.isVisible())
+
+
+def test_controls_hold_the_screen_tools_and_open_from_dock_and_launcher(qapp, app_ctx, island, shell):
+    from ventude.ui.island import IslandMode
+
+    tools: list[str] = []
+    island.run_tool = lambda mode: tools.append(mode)  # type: ignore[method-assign]
+    island.controls.tool_requested.disconnect()
+    island.controls.tool_requested.connect(island.run_tool)
+    island.controls.color.clicked.emit()
+    island.controls.ocr.clicked.emit()
+    assert tools == ["color", "ocr"]
+    assert not hasattr(island.controls, "bluetooth") and not hasattr(island.controls, "project")
+
+    app_ctx.update_settings(replace_taskbar=True)
+    shell.start()
+    dock = shell.docks[0]
+    assert [name for name, _ in dock.current_layout.end_rects] == ["background", "notifications", "controls"]
+    shell.end_clicked("controls")  # botão da ponta direita da Doca
+    assert wait_for(qapp, lambda: island.mode == IslandMode.CONTROLS)
+    shell.end_clicked("controls")  # de novo: recolhe
+    assert wait_for(qapp, lambda: island.mode == IslandMode.PILL)
+
+    shell.open_search("")
+    ln = shell.launcher
+    assert wait_for(qapp, ln.isVisible)
+    assert not hasattr(ln.status, "color_btn") and not hasattr(ln.status, "ocr_btn")
+    ln.status.controls_btn.clicked.emit()
+    assert wait_for(qapp, lambda: island.mode == IslandMode.CONTROLS and not ln.isVisible())
+    island.collapse()
 
 
 def test_notifications_center_page_and_dock_bell(qapp, app_ctx, island, shell):

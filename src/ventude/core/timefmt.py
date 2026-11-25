@@ -23,7 +23,6 @@ MONTHS = [
     "novembro",
     "dezembro",
 ]
-MONTHS_SHORT = [m[:3] for m in MONTHS]
 
 
 def parse_instant(value: object) -> float | None:
